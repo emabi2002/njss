@@ -49,3 +49,6 @@ next-env.d.ts
 
 # same internal working files
 /.same
+
+# runtime file uploads
+/uploads
