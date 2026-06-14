@@ -111,8 +111,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div className="flex items-center gap-2 sm:gap-3">
               <NJSSLogo size={32} />
               <div className="hidden xs:block">
-                <h1 className="text-sm font-bold text-slate-900">NJSS FREMS</h1>
-                <p className="text-xs text-slate-500 hidden sm:block">Financial Management System</p>
+                <h1 className="text-sm font-bold text-slate-900">NJSS CREMS</h1>
+                <p className="text-xs text-slate-500 hidden sm:block">Court Registry &amp; Expense Monitoring System</p>
               </div>
             </div>
           </div>

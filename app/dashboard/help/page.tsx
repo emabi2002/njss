@@ -65,7 +65,7 @@ export default function HelpPage() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <BookOpen className="h-7 w-7 text-png-red" /> Help &amp; User Guide
           </h1>
-          <p className="text-slate-600 mt-1">Complete process documentation and step-by-step training manual for NJSS FREMS</p>
+          <p className="text-slate-600 mt-1">Complete process documentation and step-by-step training manual for NJSS CREMS</p>
         </div>
         <button onClick={() => window.print()}
           className="px-4 py-2 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2">
@@ -75,8 +75,8 @@ export default function HelpPage() {
 
       {/* Print-only cover */}
       <div className="hidden print:block text-center border-b-4 border-png-gold pb-6 mb-6">
-        <h1 className="text-3xl font-bold text-png-maroon">NJSS FREMS</h1>
-        <p className="text-lg text-slate-700 mt-1">Financial Requisition &amp; Expense Management System</p>
+        <h1 className="text-3xl font-bold text-png-maroon">NJSS CREMS</h1>
+        <p className="text-lg text-slate-700 mt-1">Court Registry &amp; Expense Monitoring System</p>
         <p className="text-sm text-slate-500 mt-2">Process Documentation &amp; Training Manual — National Judiciary Staff Services, Papua New Guinea</p>
       </div>
 
@@ -199,10 +199,10 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 function ProcessDocumentation() {
   return (
     <>
-      <SectionTitle id="overview" num="1." icon={Info} title="System Overview" subtitle="What NJSS FREMS does and the principles it enforces" />
+      <SectionTitle id="overview" num="1." icon={Info} title="System Overview" subtitle="What NJSS CREMS does and the principles it enforces" />
       <Card>
         <p className="text-slate-700">
-          <b>NJSS FREMS</b> (Financial Requisition &amp; Expense Management System) digitises the National Judiciary&apos;s
+          <b>NJSS CREMS</b> (Court Registry &amp; Expense Monitoring System) digitises the National Judiciary&apos;s
           full budget-to-payment cycle — from preparing annual activity plans, through building the expense-code budget,
           releasing funds each quarter, raising requisitions (Form FF3), committing funds, and finally paying suppliers
           (Form FF4) — with a complete audit trail at every step.
@@ -435,7 +435,7 @@ function TrainingManual() {
       <Card>
         <h4 className="font-semibold text-slate-900 mb-2">Sign in</h4>
         <Step n={1} title="Open the system & sign in">
-          Go to the NJSS FREMS URL. Enter your <b>email</b> and <b>password</b> and click <b>Sign In</b>. Use
+          Go to the NJSS CREMS URL. Enter your <b>email</b> and <b>password</b> and click <b>Sign In</b>. Use
           &quot;Forgot password?&quot; if needed.
         </Step>
         <Step n={2} title="Understand the menu">

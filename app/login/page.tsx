@@ -96,8 +96,8 @@ function LoginContent() {
           <div className="flex justify-center mb-4">
             <NJSSLogo size={80} />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">NJSS FREMS</h1>
-          <p className="text-slate-600 mt-1">Financial Requisition & Expense Management</p>
+          <h1 className="text-2xl font-bold text-slate-900">NJSS CREMS</h1>
+          <p className="text-slate-600 mt-1">Court Registry &amp; Expense Monitoring System</p>
         </div>
 
         {/* Login Card */}

@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NJSS FREMS - Financial Requisition & Expense Management",
-  description: "National Judiciary Staff Services Financial Requisition and Expense Management System",
+  title: "NJSS CREMS - Court Registry & Expense Monitoring System",
+  description: "National Judiciary Staff Services Court Registry & Expense Monitoring System",
 };
 
 export default function RootLayout({
