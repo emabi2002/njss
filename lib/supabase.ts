@@ -28,7 +28,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
     flowType: 'pkce',
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    storageKey: 'njss-frems-auth',
+    storageKey: 'njss-crems-auth',
     lock: undefined, // Disable lock to prevent the error
   }
 })

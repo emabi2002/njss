@@ -6,6 +6,7 @@ import {
   BarChart3, ShieldCheck, ChevronRight, Info, Lightbulb, AlertTriangle,
   Hash, Workflow, GraduationCap, ClipboardCheck, ArrowRight, Users
 } from "lucide-react"
+import { NJSSLogo } from "../../components/NJSSLogo"
 
 type TabKey = "process" | "training" | "roles"
 
@@ -75,6 +76,9 @@ export default function HelpPage() {
 
       {/* Print-only cover */}
       <div className="hidden print:block text-center border-b-4 border-png-gold pb-6 mb-6">
+        <div className="flex justify-center mb-3">
+          <NJSSLogo size={84} />
+        </div>
         <h1 className="text-3xl font-bold text-png-maroon">NJSS CREMS</h1>
         <p className="text-lg text-slate-700 mt-1">Court Registry &amp; Expense Monitoring System</p>
         <p className="text-sm text-slate-500 mt-2">Process Documentation &amp; Training Manual — National Judiciary Staff Services, Papua New Guinea</p>
