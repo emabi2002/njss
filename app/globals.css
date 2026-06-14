@@ -34,3 +34,19 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Print: render the User Guide (and any dashboard page) as a clean document */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+  }
+  @page {
+    margin: 1.5cm;
+  }
+}

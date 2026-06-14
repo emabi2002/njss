@@ -21,7 +21,8 @@ import {
   Calendar,
   Loader2,
   User,
-  ClipboardList
+  ClipboardList,
+  BookOpen
 } from "lucide-react"
 import { NJSSLogo } from "../components/NJSSLogo"
 import { useAuth } from "@/contexts/AuthContext"
@@ -53,6 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: "Audit Log", href: "/dashboard/audit-log", icon: ClipboardList, perms: ["audit.view"] },
     { name: "Master Data", href: "/dashboard/master", icon: FolderOpen, perms: ["masterdata.manage", "registry.manage", "users.manage"] },
     { name: "Users & Roles", href: "/dashboard/users", icon: Users, perms: ["users.manage"] },
+    { name: "User Guide", href: "/dashboard/help", icon: BookOpen },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
   ]
 
@@ -95,7 +97,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Top Navigation */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20 print:hidden">
         {/* PNG national-colour accent ribbon */}
         <div className="h-1 bg-gradient-to-r from-png-red via-png-gold to-png-red" />
         <div className="flex items-center justify-between px-3 sm:px-4 py-3">
@@ -193,7 +195,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <aside
           className={`
             fixed lg:static inset-y-0 left-0 z-30 w-64 border-r border-png-gold/30
-            bg-[#faf7f1]
+            bg-[#faf7f1] print:hidden
             transform transition-transform duration-200 ease-in-out
             ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
             pt-14 lg:pt-0
