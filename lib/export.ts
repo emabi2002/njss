@@ -44,7 +44,7 @@ export function exportToPDF(opts: {
   const doc = new jsPDF({ orientation: opts.columns.length > 6 ? "landscape" : "portrait" })
 
   doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
+  doc.setTextColor(76, 15, 22) // PNG maroon
   doc.text(opts.title, 14, 18)
 
   doc.setFontSize(10)
@@ -57,7 +57,7 @@ export function exportToPDF(opts: {
     body: opts.rows.map((r) => r.map((c) => (c === null || c === undefined ? "" : String(c)))),
     startY: 30,
     styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [30, 64, 175], textColor: 255 },
+    headStyles: { fillColor: [138, 20, 32], textColor: 255 }, // PNG red
     alternateRowStyles: { fillColor: [248, 250, 252] },
   })
 

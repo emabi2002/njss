@@ -64,6 +64,17 @@ export default function ReportsPage() {
 
   const reportCategories = [
     {
+      category: "Planning & Budget Cycle",
+      reports: [
+        { id: "consolidated-budget", name: "Consolidated Department Budget", description: "Approved budget rolled up by department", icon: BarChart3 },
+        { id: "budget-by-cost-centre", name: "Budget by Cost Centre", description: "Approved / committed / actual per cost centre", icon: PieChart },
+        { id: "budget-by-code", name: "Budget by Expense Code", description: "Position for each full expense code", icon: BarChart3 },
+        { id: "available-balance", name: "Available Balance Report", description: "Remaining balance per expense code", icon: TrendingUp },
+        { id: "plans-by-section", name: "Annual Plans by Section", description: "Section activity plans & status", icon: FileText },
+        { id: "plans-by-department", name: "Annual Plans by Department", description: "Department plans & planned value", icon: FileText },
+      ]
+    },
+    {
       category: "Budget Reports",
       reports: [
         { id: "budget-vs-actual", name: "Budget vs Commitment vs Actual", description: "Comprehensive budget utilization analysis", icon: BarChart3 },
@@ -309,7 +320,9 @@ export default function ReportsPage() {
     }
   }
 
-  const datasetFor = (id: string): 'ff3' | 'ff4' | 'budget' | 'audit' => {
+  const PLANNING_IDS = ['consolidated-budget', 'budget-by-cost-centre', 'budget-by-code', 'available-balance', 'plans-by-section', 'plans-by-department']
+  const datasetFor = (id: string): 'ff3' | 'ff4' | 'budget' | 'audit' | 'planning' => {
+    if (PLANNING_IDS.includes(id)) return 'planning'
     if (id.startsWith('ff4') || id.startsWith('exp')) return 'ff4'
     if (id.startsWith('ff3') || id === 'quotation-analysis') return 'ff3'
     if (id.startsWith('audit') || id === 'user-activity') return 'audit'
@@ -390,6 +403,48 @@ export default function ReportsPage() {
           Change: r.changes && typeof r.changes === 'object' && 'old_status' in r.changes
             ? `${(r.changes as Record<string, unknown>).old_status} -> ${(r.changes as Record<string, unknown>).new_status}`
             : '',
+        })),
+      }
+    }
+
+    if (ds === 'planning') {
+      const fy = new Date(dateRange.start).getFullYear() || 2025
+      if (id === 'plans-by-section' || id === 'plans-by-department') {
+        const { data } = await supabase
+          .from('annual_plan_headers')
+          .select('plan_number, plan_title, status, total_planned_budget, department:departments(name), section:sections(name)')
+          .eq('financial_year', fy)
+          .order('plan_number')
+        const rows = (data || []) as unknown as Array<{ plan_number: string; plan_title: string | null; status: string; total_planned_budget: number | null; department: { name: string } | null; section: { name: string } | null }>
+        if (id === 'plans-by-department') {
+          const map = new Map<string, number>()
+          rows.forEach((r) => { const k = r.department?.name || '-'; map.set(k, (map.get(k) || 0) + (r.total_planned_budget || 0)) })
+          return { title: 'Annual Plans by Department', records: Array.from(map).map(([dept, total]) => ({ Department: dept, 'Planned (K)': total })) }
+        }
+        return {
+          title: 'Annual Plans by Section',
+          records: rows.map((r) => ({ Plan: r.plan_number, Title: r.plan_title || '-', Department: r.department?.name || '-', Section: r.section?.name || '-', Status: r.status, 'Planned (K)': r.total_planned_budget || 0 })),
+        }
+      }
+      // budget views from v_budget_by_code
+      const { data } = await supabase.from('v_budget_by_code').select('*').eq('financial_year', fy)
+      const vrows = (data || []) as Array<{ department_name: string | null; section_name: string | null; cost_centre_code: string | null; cost_centre_name: string | null; full_expense_code: string | null; revised_budget: number; committed_amount: number; actual_expenditure: number }>
+      if (id === 'consolidated-budget') {
+        const map = new Map<string, { rev: number; com: number; act: number }>()
+        vrows.forEach((r) => { const k = r.department_name || '-'; const e = map.get(k) || { rev: 0, com: 0, act: 0 }; e.rev += r.revised_budget || 0; e.com += r.committed_amount || 0; e.act += r.actual_expenditure || 0; map.set(k, e) })
+        return { title: 'Consolidated Department Budget', records: Array.from(map).map(([dept, v]) => ({ Department: dept, 'Approved (K)': v.rev, 'Committed (K)': v.com, 'Actual (K)': v.act, 'Available (K)': v.rev - v.com - v.act })) }
+      }
+      if (id === 'budget-by-cost-centre') {
+        const map = new Map<string, { rev: number; com: number; act: number }>()
+        vrows.forEach((r) => { const k = r.cost_centre_code ? `${r.cost_centre_code} — ${r.cost_centre_name}` : (r.section_name || '-'); const e = map.get(k) || { rev: 0, com: 0, act: 0 }; e.rev += r.revised_budget || 0; e.com += r.committed_amount || 0; e.act += r.actual_expenditure || 0; map.set(k, e) })
+        return { title: 'Budget by Cost Centre', records: Array.from(map).map(([cc, v]) => ({ 'Cost Centre': cc, 'Approved (K)': v.rev, 'Committed (K)': v.com, 'Actual (K)': v.act, 'Available (K)': v.rev - v.com - v.act })) }
+      }
+      return {
+        title: id === 'available-balance' ? 'Available Balance Report' : 'Budget by Expense Code',
+        records: vrows.map((r) => ({
+          'Expense Code': r.full_expense_code || '-', Department: r.department_name || '-', 'Cost Centre': r.cost_centre_code || '-',
+          'Approved (K)': r.revised_budget || 0, 'Committed (K)': r.committed_amount || 0, 'Actual (K)': r.actual_expenditure || 0,
+          'Available (K)': (r.revised_budget || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0),
         })),
       }
     }
@@ -477,18 +532,18 @@ export default function ReportsPage() {
 
       {/* Export Progress */}
       {exporting && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="bg-png-red/5 border border-png-gold/40 rounded-lg p-4">
           <div className="flex items-center gap-3 mb-2">
-            <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
-            <p className="text-blue-700 font-medium">Exporting documents...</p>
+            <Loader2 className="h-5 w-5 text-png-red animate-spin" />
+            <p className="text-png-red font-medium">Exporting documents...</p>
           </div>
-          <div className="w-full bg-blue-200 rounded-full h-2">
+          <div className="w-full bg-png-gold/30 rounded-full h-2">
             <div
-              className="bg-blue-600 h-2 rounded-full transition-all"
+              className="bg-png-red h-2 rounded-full transition-all"
               style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
             />
           </div>
-          <p className="text-sm text-blue-600 mt-1">
+          <p className="text-sm text-png-red mt-1">
             {exportProgress.current} of {exportProgress.total} documents
           </p>
         </div>
@@ -504,7 +559,7 @@ export default function ReportsPage() {
             <select
               value={selectedReport}
               onChange={(e) => setSelectedReport(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">Select a report...</option>
               {reportCategories.map((cat) => (
@@ -522,7 +577,7 @@ export default function ReportsPage() {
               type="date"
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             />
           </div>
           <div>
@@ -531,7 +586,7 @@ export default function ReportsPage() {
               type="date"
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             />
           </div>
           <div>
@@ -539,7 +594,7 @@ export default function ReportsPage() {
             <select
               value={filters.status}
               onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">All Status</option>
               <option value="DRAFT">Draft</option>
@@ -555,7 +610,7 @@ export default function ReportsPage() {
             <select
               value={filters.section}
               onChange={(e) => setFilters({ ...filters, section: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">All Sections</option>
               <option value="accounts">Accounts Section</option>
@@ -590,7 +645,7 @@ export default function ReportsPage() {
           <button
             onClick={() => handleExport('csv')}
             disabled={!selectedReport || exporting || selectedReport.includes('bulk')}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-4 py-2 bg-png-red text-white rounded-lg font-medium hover:bg-png-maroon disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <Download className="h-4 w-4" />
             Export CSV
@@ -615,15 +670,15 @@ export default function ReportsPage() {
                     onClick={() => setSelectedReport(report.id)}
                     className={`border rounded-lg p-4 cursor-pointer transition-all ${
                       selectedReport === report.id
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'
+                        ? 'border-png-gold bg-png-red/5'
+                        : 'border-slate-200 hover:border-png-gold/50 hover:bg-slate-50'
                     }`}
                   >
                     <div className="flex items-start gap-3">
                       <div className={`p-2 rounded-lg ${
                         selectedReport === report.id
-                          ? 'bg-blue-600 text-white'
-                          : isBulk ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-600'
+                          ? 'bg-png-red text-white'
+                          : isBulk ? 'bg-png-gold/20 text-png-maroon' : 'bg-slate-100 text-slate-600'
                       }`}>
                         <Icon className="h-5 w-5" />
                       </div>
@@ -631,7 +686,7 @@ export default function ReportsPage() {
                         <h3 className="font-medium text-slate-900">{report.name}</h3>
                         <p className="text-sm text-slate-600 mt-1">{report.description}</p>
                         {isBulk && (
-                          <span className="inline-block mt-2 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+                          <span className="inline-block mt-2 px-2 py-0.5 bg-png-gold/20 text-png-maroon text-xs rounded-full">
                             Bulk Export
                           </span>
                         )}

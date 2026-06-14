@@ -7,13 +7,17 @@ import { Save, Send, Plus, Trash2, AlertCircle, CheckCircle2, ArrowLeft, Loader2
 import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
 import { checkBudgetAndNotify, notifyFF3Submitted } from "@/lib/notifications"
+import { checkBudgetAvailability } from "@/lib/api"
 
 type Department = { id: string; code: string; name: string }
 type Section = { id: string; code: string; name: string; department_id: string }
 type Project = { id: string; code: string; name: string }
 type Province = { id: string; code: string; name: string }
 type FundingSource = { id: string; code: string; name: string }
+type CostCentre = { id: string; code: string; name: string; section_id: string | null; department_id: string | null }
+type ExpenseCode = { id: string; full_expense_code: string; section_id: string | null }
 type BudgetInfo = { available_balance: number; quarterly_released: number }
+type BudgetCheck = { revised: number; committed: number; spent: number; available: number; hasAllocation: boolean } | null
 
 export default function NewFF3Page() {
   const router = useRouter()
@@ -28,12 +32,17 @@ export default function NewFF3Page() {
   const [projects, setProjects] = useState<Project[]>([])
   const [provinces, setProvinces] = useState<Province[]>([])
   const [fundingSources, setFundingSources] = useState<FundingSource[]>([])
+  const [costCentres, setCostCentres] = useState<CostCentre[]>([])
+  const [expenseCodes, setExpenseCodes] = useState<ExpenseCode[]>([])
   const [budgetInfo, setBudgetInfo] = useState<BudgetInfo>({ available_balance: 0, quarterly_released: 0 })
+  const [budgetCheck, setBudgetCheck] = useState<BudgetCheck>(null)
 
   const [formData, setFormData] = useState({
     financial_year: 2025,
     department_id: "",
     section_id: "",
+    cost_centre_id: "",
+    expense_code_registry_id: "",
     project_id: "",
     province_id: "",
     funding_source_id: "",
@@ -62,12 +71,14 @@ export default function NewFF3Page() {
   useEffect(() => {
     async function fetchMasterData() {
       try {
-        const [deptRes, secRes, projRes, provRes, fundRes] = await Promise.all([
+        const [deptRes, secRes, projRes, provRes, fundRes, ccRes, codeRes] = await Promise.all([
           supabase.from('departments').select('id, code, name').eq('is_active', true).order('name'),
           supabase.from('sections').select('id, code, name, department_id').eq('is_active', true).order('name'),
           supabase.from('projects').select('id, code, name').eq('is_active', true).order('name'),
           supabase.from('provinces').select('id, code, name').eq('is_active', true).order('name'),
-          supabase.from('funding_sources').select('id, code, name').eq('is_active', true).order('name')
+          supabase.from('funding_sources').select('id, code, name').eq('is_active', true).order('name'),
+          supabase.from('cost_centres').select('id, code, name, section_id, department_id').eq('is_active', true).order('code'),
+          supabase.from('expense_code_registry').select('id, full_expense_code, section_id').eq('is_active', true).order('full_expense_code')
         ])
 
         setDepartments(deptRes.data || [])
@@ -75,6 +86,8 @@ export default function NewFF3Page() {
         setProjects(projRes.data || [])
         setProvinces(provRes.data || [])
         setFundingSources(fundRes.data || [])
+        setCostCentres(ccRes.data || [])
+        setExpenseCodes(codeRes.data || [])
 
         // Fetch budget info
         const { data: releases } = await supabase
@@ -111,6 +124,37 @@ export default function NewFF3Page() {
     () => formData.department_id ? sections.filter(s => s.department_id === formData.department_id) : [],
     [formData.department_id, sections]
   )
+
+  const filteredCostCentres = useMemo(
+    () => costCentres.filter(c => (!formData.section_id || c.section_id === formData.section_id) && (!formData.department_id || c.department_id === formData.department_id)),
+    [costCentres, formData.section_id, formData.department_id]
+  )
+
+  const filteredCodes = useMemo(
+    () => expenseCodes.filter(c => !formData.section_id || c.section_id === formData.section_id || !c.section_id),
+    [expenseCodes, formData.section_id]
+  )
+
+  // Look up the budget position for the chosen expense code (or section) — spec §14
+  useEffect(() => {
+    let cancelled = false
+    async function loadPosition() {
+      if (!formData.expense_code_registry_id && !formData.section_id) { setBudgetCheck(null); return }
+      try {
+        const res = await checkBudgetAvailability({
+          financialYear: formData.financial_year,
+          expenseCodeId: formData.expense_code_registry_id || null,
+          sectionId: formData.section_id || null,
+          amount: 0,
+        })
+        if (!cancelled) setBudgetCheck({ revised: res.revised, committed: res.committed, spent: res.spent, available: res.available, hasAllocation: res.hasAllocation })
+      } catch {
+        if (!cancelled) setBudgetCheck(null)
+      }
+    }
+    loadPosition()
+    return () => { cancelled = true }
+  }, [formData.expense_code_registry_id, formData.section_id, formData.financial_year])
 
   const addItem = () => {
     setItems([...items, {
@@ -186,6 +230,8 @@ export default function NewFF3Page() {
   }
 
   const totalEstimate = items.reduce((sum, item) => sum + (item.quantity * item.estimated_unit_price), 0)
+  const effectiveAvailable = budgetCheck?.hasAllocation ? budgetCheck.available : budgetInfo.available_balance
+  const selectedCode = expenseCodes.find(c => c.id === formData.expense_code_registry_id)
   const quotationCount = quotations.filter(q => q.supplier_name && q.quotation_amount > 0).length
   const canSubmit = quotationCount >= 3 && totalEstimate > 0 && formData.purpose && formData.justification && formData.department_id && formData.section_id
 
@@ -220,6 +266,8 @@ export default function NewFF3Page() {
           financial_year: formData.financial_year,
           department_id: formData.department_id || null,
           section_id: formData.section_id || null,
+          cost_centre_id: formData.cost_centre_id || null,
+          expense_code_registry_id: formData.expense_code_registry_id || null,
           project_id: formData.project_id || null,
           province_id: formData.province_id || null,
           funding_source_id: formData.funding_source_id || null,
@@ -230,7 +278,7 @@ export default function NewFF3Page() {
           procurement_method: formData.procurement_method,
           status: status,
           total_estimated_amount: totalEstimate,
-          is_within_budget: totalEstimate <= budgetInfo.available_balance,
+          is_within_budget: totalEstimate <= (budgetCheck?.available ?? budgetInfo.available_balance),
           submitted_date: status === 'SUBMITTED' ? new Date().toISOString() : null
         })
         .select()
@@ -302,7 +350,7 @@ export default function NewFF3Page() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        <Loader2 className="h-8 w-8 animate-spin text-png-red" />
       </div>
     )
   }
@@ -364,7 +412,7 @@ export default function NewFF3Page() {
               type="number"
               value={formData.financial_year}
               onChange={(e) => setFormData({ ...formData, financial_year: parseInt(e.target.value) })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             />
           </div>
           <div>
@@ -372,7 +420,7 @@ export default function NewFF3Page() {
             <select
               value={formData.department_id}
               onChange={(e) => setFormData({ ...formData, department_id: e.target.value, section_id: "" })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">Select Department</option>
               {departments.map(dept => (
@@ -385,7 +433,7 @@ export default function NewFF3Page() {
             <select
               value={formData.section_id}
               onChange={(e) => setFormData({ ...formData, section_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
               disabled={!formData.department_id}
             >
               <option value="">Select Section</option>
@@ -399,7 +447,7 @@ export default function NewFF3Page() {
             <select
               value={formData.project_id}
               onChange={(e) => setFormData({ ...formData, project_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">Select Project</option>
               {projects.map(proj => (
@@ -412,7 +460,7 @@ export default function NewFF3Page() {
             <select
               value={formData.province_id}
               onChange={(e) => setFormData({ ...formData, province_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">Select Province</option>
               {provinces.map(prov => (
@@ -425,11 +473,38 @@ export default function NewFF3Page() {
             <select
               value={formData.funding_source_id}
               onChange={(e) => setFormData({ ...formData, funding_source_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">Select Funding Source</option>
               {fundingSources.map(fs => (
                 <option key={fs.id} value={fs.id}>{fs.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Cost Centre</label>
+            <select
+              value={formData.cost_centre_id}
+              onChange={(e) => setFormData({ ...formData, cost_centre_id: e.target.value })}
+              disabled={!formData.department_id}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
+            >
+              <option value="">Select Cost Centre</option>
+              {filteredCostCentres.map(cc => (
+                <option key={cc.id} value={cc.id}>{cc.code} — {cc.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Expense Code <span className="text-slate-400 text-xs">(approved budget line)</span></label>
+            <select
+              value={formData.expense_code_registry_id}
+              onChange={(e) => setFormData({ ...formData, expense_code_registry_id: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red font-mono text-sm"
+            >
+              <option value="">Select Expense Code</option>
+              {filteredCodes.map(c => (
+                <option key={c.id} value={c.id}>{c.full_expense_code}</option>
               ))}
             </select>
           </div>
@@ -447,7 +522,7 @@ export default function NewFF3Page() {
               onChange={(e) => setFormData({ ...formData, purpose: e.target.value })}
               rows={3}
               placeholder="Describe the purpose of this expenditure..."
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             />
           </div>
           <div>
@@ -457,7 +532,7 @@ export default function NewFF3Page() {
               onChange={(e) => setFormData({ ...formData, justification: e.target.value })}
               rows={3}
               placeholder="Provide justification for this expenditure..."
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             />
           </div>
           <div className="grid md:grid-cols-3 gap-4">
@@ -467,7 +542,7 @@ export default function NewFF3Page() {
                 type="date"
                 value={formData.required_by_date}
                 onChange={(e) => setFormData({ ...formData, required_by_date: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
               />
             </div>
             <div>
@@ -475,7 +550,7 @@ export default function NewFF3Page() {
               <select
                 value={formData.urgency_level}
                 onChange={(e) => setFormData({ ...formData, urgency_level: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
               >
                 <option value="LOW">Low</option>
                 <option value="MEDIUM">Medium</option>
@@ -488,7 +563,7 @@ export default function NewFF3Page() {
               <select
                 value={formData.procurement_method}
                 onChange={(e) => setFormData({ ...formData, procurement_method: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
               >
                 <option value="QUOTATION">Quotation</option>
                 <option value="TENDER">Tender</option>
@@ -505,7 +580,7 @@ export default function NewFF3Page() {
           <h2 className="text-lg font-semibold text-slate-900">Section C: Item Details</h2>
           <button
             onClick={addItem}
-            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
+            className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2"
           >
             <Plus className="h-4 w-4" />
             Add Item
@@ -534,7 +609,7 @@ export default function NewFF3Page() {
                       setItems(newItems)
                     }}
                     placeholder="Enter item description"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
                 <div>
@@ -547,7 +622,7 @@ export default function NewFF3Page() {
                       newItems[index].quantity = parseFloat(e.target.value) || 0
                       setItems(newItems)
                     }}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
                 <div>
@@ -561,7 +636,7 @@ export default function NewFF3Page() {
                       newItems[index].estimated_unit_price = parseFloat(e.target.value) || 0
                       setItems(newItems)
                     }}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
                 <div>
@@ -575,7 +650,7 @@ export default function NewFF3Page() {
                       setItems(newItems)
                     }}
                     placeholder="e.g., Units, Boxes"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
                 <div>
@@ -606,7 +681,7 @@ export default function NewFF3Page() {
           </div>
           <button
             onClick={addQuotation}
-            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
+            className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2"
           >
             <Plus className="h-4 w-4" />
             Add Quotation
@@ -646,7 +721,7 @@ export default function NewFF3Page() {
                       setQuotations(newQuots)
                     }}
                     placeholder="Enter supplier name"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
                 <div>
@@ -660,7 +735,7 @@ export default function NewFF3Page() {
                       setQuotations(newQuots)
                     }}
                     placeholder="Quote #"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
                 <div>
@@ -673,7 +748,7 @@ export default function NewFF3Page() {
                       newQuots[index].quotation_date = e.target.value
                       setQuotations(newQuots)
                     }}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
                 <div>
@@ -687,7 +762,7 @@ export default function NewFF3Page() {
                       newQuots[index].quotation_amount = parseFloat(e.target.value) || 0
                       setQuotations(newQuots)
                     }}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
               </div>
@@ -716,7 +791,7 @@ export default function NewFF3Page() {
                 ) : (
                   <label className="flex items-center gap-2 p-2 border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50">
                     {uploadingQuotation === index ? (
-                      <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                      <Loader2 className="h-4 w-4 text-png-red animate-spin" />
                     ) : (
                       <Upload className="h-4 w-4 text-slate-400" />
                     )}
@@ -744,9 +819,9 @@ export default function NewFF3Page() {
         <p className="text-sm text-slate-600 mb-4">Upload any supporting documents such as specifications, approvals, or other relevant files.</p>
 
         {/* Upload Area */}
-        <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-colors">
+        <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-png-gold transition-colors">
           {uploadingDoc ? (
-            <Loader2 className="h-8 w-8 text-blue-500 animate-spin mb-2" />
+            <Loader2 className="h-8 w-8 text-png-red animate-spin mb-2" />
           ) : (
             <Upload className="h-8 w-8 text-slate-400 mb-2" />
           )}
@@ -769,9 +844,9 @@ export default function NewFF3Page() {
             <p className="text-sm font-medium text-slate-700">Uploaded Documents ({supportingDocs.length})</p>
             {supportingDocs.map((doc, index) => (
               <div key={doc.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                <FileText className="h-5 w-5 text-blue-500" />
+                <FileText className="h-5 w-5 text-png-red" />
                 <div className="flex-1 min-w-0">
-                  <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:underline truncate block">
+                  <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-png-red hover:underline truncate block">
                     {doc.name}
                   </a>
                   <p className="text-xs text-slate-500">{(doc.size / 1024).toFixed(1)} KB</p>
@@ -791,30 +866,45 @@ export default function NewFF3Page() {
 
       {/* Section F: Budget Validation */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Section F: Budget Validation</h2>
-        <div className="space-y-2">
-          <BudgetLine label="Quarterly Released" amount={budgetInfo.quarterly_released} />
-          <BudgetLine label="Available Balance" amount={budgetInfo.available_balance} isTotal />
-          <div className="border-t border-slate-200 pt-2 mt-2">
-            <BudgetLine label="Requested Amount" amount={totalEstimate} highlight />
-          </div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-900">Section F: Budget Validation</h2>
+          {selectedCode && (
+            <span className="font-mono text-xs px-2 py-1 rounded-lg bg-png-red/5 text-png-red border border-png-gold/40">{selectedCode.full_expense_code}</span>
+          )}
         </div>
+        {budgetCheck?.hasAllocation ? (
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500 mb-1">{selectedCode ? "Position for the selected expense code" : "Position for the selected section"}</p>
+            <BudgetLine label="Approved Budget (Revised)" amount={budgetCheck.revised} />
+            <BudgetLine label="Committed" amount={budgetCheck.committed} />
+            <BudgetLine label="Spent" amount={budgetCheck.spent} />
+            <BudgetLine label="Available Balance" amount={budgetCheck.available} isTotal />
+            <div className="border-t border-slate-200 pt-2 mt-2">
+              <BudgetLine label="This Request" amount={totalEstimate} highlight />
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {(formData.expense_code_registry_id || formData.section_id) && (
+              <div className="mb-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-2">
+                <AlertCircle className="h-4 w-4" /> No confirmed budget allocation found yet — showing the overall available balance.
+              </div>
+            )}
+            <BudgetLine label="Quarterly Released" amount={budgetInfo.quarterly_released} />
+            <BudgetLine label="Available Balance" amount={budgetInfo.available_balance} isTotal />
+            <div className="border-t border-slate-200 pt-2 mt-2">
+              <BudgetLine label="This Request" amount={totalEstimate} highlight />
+            </div>
+          </div>
+        )}
         {totalEstimate > 0 && (
           <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-sm ${
-            totalEstimate <= budgetInfo.available_balance
-              ? 'bg-green-50 text-green-700'
-              : 'bg-red-50 text-red-700'
+            totalEstimate <= effectiveAvailable ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
           }`}>
-            {totalEstimate <= budgetInfo.available_balance ? (
-              <>
-                <CheckCircle2 className="h-4 w-4" />
-                <span className="font-medium">Within Budget - Sufficient funds available</span>
-              </>
+            {totalEstimate <= effectiveAvailable ? (
+              <><CheckCircle2 className="h-4 w-4" /><span className="font-medium">Within Budget — sufficient funds available (K {effectiveAvailable.toLocaleString()} remaining)</span></>
             ) : (
-              <>
-                <AlertCircle className="h-4 w-4" />
-                <span className="font-medium">Insufficient Funds - Exceeds available balance</span>
-              </>
+              <><AlertCircle className="h-4 w-4" /><span className="font-medium">Insufficient Funds — exceeds available balance of K {effectiveAvailable.toLocaleString()}</span></>
             )}
           </div>
         )}
@@ -841,7 +931,7 @@ export default function NewFF3Page() {
             <button
               onClick={handleSubmit}
               disabled={!canSubmit || submitting}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="px-6 py-2 bg-png-red text-white rounded-lg font-medium hover:bg-png-maroon disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Submit for Approval
@@ -861,7 +951,7 @@ function BudgetLine({ label, amount, isNegative = false, isTotal = false, highli
   highlight?: boolean
 }) {
   return (
-    <div className={`flex items-center justify-between py-1 ${isTotal ? 'text-lg font-bold' : ''} ${highlight ? 'text-blue-600 font-semibold' : ''}`}>
+    <div className={`flex items-center justify-between py-1 ${isTotal ? 'text-lg font-bold' : ''} ${highlight ? 'text-png-red font-semibold' : ''}`}>
       <span className={isTotal ? 'text-slate-900' : 'text-slate-700'}>{label}</span>
       <span className={`${isTotal ? 'text-green-700' : isNegative ? 'text-red-600' : 'text-slate-900'}`}>
         K {amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

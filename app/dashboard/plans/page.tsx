@@ -5,6 +5,7 @@ import { Calendar, Plus, Loader2, X, ChevronDown, ChevronRight, Trash2, CheckCir
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/contexts/AuthContext"
 import { transitionAnnualPlan, type PlanAction } from "@/lib/api"
+import { type Permission } from "@/lib/permissions"
 
 type Plan = {
   id: string
@@ -60,7 +61,7 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 // Which actions are available at each status (and the permission needed)
-type Act = { action: PlanAction; label: string; perm: string; icon: typeof Send; tone: "primary" | "neutral" | "danger" }
+type Act = { action: PlanAction; label: string; perm: Permission; icon: typeof Send; tone: "primary" | "neutral" | "danger" }
 const ACTIONS: Record<string, Act[]> = {
   DRAFT: [{ action: "SUBMIT", label: "Submit", perm: "plans.submit", icon: Send, tone: "primary" }],
   RETURNED_FOR_CORRECTION: [{ action: "SUBMIT", label: "Re-submit", perm: "plans.submit", icon: Send, tone: "primary" }],
@@ -232,7 +233,7 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
 
 function PlanRow({ plan, expanded, lines, onToggle, onAction, busy, can }: {
   plan: Plan; expanded: boolean; lines?: PlanLine[]; onToggle: () => void
-  onAction: (id: string, a: PlanAction) => void; busy: string | null; can: (p: string) => boolean
+  onAction: (id: string, a: PlanAction) => void; busy: string | null; can: (p: Permission) => boolean
 }) {
   const acts = (ACTIONS[plan.status] || []).filter((a) => can(a.perm))
   return (
