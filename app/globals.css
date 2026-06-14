@@ -10,6 +10,15 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* PNG Judiciary brand palette — deep maroon (authority), antique gold (prestige), national red */
+  --color-png-maroon: #4c0f16;
+  --color-png-maroon-mid: #380a10;
+  --color-png-maroon-dark: #1d0608;
+  --color-png-red: #8a1420;
+  --color-png-gold: #d4af37;
+  --color-png-gold-soft: #e3c876;
+  --color-png-cream: #f3e9d8;
 }
 
 @media (prefers-color-scheme: dark) {

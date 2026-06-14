@@ -48,10 +48,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: "FF4 Expenses", href: "/dashboard/ff4", icon: DollarSign, perms: ["ff4.create", "ff4.verify", "ff4.process"] },
     { name: "Commitments", href: "/dashboard/commitments", icon: FileCheck, perms: ["budget.view", "ff4.verify", "ff4.process"] },
     { name: "Budget Control", href: "/dashboard/budget", icon: Wallet, perms: ["budget.view"] },
-    { name: "Annual Plans", href: "/dashboard/plans", icon: Calendar, perms: ["budget.view"] },
+    { name: "Annual Plans", href: "/dashboard/plans", icon: Calendar, perms: ["plans.create", "plans.review", "plans.authorize", "plans.confirm", "budget.view"] },
     { name: "Reports", href: "/dashboard/reports", icon: BarChart3, perms: ["reports.view"] },
     { name: "Audit Log", href: "/dashboard/audit-log", icon: ClipboardList, perms: ["audit.view"] },
-    { name: "Master Data", href: "/dashboard/master", icon: FolderOpen, perms: ["users.manage"] },
+    { name: "Master Data", href: "/dashboard/master", icon: FolderOpen, perms: ["masterdata.manage", "registry.manage", "users.manage"] },
     { name: "Users & Roles", href: "/dashboard/users", icon: Users, perms: ["users.manage"] },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
   ]
@@ -85,7 +85,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto" />
+          <Loader2 className="h-8 w-8 animate-spin text-png-red mx-auto" />
           <p className="mt-2 text-sm text-slate-600">Loading...</p>
         </div>
       </div>
@@ -96,6 +96,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen bg-slate-50">
       {/* Top Navigation */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        {/* PNG national-colour accent ribbon */}
+        <div className="h-1 bg-gradient-to-r from-png-red via-png-gold to-png-red" />
         <div className="flex items-center justify-between px-3 sm:px-4 py-3">
           <div className="flex items-center gap-2 sm:gap-4">
             <button
@@ -120,7 +122,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <input
                 type="text"
                 placeholder="Search requisitions, expenses..."
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red"
               />
             </div>
           </div>
@@ -135,8 +137,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
                 className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg hover:bg-slate-100"
               >
-                <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
-                  <span className="text-sm font-semibold text-blue-600">{getInitials()}</span>
+                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-png-red to-png-maroon flex items-center justify-center shadow-sm">
+                  <span className="text-sm font-semibold text-white">{getInitials()}</span>
                 </div>
                 <div className="hidden md:block text-left">
                   <p className="text-sm font-medium text-slate-900">{profile?.name || user?.email?.split('@')[0] || 'User'}</p>
@@ -152,7 +154,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <p className="text-sm font-medium text-slate-900">{profile?.name || 'User'}</p>
                     <p className="text-xs text-slate-500">{user?.email || profile?.email}</p>
                     <div className="flex items-center gap-2 mt-1.5">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-png-red/10 text-png-red">
                         {role || 'No role'}
                       </span>
                       {profile?.department && (
@@ -190,15 +192,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Sidebar */}
         <aside
           className={`
-            fixed lg:static inset-y-0 left-0 z-30 w-64 bg-white border-r border-slate-200
+            fixed lg:static inset-y-0 left-0 z-30 w-64 border-r border-png-gold/30
+            bg-[#faf7f1]
             transform transition-transform duration-200 ease-in-out
             ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
             pt-14 lg:pt-0
           `}
         >
           <nav className="h-[calc(100vh-56px)] lg:h-screen overflow-y-auto p-4 space-y-1">
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-png-red/60">
+              Main Menu
+            </p>
             {visibleNavigation.map((item) => {
               const Icon = item.icon
+              const active = isActive(item.href)
               return (
                 <Link
                   key={item.name}
@@ -206,23 +213,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   onClick={() => setSidebarOpen(false)}
                   className={`
                     flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium
-                    transition-colors
-                    ${isActive(item.href)
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-slate-700 hover:bg-slate-100'
+                    border-l-2 transition-all duration-150
+                    ${active
+                      ? 'bg-png-red/10 text-png-red border-png-gold'
+                      : 'text-slate-600 border-transparent hover:bg-png-red/5 hover:text-png-red'
                     }
                   `}
                 >
-                  <Icon className="h-5 w-5" />
+                  <Icon className={`h-5 w-5 ${active ? 'text-png-red' : 'text-slate-400'}`} />
                   {item.name}
                 </Link>
               )
             })}
 
-            <div className="pt-4 mt-4 border-t border-slate-200">
+            <div className="pt-4 mt-4 border-t border-png-gold/20">
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 w-full"
+                className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-700 w-full transition-colors"
               >
                 <LogOut className="h-5 w-5" />
                 Sign Out
