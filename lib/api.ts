@@ -854,6 +854,102 @@ export async function getBudgetByCode(financialYear: number) {
 }
 
 // ==========================================
+// QUARTERLY BUDGET RELEASES (per budget allocation / expense code)
+// ==========================================
+
+// Allocations available to release against (with code, approved & released-so-far)
+export async function getAllocationsForRelease(financialYear: number) {
+  const { data: allocs, error } = await supabase
+    .from('budget_allocations')
+    .select('id, revised_budget, department:departments(code, name), section:sections(name), cost_centre:cost_centres(code, name), expense_code:expense_code_registry(full_expense_code)')
+    .eq('financial_year', financialYear)
+    .eq('is_active', true)
+  if (error) throw error
+
+  const { data: releases } = await supabase
+    .from('quarterly_releases')
+    .select('budget_allocation_id, released_amount')
+    .eq('financial_year', financialYear)
+  const releasedByAlloc = new Map<string, number>()
+  ;(releases || []).forEach((r) => {
+    if (!r.budget_allocation_id) return
+    releasedByAlloc.set(r.budget_allocation_id, (releasedByAlloc.get(r.budget_allocation_id) || 0) + (r.released_amount || 0))
+  })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (allocs || []).map((a: any) => {
+    const released = releasedByAlloc.get(a.id) || 0
+    return {
+      id: a.id,
+      revised_budget: a.revised_budget || 0,
+      released,
+      releasable: Math.max(0, (a.revised_budget || 0) - released),
+      department_name: a.department?.name || null,
+      section_name: a.section?.name || null,
+      cost_centre_code: a.cost_centre?.code || null,
+      cost_centre_name: a.cost_centre?.name || null,
+      full_expense_code: a.expense_code?.full_expense_code || null,
+    }
+  })
+}
+
+// All release lines for a year (from v_releases_by_code)
+export async function getReleases(financialYear: number) {
+  const { data, error } = await supabase
+    .from('v_releases_by_code')
+    .select('*')
+    .eq('financial_year', financialYear)
+    .order('release_date', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+// Create a quarterly release; guards against releasing beyond the approved budget.
+export async function createQuarterlyRelease(input: {
+  budget_allocation_id: string
+  financial_year: number
+  quarter: number
+  released_amount: number
+  release_date?: string
+}) {
+  // Guard: cumulative releases must not exceed the allocation's revised budget
+  const { data: alloc, error: aErr } = await supabase
+    .from('budget_allocations')
+    .select('revised_budget')
+    .eq('id', input.budget_allocation_id)
+    .single()
+  if (aErr) throw aErr
+
+  const { data: priorReleases } = await supabase
+    .from('quarterly_releases')
+    .select('released_amount')
+    .eq('budget_allocation_id', input.budget_allocation_id)
+  const alreadyReleased = (priorReleases || []).reduce((s, r) => s + (r.released_amount || 0), 0)
+  const ceiling = alloc.revised_budget || 0
+  if (alreadyReleased + input.released_amount > ceiling + 0.001) {
+    throw new Error(
+      `Release of K ${input.released_amount.toLocaleString()} would exceed the approved budget. ` +
+      `Approved K ${ceiling.toLocaleString()}, already released K ${alreadyReleased.toLocaleString()}, ` +
+      `remaining to release K ${(ceiling - alreadyReleased).toLocaleString()}.`
+    )
+  }
+
+  const { data, error } = await supabase
+    .from('quarterly_releases')
+    .insert({
+      budget_allocation_id: input.budget_allocation_id,
+      financial_year: input.financial_year,
+      quarter: input.quarter,
+      released_amount: input.released_amount,
+      release_date: input.release_date || new Date().toISOString().split('T')[0],
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// ==========================================
 // BUDGET AVAILABILITY CHECK (used by FF3)
 // ==========================================
 
@@ -868,9 +964,16 @@ export async function checkBudgetAvailability(params: { financialYear: number; e
   const revised = (allocs || []).reduce((s, a) => s + (a.revised_budget || 0), 0)
   const allocIds = (allocs || []).map((a) => a.id)
 
+  let released = 0
   let committed = 0
   let spent = 0
   if (allocIds.length > 0) {
+    const { data: rels } = await supabase
+      .from('quarterly_releases')
+      .select('released_amount, budget_allocation_id')
+      .in('budget_allocation_id', allocIds)
+    released = (rels || []).reduce((s, r) => s + (r.released_amount || 0), 0)
+
     const { data: coms } = await supabase
       .from('ff3_commitments')
       .select('committed_amount, paid_amount, status, budget_allocation_id')
@@ -879,12 +982,18 @@ export async function checkBudgetAvailability(params: { financialYear: number; e
     spent = (coms || []).reduce((s, c) => s + (c.paid_amount || 0), 0)
   }
 
-  const available = revised - committed - spent
+  // Cash-control available = released - committed - spent (spec formula).
+  const available = released - committed - spent
+  // Approved-ceiling available, for context.
+  const approvedAvailable = revised - committed - spent
   return {
     revised,
+    released,
     committed,
     spent,
     available,
+    approvedAvailable,
+    unreleased: revised - released,
     requested: params.amount,
     withinBudget: params.amount <= available,
     hasAllocation: allocIds.length > 0,

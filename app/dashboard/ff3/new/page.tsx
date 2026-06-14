@@ -17,7 +17,7 @@ type FundingSource = { id: string; code: string; name: string }
 type CostCentre = { id: string; code: string; name: string; section_id: string | null; department_id: string | null }
 type ExpenseCode = { id: string; full_expense_code: string; section_id: string | null }
 type BudgetInfo = { available_balance: number; quarterly_released: number }
-type BudgetCheck = { revised: number; committed: number; spent: number; available: number; hasAllocation: boolean } | null
+type BudgetCheck = { revised: number; released: number; committed: number; spent: number; available: number; hasAllocation: boolean } | null
 
 export default function NewFF3Page() {
   const router = useRouter()
@@ -147,7 +147,7 @@ export default function NewFF3Page() {
           sectionId: formData.section_id || null,
           amount: 0,
         })
-        if (!cancelled) setBudgetCheck({ revised: res.revised, committed: res.committed, spent: res.spent, available: res.available, hasAllocation: res.hasAllocation })
+        if (!cancelled) setBudgetCheck({ revised: res.revised, released: res.released, committed: res.committed, spent: res.spent, available: res.available, hasAllocation: res.hasAllocation })
       } catch {
         if (!cancelled) setBudgetCheck(null)
       }
@@ -876,6 +876,7 @@ export default function NewFF3Page() {
           <div className="space-y-2">
             <p className="text-xs text-slate-500 mb-1">{selectedCode ? "Position for the selected expense code" : "Position for the selected section"}</p>
             <BudgetLine label="Approved Budget (Revised)" amount={budgetCheck.revised} />
+            <BudgetLine label="Released (cash available)" amount={budgetCheck.released} />
             <BudgetLine label="Committed" amount={budgetCheck.committed} />
             <BudgetLine label="Spent" amount={budgetCheck.spent} />
             <BudgetLine label="Available Balance" amount={budgetCheck.available} isTotal />

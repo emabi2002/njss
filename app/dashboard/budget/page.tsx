@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Wallet, TrendingUp, DollarSign, FileText, Loader2, Layers, Hash, Building2, Play, CheckCircle2, AlertCircle, Download, RefreshCw } from "lucide-react"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts"
-import { getBudgetByCode, getConsolidations, consolidateDepartmentBudget, getDepartments } from "@/lib/api"
+import { Wallet, TrendingUp, DollarSign, FileText, Loader2, Layers, Hash, Building2, Play, CheckCircle2, AlertCircle, Download, RefreshCw, Banknote } from "lucide-react"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
+import { getBudgetByCode, getConsolidations, consolidateDepartmentBudget, getDepartments, getReleases, getAllocationsForRelease, createQuarterlyRelease } from "@/lib/api"
 import { useAuth } from "@/contexts/AuthContext"
 import { exportToCSV, exportToPDF, rowsToPdfTable } from "@/lib/export"
 
@@ -19,6 +19,7 @@ type CodeRow = {
   expense_code_registry_id: string | null
   full_expense_code: string | null
   revised_budget: number
+  released_amount: number
   committed_amount: number
   actual_expenditure: number
 }
@@ -34,8 +35,33 @@ type Consolidation = {
   department: { code: string; name: string } | null
 }
 
+type ReleaseRow = {
+  id: string
+  quarter: number
+  release_number: string | null
+  release_date: string
+  released_amount: number
+  revised_budget: number
+  department_name: string | null
+  cost_centre_code: string | null
+  cost_centre_name: string | null
+  full_expense_code: string | null
+}
+
+type Allocation = {
+  id: string
+  revised_budget: number
+  released: number
+  releasable: number
+  department_name: string | null
+  section_name: string | null
+  cost_centre_code: string | null
+  cost_centre_name: string | null
+  full_expense_code: string | null
+}
+
 type Dept = { id: string; code: string; name: string }
-type Tab = "code" | "centre" | "consolidation"
+type Tab = "code" | "centre" | "releases" | "consolidation"
 
 const CHART_COLORS = ["#8a1420", "#4c0f16", "#d4af37", "#a8324a", "#b8860b", "#6b1420"]
 
@@ -47,18 +73,24 @@ export default function BudgetControlPage() {
   const [rows, setRows] = useState<CodeRow[]>([])
   const [consolidations, setConsolidations] = useState<Consolidation[]>([])
   const [depts, setDepts] = useState<Dept[]>([])
+  const [releases, setReleases] = useState<ReleaseRow[]>([])
+  const [allocations, setAllocations] = useState<Allocation[]>([])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [codeData, consData, deptData] = await Promise.all([
+      const [codeData, consData, deptData, relData, allocData] = await Promise.all([
         getBudgetByCode(year),
         getConsolidations(year),
         getDepartments(),
+        getReleases(year),
+        getAllocationsForRelease(year),
       ])
       setRows((codeData || []) as unknown as CodeRow[])
       setConsolidations((consData || []) as unknown as Consolidation[])
       setDepts((deptData || []) as unknown as Dept[])
+      setReleases((relData || []) as unknown as ReleaseRow[])
+      setAllocations((allocData || []) as unknown as Allocation[])
     } catch (err) {
       console.error("Error loading budget data:", err)
     } finally {
@@ -73,19 +105,21 @@ export default function BudgetControlPage() {
 
   const totals = useMemo(() => {
     const revised = rows.reduce((s, r) => s + (r.revised_budget || 0), 0)
+    const released = rows.reduce((s, r) => s + (r.released_amount || 0), 0)
     const committed = rows.reduce((s, r) => s + (r.committed_amount || 0), 0)
     const actual = rows.reduce((s, r) => s + (r.actual_expenditure || 0), 0)
-    return { revised, committed, actual, available: revised - committed - actual }
+    return { revised, released, committed, actual, available: released - committed - actual }
   }, [rows])
 
   // Roll-up by cost centre
   const byCentre = useMemo(() => {
-    const map = new Map<string, { label: string; revised: number; committed: number; actual: number }>()
+    const map = new Map<string, { label: string; revised: number; released: number; committed: number; actual: number }>()
     for (const r of rows) {
       const key = r.cost_centre_code || r.section_name || "Unassigned"
       const label = r.cost_centre_code ? `${r.cost_centre_code} — ${r.cost_centre_name}` : r.section_name || "Unassigned"
-      const e = map.get(key) || { label, revised: 0, committed: 0, actual: 0 }
+      const e = map.get(key) || { label, revised: 0, released: 0, committed: 0, actual: 0 }
       e.revised += r.revised_budget || 0
+      e.released += r.released_amount || 0
       e.committed += r.committed_amount || 0
       e.actual += r.actual_expenditure || 0
       map.set(key, e)
@@ -94,38 +128,44 @@ export default function BudgetControlPage() {
   }, [rows])
 
   const chartData = useMemo(
-    () => byCentre.slice(0, 8).map((c) => ({ name: c.label.split(" — ")[0], available: c.revised - c.committed - c.actual, used: c.committed + c.actual })),
+    () => byCentre.slice(0, 8).map((c) => ({ name: c.label.split(" — ")[0], available: Math.max(0, c.released - c.committed - c.actual), used: c.committed + c.actual })),
     [byCentre]
   )
 
   const exportCurrent = (format: "csv" | "pdf") => {
     const stamp = new Date().toISOString().split("T")[0]
+    const emit = (file: string, title: string, records: Record<string, string | number>[]) => {
+      if (records.length === 0) return
+      if (format === "csv") exportToCSV(`${file}_${stamp}`, records)
+      else { const { columns, rows: r } = rowsToPdfTable(records); exportToPDF({ title, subtitle: `FY${year}`, columns, rows: r, filename: `${file}_${stamp}` }) }
+    }
     if (tab === "code") {
-      const records = rows.map((r) => ({
-        "Expense Code": r.full_expense_code || "-", Department: r.department_name || "-",
-        "Cost Centre": r.cost_centre_code || "-", "Approved (K)": r.revised_budget || 0,
-        "Committed (K)": r.committed_amount || 0, "Actual (K)": r.actual_expenditure || 0,
-        "Available (K)": (r.revised_budget || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0),
-      }))
-      if (records.length === 0) return
-      if (format === "csv") exportToCSV(`budget_by_code_${stamp}`, records)
-      else { const { columns, rows: r } = rowsToPdfTable(records); exportToPDF({ title: "Budget by Expense Code", subtitle: `FY${year}`, columns, rows: r, filename: `budget_by_code_${stamp}` }) }
+      emit("budget_by_code", "Budget by Expense Code", rows.map((r) => ({
+        "Expense Code": r.full_expense_code || "-", Department: r.department_name || "-", "Cost Centre": r.cost_centre_code || "-",
+        "Approved (K)": r.revised_budget || 0, "Released (K)": r.released_amount || 0, "Committed (K)": r.committed_amount || 0,
+        "Actual (K)": r.actual_expenditure || 0, "Available (K)": (r.released_amount || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0),
+      })))
     } else if (tab === "centre") {
-      const records = byCentre.map((c) => ({ "Cost Centre": c.label, "Approved (K)": c.revised, "Committed (K)": c.committed, "Actual (K)": c.actual, "Available (K)": c.revised - c.committed - c.actual }))
-      if (records.length === 0) return
-      if (format === "csv") exportToCSV(`budget_by_cost_centre_${stamp}`, records)
-      else { const { columns, rows: r } = rowsToPdfTable(records); exportToPDF({ title: "Budget by Cost Centre", subtitle: `FY${year}`, columns, rows: r, filename: `budget_by_cost_centre_${stamp}` }) }
+      emit("budget_by_cost_centre", "Budget by Cost Centre", byCentre.map((c) => ({
+        "Cost Centre": c.label, "Approved (K)": c.revised, "Released (K)": c.released, "Committed (K)": c.committed,
+        "Actual (K)": c.actual, "Available (K)": c.released - c.committed - c.actual,
+      })))
+    } else if (tab === "releases") {
+      emit("quarterly_releases", "Quarterly Releases", releases.map((r) => ({
+        Release: r.release_number || "-", "Expense Code": r.full_expense_code || "-", "Cost Centre": r.cost_centre_code || "-",
+        Quarter: `Q${r.quarter}`, Date: r.release_date, "Amount (K)": r.released_amount || 0,
+      })))
     } else {
-      const records = consolidations.map((c) => ({ Department: c.department?.name || "-", Status: c.status, Sections: c.section_count, Plans: c.plan_count, "Total (K)": c.total_amount }))
-      if (records.length === 0) return
-      if (format === "csv") exportToCSV(`consolidations_${stamp}`, records)
-      else { const { columns, rows: r } = rowsToPdfTable(records); exportToPDF({ title: "Budget Consolidations", subtitle: `FY${year}`, columns, rows: r, filename: `consolidations_${stamp}` }) }
+      emit("consolidations", "Budget Consolidations", consolidations.map((c) => ({
+        Department: c.department?.name || "-", Status: c.status, Sections: c.section_count, Plans: c.plan_count, "Total (K)": c.total_amount,
+      })))
     }
   }
 
   const TABS: { key: Tab; label: string; icon: typeof Hash }[] = [
     { key: "code", label: "By Expense Code", icon: Hash },
     { key: "centre", label: "By Cost Centre", icon: Layers },
+    { key: "releases", label: "Releases", icon: Banknote },
     { key: "consolidation", label: "Consolidation", icon: Building2 },
   ]
 
@@ -137,7 +177,7 @@ export default function BudgetControlPage() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Wallet className="h-7 w-7 text-png-red" /> Budget Control
           </h1>
-          <p className="text-slate-600 mt-1">Approved budget, commitments &amp; actual expenditure by code, cost centre and department</p>
+          <p className="text-slate-600 mt-1">Approved budget, quarterly releases, commitments &amp; actual expenditure by code, cost centre and department</p>
         </div>
         <div className="flex items-center gap-2">
           <select value={year} onChange={(e) => setYear(parseInt(e.target.value))}
@@ -157,11 +197,12 @@ export default function BudgetControlPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <SummaryCard title="Approved Budget" value={totals.revised} subtitle="Confirmed allocations" icon={<Wallet className="h-6 w-6" />} tone="maroon" />
-        <SummaryCard title="Committed" value={totals.committed} subtitle="Outstanding commitments" icon={<FileText className="h-6 w-6" />} tone="gold" />
-        <SummaryCard title="Actual Expenditure" value={totals.actual} subtitle="Paid to date" icon={<DollarSign className="h-6 w-6" />} tone="red" />
-        <SummaryCard title="Available Balance" value={totals.available} subtitle="Ready to commit" icon={<TrendingUp className="h-6 w-6" />} tone="green" />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <SummaryCard title="Approved" value={totals.revised} subtitle="Annual ceiling" icon={<Wallet className="h-6 w-6" />} tone="maroon" />
+        <SummaryCard title="Released" value={totals.released} subtitle="Cash made available" icon={<Banknote className="h-6 w-6" />} tone="gold" />
+        <SummaryCard title="Committed" value={totals.committed} subtitle="Outstanding" icon={<FileText className="h-6 w-6" />} tone="slate" />
+        <SummaryCard title="Actual" value={totals.actual} subtitle="Paid to date" icon={<DollarSign className="h-6 w-6" />} tone="red" />
+        <SummaryCard title="Available" value={totals.available} subtitle="Released − Com − Act" icon={<TrendingUp className="h-6 w-6" />} tone="green" />
       </div>
 
       {/* Tabs */}
@@ -183,6 +224,8 @@ export default function BudgetControlPage() {
         <ByCodeTable rows={rows} />
       ) : tab === "centre" ? (
         <ByCentreView byCentre={byCentre} chartData={chartData} />
+      ) : tab === "releases" ? (
+        <ReleasesView year={year} releases={releases} allocations={allocations} canRelease={can("budget.release")} onChanged={fetchData} />
       ) : (
         <ConsolidationView year={year} depts={depts} consolidations={consolidations} canRun={can("consolidation.run")} onChanged={fetchData} />
       )}
@@ -200,8 +243,9 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
             <tr>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Expense Code</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Department</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Cost Centre</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">CC</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Approved</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Released</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Committed</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Actual</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Available</th>
@@ -210,19 +254,20 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((r, i) => {
-              const avail = (r.revised_budget || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0)
-              const used = r.revised_budget ? ((r.committed_amount + r.actual_expenditure) / r.revised_budget) * 100 : 0
+              const avail = (r.released_amount || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0)
+              const used = r.released_amount ? ((r.committed_amount + r.actual_expenditure) / r.released_amount) * 100 : 0
               return (
                 <tr key={i} className="hover:bg-slate-50">
                   <td className="px-4 py-3"><span className="font-mono text-sm text-png-red font-medium">{r.full_expense_code || "—"}</span></td>
                   <td className="px-4 py-3 text-sm text-slate-600">{r.department_name || "-"}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{r.cost_centre_code ? `${r.cost_centre_code}` : "-"}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600 font-mono">{r.cost_centre_code || "-"}</td>
                   <td className="px-4 py-3 text-sm text-slate-900 text-right font-medium">K {(r.revised_budget || 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-png-gold-strong text-right">K {(r.released_amount || 0).toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-maroon text-right">K {(r.committed_amount || 0).toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-red text-right">K {(r.actual_expenditure || 0).toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-right font-semibold"><span className={avail >= 0 ? "text-green-700" : "text-red-600"}>K {avail.toLocaleString()}</span></td>
                   <td className="px-4 py-3 text-right">
-                    <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${used > 80 ? "bg-red-100 text-red-700" : used > 60 ? "bg-png-gold/25 text-png-maroon" : "bg-green-100 text-green-700"}`}>{used.toFixed(0)}%</span>
+                    <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${used > 90 ? "bg-red-100 text-red-700" : used > 70 ? "bg-png-gold/25 text-png-maroon" : "bg-green-100 text-green-700"}`}>{used.toFixed(0)}%</span>
                   </td>
                 </tr>
               )
@@ -234,7 +279,7 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
   )
 }
 
-function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revised: number; committed: number; actual: number }[]; chartData: { name: string; available: number; used: number }[] }) {
+function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revised: number; released: number; committed: number; actual: number }[]; chartData: { name: string; available: number; used: number }[] }) {
   if (byCentre.length === 0) return <EmptyState message="No cost-centre budgets yet." />
   return (
     <div className="space-y-6">
@@ -247,7 +292,8 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revi
               <XAxis dataKey="name" stroke="#64748b" fontSize={12} />
               <YAxis stroke="#64748b" tickFormatter={(v) => `K${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={(v) => `K ${Number(v).toLocaleString()}`} />
-              <Bar dataKey="used" name="Committed + Actual" stackId="a" fill="#8a1420" radius={[0, 0, 0, 0]} />
+              <Legend />
+              <Bar dataKey="used" name="Committed + Actual" stackId="a" fill="#8a1420" />
               <Bar dataKey="available" name="Available" stackId="a" fill="#d4af37" radius={[4, 4, 0, 0]}>
                 {chartData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
               </Bar>
@@ -262,6 +308,7 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revi
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Cost Centre</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Approved</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Released</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Committed</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Actual</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Available</th>
@@ -269,11 +316,12 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revi
             </thead>
             <tbody className="divide-y divide-slate-100">
               {byCentre.map((c, i) => {
-                const avail = c.revised - c.committed - c.actual
+                const avail = c.released - c.committed - c.actual
                 return (
                   <tr key={i} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-sm font-medium text-slate-900">{c.label}</td>
                     <td className="px-4 py-3 text-sm text-slate-900 text-right">K {c.revised.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-png-gold-strong text-right">K {c.released.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-maroon text-right">K {c.committed.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-red text-right">K {c.actual.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-right font-semibold"><span className={avail >= 0 ? "text-green-700" : "text-red-600"}>K {avail.toLocaleString()}</span></td>
@@ -283,6 +331,131 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revi
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function ReleasesView({ year, releases, allocations, canRelease, onChanged }: {
+  year: number; releases: ReleaseRow[]; allocations: Allocation[]; canRelease: boolean; onChanged: () => void
+}) {
+  const [allocId, setAllocId] = useState("")
+  const [quarter, setQuarter] = useState(1)
+  const [amount, setAmount] = useState("")
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0])
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
+
+  const selected = allocations.find((a) => a.id === allocId)
+  const totalReleased = releases.reduce((s, r) => s + (r.released_amount || 0), 0)
+
+  const submit = async () => {
+    const amt = parseFloat(amount)
+    if (!allocId || !amt || amt <= 0) return
+    setSaving(true); setMsg(null)
+    try {
+      const r = await createQuarterlyRelease({ budget_allocation_id: allocId, financial_year: year, quarter, released_amount: amt, release_date: date })
+      setMsg({ type: "ok", text: `Released K ${amt.toLocaleString()} (${r?.release_number || "Q" + quarter}) for ${selected?.full_expense_code || "allocation"}.` })
+      setAmount(""); setAllocId("")
+      onChanged()
+    } catch (err: unknown) {
+      setMsg({ type: "err", text: err instanceof Error ? err.message : "Release failed." })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {canRelease && (
+        <div className="bg-white rounded-lg border border-png-gold/40 p-5">
+          <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-1"><Banknote className="h-4 w-4 text-png-gold" /> Release Quarterly Funds</h3>
+          <p className="text-xs text-slate-500 mb-4">Make cash available against an approved budget code for a quarter. Releases cannot exceed the approved ceiling.</p>
+          {msg && (
+            <div className={`mb-3 rounded-lg p-2.5 text-sm flex items-center gap-2 ${msg.type === "ok" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
+              {msg.type === "ok" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />} {msg.text}
+            </div>
+          )}
+          <div className="grid md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-5">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Budget Code / Allocation</label>
+              <select value={allocId} onChange={(e) => setAllocId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
+                <option value="">Select an approved budget code...</option>
+                {allocations.map((a) => (
+                  <option key={a.id} value={a.id} disabled={a.releasable <= 0}>
+                    {(a.full_expense_code || a.cost_centre_code || "—")} · {a.department_name} · approved K{a.revised_budget.toLocaleString()} · releasable K{a.releasable.toLocaleString()}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Quarter</label>
+              <select value={quarter} onChange={(e) => setQuarter(parseInt(e.target.value))}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
+                {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Amount (K)</label>
+              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-right focus:outline-none focus:ring-2 focus:ring-png-red" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red" />
+            </div>
+            <div className="md:col-span-1">
+              <button onClick={submit} disabled={!allocId || !amount || saving}
+                className="w-full px-3 py-2 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon disabled:opacity-50 flex items-center justify-center gap-1">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          {selected && (
+            <p className="mt-2 text-xs text-slate-500">
+              Approved <b>K {selected.revised_budget.toLocaleString()}</b> · already released <b>K {selected.released.toLocaleString()}</b> · remaining to release <b className="text-png-maroon">K {selected.releasable.toLocaleString()}</b>
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Quarterly Releases — FY{year}</h2>
+          <span className="text-sm text-slate-600">Total released: <span className="font-bold text-png-gold-strong">K {totalReleased.toLocaleString()}</span></span>
+        </div>
+        {releases.length === 0 ? (
+          <EmptyState message="No releases recorded yet. Release funds against an approved budget code above." bordered={false} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Release #</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Expense Code</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Cost Centre</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-slate-700 uppercase">Quarter</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Date</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {releases.map((r) => (
+                  <tr key={r.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 text-sm font-medium text-png-red">{r.release_number || "—"}</td>
+                    <td className="px-4 py-3"><span className="font-mono text-sm text-slate-700">{r.full_expense_code || "—"}</span></td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{r.cost_centre_code || "-"}</td>
+                    <td className="px-4 py-3 text-center"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-png-gold/20 text-png-maroon">Q{r.quarter}</span></td>
+                    <td className="px-4 py-3 text-sm text-slate-500">{new Date(r.release_date).toLocaleDateString("en-GB")}</td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-900 text-right">K {(r.released_amount || 0).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -392,13 +565,14 @@ function EmptyState({ message, bordered = true }: { message: string; bordered?: 
 }
 
 function SummaryCard({ title, value, subtitle, icon, tone }: {
-  title: string; value: number; subtitle: string; icon: React.ReactNode; tone: "maroon" | "gold" | "red" | "green"
+  title: string; value: number; subtitle: string; icon: React.ReactNode; tone: "maroon" | "gold" | "red" | "green" | "slate"
 }) {
   const toneClasses = {
     maroon: "bg-png-maroon/10 text-png-maroon",
     gold: "bg-png-gold/20 text-png-maroon",
     red: "bg-png-red/10 text-png-red",
     green: "bg-green-100 text-green-700",
+    slate: "bg-slate-100 text-slate-600",
   }
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-5">

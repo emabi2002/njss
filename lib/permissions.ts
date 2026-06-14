@@ -14,6 +14,7 @@ export type Permission =
   | 'ff4.process'
   | 'budget.view'
   | 'budget.confirm'
+  | 'budget.release'
   | 'plans.create'
   | 'plans.submit'
   | 'plans.review'
@@ -47,8 +48,8 @@ export type RoleName = (typeof ROLES)[number]
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   'System Administrator': ['all'],
   Registrar: ['dashboard.view', 'plans.review', 'plans.authorize', 'budget.view', 'reports.view', 'audit.view'],
-  Administrator: ['dashboard.view', 'masterdata.manage', 'registry.manage', 'plans.confirm', 'budget.view', 'budget.confirm', 'consolidation.run', 'users.manage', 'reports.view'],
-  'Finance Manager': ['dashboard.view', 'ff3.approve', 'ff4.verify', 'ff4.process', 'budget.view', 'reports.view'],
+  Administrator: ['dashboard.view', 'masterdata.manage', 'registry.manage', 'plans.confirm', 'budget.view', 'budget.confirm', 'budget.release', 'consolidation.run', 'users.manage', 'reports.view'],
+  'Finance Manager': ['dashboard.view', 'ff3.approve', 'ff4.verify', 'ff4.process', 'budget.view', 'budget.release', 'reports.view'],
   'Department Head': ['dashboard.view', 'plans.review', 'ff3.endorse', 'ff3.reject', 'reports.view'],
   'Section Manager': ['dashboard.view', 'plans.create', 'plans.submit', 'ff3.create', 'ff4.create', 'budget.view'],
   'Section Head': ['dashboard.view', 'plans.create', 'plans.submit', 'ff3.endorse'],
