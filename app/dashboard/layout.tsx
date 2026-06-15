@@ -28,6 +28,7 @@ import { NJSSLogo } from "../components/NJSSLogo"
 import { useAuth } from "@/contexts/AuthContext"
 import { NotificationsDropdown } from "@/components/NotificationsDropdown"
 import { hasAnyPermission, type Permission } from "@/lib/permissions"
+import { loadOrganization, DEFAULT_ORG, type OrganizationProfile } from "@/lib/org"
 
 type NavItem = { name: string; href: string; icon: typeof LayoutDashboard; perms?: Permission[] }
 
@@ -42,6 +43,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!loading && !user) router.replace('/login')
   }, [loading, user, router])
+
+  // Cache the organization profile so report/export headers are always branded
+  const [org, setOrg] = useState<OrganizationProfile>(DEFAULT_ORG)
+  // Tracks the last logo URL that failed to load so we can fall back gracefully.
+  const [failedLogo, setFailedLogo] = useState('')
+  useEffect(() => {
+    if (user) loadOrganization().then(setOrg)
+  }, [user])
 
   const navigation: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, perms: ["dashboard.view"] },
@@ -109,10 +118,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
             <div className="flex items-center gap-2 sm:gap-3">
-              <NJSSLogo size={32} />
+              {org.logo_url && failedLogo !== org.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={org.logo_url}
+                  alt={org.name}
+                  className="h-8 w-8 object-contain"
+                  onError={() => setFailedLogo(org.logo_url)}
+                />
+              ) : (
+                <NJSSLogo size={32} />
+              )}
               <div className="hidden xs:block">
-                <h1 className="text-sm font-bold text-slate-900">NJSS CREMS</h1>
-                <p className="text-xs text-slate-500 hidden sm:block">Court Registry &amp; Expense Monitoring System</p>
+                <h1 className="text-sm font-bold text-slate-900">{org.short_name || 'NJSS'} CREMS</h1>
+                <p className="text-xs text-slate-500 hidden sm:block">{org.subtitle || 'Court Registry & Expense Monitoring System'}</p>
               </div>
             </div>
           </div>

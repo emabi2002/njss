@@ -1,14 +1,19 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Settings, Bell, Mail, User, Shield, Save, Loader2,
   CheckCircle2, AlertCircle, Volume2, VolumeX, Smartphone,
-  Play, Wallet, FileText, DollarSign
+  Play, Wallet, FileText, DollarSign, Building2, MapPin, Phone, Globe,
+  Upload, Trash2, ImagePlus
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { toast } from "sonner"
 import { playNotificationSound, type SoundType } from "@/lib/notifications"
+import {
+  loadOrganization, saveOrganization, orgAddressLine, orgContactLine,
+  fileToLogoDataUrl, DEFAULT_ORG, type OrganizationProfile
+} from "@/lib/org"
 
 type NotificationPreferences = {
   // Notification types
@@ -52,11 +57,30 @@ const SOUND_OPTIONS: { value: SoundType; label: string; description: string }[] 
 ]
 
 export default function SettingsPage() {
-  const { user, profile } = useAuth()
+  const { user, profile, can } = useAuth()
+  const canManageOrg = can('masterdata.manage')
   const [saving, setSaving] = useState(false)
   const [preferences, setPreferences] = useState<NotificationPreferences>(defaultPreferences)
   const [pushPermission, setPushPermission] = useState<NotificationPermission>('default')
-  const [activeTab, setActiveTab] = useState<'notifications' | 'profile' | 'security'>('notifications')
+  const [activeTab, setActiveTab] = useState<'organization' | 'notifications' | 'profile' | 'security'>(
+    canManageOrg ? 'organization' : 'notifications'
+  )
+
+  // Organization profile (admin-managed) — drives report/export headers
+  const [org, setOrg] = useState<OrganizationProfile>(DEFAULT_ORG)
+  const [orgLoading, setOrgLoading] = useState(true)
+  const [orgSaving, setOrgSaving] = useState(false)
+  const [logoBusy, setLogoBusy] = useState(false)
+  // Tracks the last logo URL that failed to load, to show fallback + guidance.
+  const [failedLogo, setFailedLogo] = useState('')
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const logoPreviewError = !!org.logo_url && failedLogo === org.logo_url
+
+  useEffect(() => {
+    loadOrganization()
+      .then((o) => setOrg(o))
+      .finally(() => setOrgLoading(false))
+  }, [])
 
   useEffect(() => {
     // Load preferences from localStorage
@@ -113,7 +137,46 @@ export default function SettingsPage() {
     playNotificationSound(soundType)
   }
 
+  const updateOrg = (key: keyof OrganizationProfile, value: string) =>
+    setOrg((prev) => ({ ...prev, [key]: value }))
+
+  const handleLogoFile = async (file: File | undefined | null) => {
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image too large', { description: 'Please choose an image under 5MB' })
+      return
+    }
+    setLogoBusy(true)
+    try {
+      const dataUrl = await fileToLogoDataUrl(file, 256)
+      updateOrg('logo_url', dataUrl)
+      toast.success('Logo added', { description: "Click 'Save Organization' to apply it everywhere" })
+    } catch (e) {
+      toast.error('Could not load image', {
+        description: e instanceof Error ? e.message : 'Please try a different file',
+      })
+    } finally {
+      setLogoBusy(false)
+      if (logoInputRef.current) logoInputRef.current.value = ''
+    }
+  }
+
+  const handleSaveOrg = async () => {
+    setOrgSaving(true)
+    try {
+      await saveOrganization(org)
+      toast.success('Organization saved', {
+        description: 'Company details will now appear on all reports and downloads',
+      })
+    } catch {
+      toast.error('Error', { description: 'Failed to save organization details' })
+    } finally {
+      setOrgSaving(false)
+    }
+  }
+
   const tabs = [
+    ...(canManageOrg ? [{ id: 'organization' as const, label: 'Organization', icon: Building2 }] : []),
     { id: 'notifications' as const, label: 'Notifications', icon: Bell },
     { id: 'profile' as const, label: 'Profile', icon: User },
     { id: 'security' as const, label: 'Security', icon: Shield },
@@ -127,7 +190,11 @@ export default function SettingsPage() {
           <Settings className="h-7 w-7 text-slate-700" />
           Settings
         </h1>
-        <p className="text-slate-600 mt-1">Manage your account and notification preferences</p>
+        <p className="text-slate-600 mt-1">
+          {canManageOrg
+            ? 'Manage organization details, account and notification preferences'
+            : 'Manage your account and notification preferences'}
+        </p>
       </div>
 
       {/* Tabs */}
@@ -153,6 +220,193 @@ export default function SettingsPage() {
         </div>
 
         <div className="p-6">
+          {/* Organization Tab (admin only) */}
+          {activeTab === 'organization' && canManageOrg && (
+            <div className="space-y-8">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                  <Building2 className="h-5 w-5 text-png-red" />
+                  Organization Profile
+                </h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  These details form the header of every report, PDF, Excel export and printout.
+                </p>
+              </div>
+
+              {orgLoading ? (
+                <div className="flex items-center gap-2 text-slate-500 py-8">
+                  <Loader2 className="h-5 w-5 animate-spin" /> Loading organization details...
+                </div>
+              ) : (
+                <>
+                  {/* Live header preview */}
+                  <div className="rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="h-1 bg-gradient-to-r from-png-red via-png-gold to-png-red" />
+                    <div className="bg-png-red text-white px-5 py-4 text-center">
+                      {org.logo_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={org.logo_url} alt="" className="h-10 mx-auto mb-2 object-contain" />
+                      )}
+                      <p className="text-base font-bold tracking-wide uppercase">
+                        {org.name || 'Organization Name'}
+                      </p>
+                      {orgAddressLine(org) && (
+                        <p className="text-[11px] text-white/90 mt-0.5">{orgAddressLine(org)}</p>
+                      )}
+                      {orgContactLine(org) && (
+                        <p className="text-[11px] text-white/90">{orgContactLine(org)}</p>
+                      )}
+                    </div>
+                    <p className="text-center text-xs text-slate-400 py-1.5 bg-slate-50">
+                      Live report-header preview
+                    </p>
+                  </div>
+
+                  {/* Identity */}
+                  <section className="space-y-4">
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Identity</h4>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div className="sm:col-span-2">
+                        <OrgInput label="Organization Name *" value={org.name} onChange={(v) => updateOrg('name', v)} placeholder="National Judiciary Staff Services" icon={Building2} />
+                      </div>
+                      <OrgInput label="Short Name / Abbreviation" value={org.short_name} onChange={(v) => updateOrg('short_name', v)} placeholder="NJSS" />
+                      <OrgInput label="Tagline / Subtitle" value={org.subtitle} onChange={(v) => updateOrg('subtitle', v)} placeholder="Court Registry & Expense Monitoring System" />
+                    </div>
+                  </section>
+
+                  {/* Address */}
+                  <section className="space-y-4">
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5" /> Address
+                    </h4>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div className="sm:col-span-2">
+                        <OrgInput label="Address Line 1" value={org.address_line1} onChange={(v) => updateOrg('address_line1', v)} placeholder="P.O. Box 123 / Street address" />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <OrgInput label="Address Line 2" value={org.address_line2} onChange={(v) => updateOrg('address_line2', v)} placeholder="Building, floor, suite (optional)" />
+                      </div>
+                      <OrgInput label="City / Town" value={org.city} onChange={(v) => updateOrg('city', v)} placeholder="Port Moresby" />
+                      <OrgInput label="Province / Region" value={org.province} onChange={(v) => updateOrg('province', v)} placeholder="National Capital District" />
+                      <OrgInput label="Postal Code" value={org.postal_code} onChange={(v) => updateOrg('postal_code', v)} placeholder="111" />
+                      <OrgInput label="Country" value={org.country} onChange={(v) => updateOrg('country', v)} placeholder="Papua New Guinea" />
+                    </div>
+                  </section>
+
+                  {/* Contact */}
+                  <section className="space-y-4">
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <Phone className="h-3.5 w-3.5" /> Contact
+                    </h4>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <OrgInput label="Primary Phone" value={org.phone} onChange={(v) => updateOrg('phone', v)} placeholder="+675 000 0000" icon={Phone} type="tel" />
+                      <OrgInput label="Alternate Phone" value={org.phone_alt} onChange={(v) => updateOrg('phone_alt', v)} placeholder="+675 000 0001" icon={Phone} type="tel" />
+                      <OrgInput label="Email" value={org.email} onChange={(v) => updateOrg('email', v)} placeholder="info@njss.gov.pg" icon={Mail} type="email" />
+                      <OrgInput label="Website" value={org.website} onChange={(v) => updateOrg('website', v)} placeholder="www.njss.gov.pg" icon={Globe} />
+                    </div>
+                  </section>
+
+                  {/* Branding */}
+                  <section className="space-y-4">
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <ImagePlus className="h-3.5 w-3.5" /> Branding
+                    </h4>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Organization Logo</label>
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div className="h-20 w-20 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+                          {org.logo_url && !logoPreviewError ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={org.logo_url}
+                              alt="Logo preview"
+                              className="h-full w-full object-contain"
+                              onError={() => setFailedLogo(org.logo_url)}
+                            />
+                          ) : (
+                            <ImagePlus className="h-7 w-7 text-slate-300" />
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => logoInputRef.current?.click()}
+                              disabled={logoBusy}
+                              className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                              {org.logo_url ? 'Change logo' : 'Upload logo'}
+                            </button>
+                            {org.logo_url && (
+                              <button
+                                type="button"
+                                onClick={() => updateOrg('logo_url', '')}
+                                className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                              >
+                                <Trash2 className="h-4 w-4" /> Remove
+                              </button>
+                            )}
+                          </div>
+                          {logoPreviewError ? (
+                            <p className="text-xs text-red-600">
+                              Couldn&apos;t load an image from that link. Upload a file instead, or use a direct image URL ending in .png / .jpg (a website address won&apos;t work).
+                            </p>
+                          ) : (
+                            <p className="text-xs text-slate-500">
+                              PNG or JPG, up to 5MB. Uploading is recommended — it also embeds into PDFs.
+                            </p>
+                          )}
+                        </div>
+                        <input
+                          ref={logoInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleLogoFile(e.target.files?.[0])}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <OrgInput
+                        label="Or paste a direct image URL (.png / .jpg)"
+                        value={org.logo_url.startsWith('data:') ? '' : org.logo_url}
+                        onChange={(v) => updateOrg('logo_url', v)}
+                        placeholder="https://example.com/logo.png"
+                        icon={Globe}
+                      />
+                      <OrgInput label="Currency Code" value={org.currency} onChange={(v) => updateOrg('currency', v)} placeholder="PGK" />
+                    </div>
+                  </section>
+
+                  {/* Save */}
+                  <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={handleSaveOrg}
+                      disabled={orgSaving || !org.name.trim()}
+                      className="px-6 py-2.5 bg-png-red text-white rounded-lg font-medium hover:bg-png-maroon disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {orgSaving ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" /> Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4" /> Save Organization
+                        </>
+                      )}
+                    </button>
+                    <span className="text-xs text-slate-500">
+                      Applies to all users&apos; reports and downloads.
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Notifications Tab */}
           {activeTab === 'notifications' && (
             <div className="space-y-6">
@@ -534,6 +788,38 @@ function NotificationOption({
         <p className="text-sm text-slate-600">{description}</p>
       </div>
       <ToggleSwitch enabled={enabled} onChange={onChange} />
+    </div>
+  )
+}
+
+function OrgInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  icon: Icon,
+  type = 'text',
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  icon?: typeof Building2
+  type?: string
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
+      <div className="relative">
+        {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />}
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`w-full ${Icon ? 'pl-9' : 'pl-3'} pr-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-png-red`}
+        />
+      </div>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { getOrg, orgAddressLine, orgContactLine, getLogoForPdf } from './org'
 
 // Extend jsPDF type for autoTable
 declare module 'jspdf' {
@@ -41,35 +42,61 @@ function formatDate(dateStr: string | null): string {
   })
 }
 
-// Add header to PDF
+// Add header to PDF — branded with the configured organization profile.
 function addHeader(doc: jsPDF, title: string, subtitle: string) {
+  const org = getOrg()
   const pageWidth = doc.internal.pageSize.getWidth()
+  const addr = orgAddressLine(org)
+  const contact = orgContactLine(org)
 
-  // Header background
+  // Adaptive band: organization name (+ optional address / contact) then form title.
+  let bandH = 23
+  if (addr) bandH += 5
+  if (contact) bandH += 5
+
   doc.setFillColor(...COLORS.primary)
-  doc.rect(0, 0, pageWidth, 35, 'F')
+  doc.rect(0, 0, pageWidth, bandH, 'F')
 
-  // Title
+  // Organization logo (left side of the band), if one is configured & loaded.
+  const logo = getLogoForPdf()
+  if (logo && logo.h > 0 && logo.dataUrl) {
+    const drawH = Math.min(bandH - 6, 15)
+    const drawW = drawH * (logo.w / logo.h)
+    try {
+      doc.addImage(logo.dataUrl, 'PNG', 10, (bandH - drawH) / 2, drawW, drawH)
+    } catch {
+      /* logo not embeddable (e.g. cross-origin image without CORS) */
+    }
+  }
+
   doc.setTextColor(255, 255, 255)
+  let yy = 9
   doc.setFontSize(FONTS.title)
   doc.setFont('helvetica', 'bold')
-  doc.text('NATIONAL JUDICIARY STAFF SERVICES', pageWidth / 2, 12, { align: 'center' })
+  doc.text(org.name.toUpperCase(), pageWidth / 2, yy, { align: 'center' })
+  yy += 5
 
-  doc.setFontSize(FONTS.subtitle)
   doc.setFont('helvetica', 'normal')
-  doc.text(title, pageWidth / 2, 20, { align: 'center' })
+  doc.setFontSize(FONTS.small - 1.5)
+  if (addr) { doc.text(addr, pageWidth / 2, yy, { align: 'center' }); yy += 4.5 }
+  if (contact) { doc.text(contact, pageWidth / 2, yy, { align: 'center' }); yy += 4.5 }
+
+  doc.setFontSize(FONTS.heading)
+  doc.setFont('helvetica', 'bold')
+  doc.text(title, pageWidth / 2, yy + 1, { align: 'center' })
+  yy += 6
 
   doc.setFontSize(FONTS.small)
-  doc.text(subtitle, pageWidth / 2, 28, { align: 'center' })
+  doc.setFont('helvetica', 'normal')
+  doc.text(subtitle, pageWidth / 2, yy, { align: 'center' })
 
-  // Reset text color
   doc.setTextColor(0, 0, 0)
-
-  return 45 // Return Y position after header
+  return bandH + 10 // Y position after header
 }
 
 // Add footer to PDF
 function addFooter(doc: jsPDF, pageNumber: number) {
+  const org = getOrg()
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
 
@@ -83,7 +110,7 @@ function addFooter(doc: jsPDF, pageNumber: number) {
   // Footer text
   doc.text(`Generated on ${new Date().toLocaleString('en-GB')}`, 20, pageHeight - 12)
   doc.text(`Page ${pageNumber}`, pageWidth - 20, pageHeight - 12, { align: 'right' })
-  doc.text('NJSS FREMS - Financial Requisition & Expense Management System', pageWidth / 2, pageHeight - 12, { align: 'center' })
+  doc.text(org.name, pageWidth / 2, pageHeight - 12, { align: 'center' })
 
   doc.setTextColor(0, 0, 0)
 }
@@ -152,8 +179,11 @@ export type FF3PDFData = {
   }>
 }
 
-export function generateFF3PDF(data: FF3PDFData): jsPDF {
-  const doc = new jsPDF()
+export function generateFF3PDF(data: FF3PDFData, existingDoc?: jsPDF): jsPDF {
+  // When an existing document is passed (bulk export), append a new page and
+  // render this FF3 onto it; otherwise create a fresh single-form document.
+  const doc = existingDoc ?? new jsPDF()
+  if (existingDoc) doc.addPage()
   const pageWidth = doc.internal.pageSize.getWidth()
 
   // Header
@@ -369,8 +399,11 @@ export type FF4PDFData = {
   payment_date?: string
 }
 
-export function generateFF4PDF(data: FF4PDFData): jsPDF {
-  const doc = new jsPDF()
+export function generateFF4PDF(data: FF4PDFData, existingDoc?: jsPDF): jsPDF {
+  // When an existing document is passed (bulk export), append a new page and
+  // render this FF4 onto it; otherwise create a fresh single-form document.
+  const doc = existingDoc ?? new jsPDF()
+  if (existingDoc) doc.addPage()
   const pageWidth = doc.internal.pageSize.getWidth()
 
   // Header
