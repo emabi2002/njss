@@ -23,7 +23,7 @@ const DEMO_ACCOUNTS = [
 function LoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, isTestingFallback } = useAuth()
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -34,12 +34,13 @@ function LoginContent() {
 
   const redirectTo = searchParams.get('redirect') || '/dashboard'
 
-  // Redirect if already logged in
+  // Redirect if already logged in with a REAL session (ignore the testing-mode
+  // placeholder identity so the login page stays reachable to switch roles).
   useEffect(() => {
-    if (!authLoading && user) {
+    if (!authLoading && user && !isTestingFallback) {
       router.push(redirectTo)
     }
-  }, [user, authLoading, router, redirectTo])
+  }, [user, authLoading, isTestingFallback, router, redirectTo])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
