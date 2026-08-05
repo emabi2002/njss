@@ -15,6 +15,10 @@ export type Permission =
   | 'budget.view'
   | 'budget.confirm'
   | 'budget.release'
+  | 'budget.template'
+  | 'budget.template.submit'
+  | 'budget.template.review'
+  | 'budget.template.approve'
   | 'plans.create'
   | 'plans.submit'
   | 'plans.review'
@@ -47,12 +51,12 @@ export type RoleName = (typeof ROLES)[number]
 
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   'System Administrator': ['all'],
-  Registrar: ['dashboard.view', 'plans.review', 'plans.authorize', 'budget.view', 'reports.view', 'audit.view'],
-  Administrator: ['dashboard.view', 'masterdata.manage', 'registry.manage', 'plans.confirm', 'budget.view', 'budget.confirm', 'budget.release', 'consolidation.run', 'users.manage', 'reports.view'],
-  'Finance Manager': ['dashboard.view', 'ff3.approve', 'ff4.verify', 'ff4.process', 'budget.view', 'budget.release', 'reports.view'],
-  'Department Head': ['dashboard.view', 'plans.review', 'ff3.endorse', 'ff3.reject', 'reports.view'],
-  'Section Manager': ['dashboard.view', 'plans.create', 'plans.submit', 'ff3.create', 'ff4.create', 'budget.view'],
-  'Section Head': ['dashboard.view', 'plans.create', 'plans.submit', 'ff3.endorse'],
+  Registrar: ['dashboard.view', 'plans.review', 'plans.authorize', 'budget.view', 'budget.template', 'budget.template.review', 'budget.template.approve', 'reports.view', 'audit.view'],
+  Administrator: ['dashboard.view', 'masterdata.manage', 'registry.manage', 'plans.confirm', 'budget.view', 'budget.confirm', 'budget.release', 'budget.template', 'budget.template.review', 'budget.template.approve', 'consolidation.run', 'users.manage', 'reports.view'],
+  'Finance Manager': ['dashboard.view', 'ff3.approve', 'ff4.verify', 'ff4.process', 'budget.view', 'budget.release', 'budget.template', 'budget.template.review', 'budget.template.approve', 'reports.view'],
+  'Department Head': ['dashboard.view', 'plans.review', 'budget.template', 'budget.template.review', 'ff3.endorse', 'ff3.reject', 'reports.view'],
+  'Section Manager': ['dashboard.view', 'plans.create', 'plans.submit', 'budget.template', 'budget.template.submit', 'ff3.create', 'ff4.create', 'budget.view'],
+  'Section Head': ['dashboard.view', 'plans.create', 'plans.submit', 'budget.template', 'budget.template.submit', 'ff3.endorse'],
   Approver: ['dashboard.view', 'ff3.approve'],
   'Requisition Officer': ['dashboard.view', 'ff3.create', 'ff4.create'],
   Auditor: ['dashboard.view', 'audit.view', 'reports.view'],

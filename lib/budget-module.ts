@@ -198,7 +198,7 @@ export async function getSubmissionDetail(id: string) {
   return { submission: submission.data as BudgetSubmission, lines: lines.data as BudgetLine[], history: history.data as BudgetWorkflowHistory[] }
 }
 
-export async function createDraftSubmission(input: { cycle_id: string; budget_year: number; division_id: string; department_id?: string | null; cost_centre?: string | null; budget_ceiling?: number; prepared_by?: string | null }) {
+export async function createDraftSubmission(input: { cycle_id: string; budget_year: number; division_id: string; department_id?: string | null; cost_centre?: string | null; budget_ceiling?: number; submission_reference?: string | null; prepared_by?: string | null }) {
   const { data, error } = await supabase
     .from('divisional_budget_submissions')
     .insert({ ...input, status: 'DRAFT', validation_status: 'PENDING', date_prepared: new Date().toISOString().slice(0, 10) })
