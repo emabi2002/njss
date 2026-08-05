@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* PNG Judiciary brand palette — deep maroon (authority), antique gold (prestige), national red */
+  --color-png-maroon: #4c0f16;
+  --color-png-maroon-mid: #380a10;
+  --color-png-maroon-dark: #1d0608;
+  --color-png-red: #8a1420;
+  --color-png-gold: #d4af37;
+  --color-png-gold-soft: #e3c876;
+  --color-png-gold-strong: #9a7d1f;
+  --color-png-cream: #f3e9d8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Print: render the User Guide (and any dashboard page) as a clean document */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+  }
+  @page {
+    margin: 1.5cm;
+  }
+}
