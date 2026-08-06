@@ -1,11 +1,26 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { AlertCircle, CalendarDays, CheckCircle2, ClipboardList, FileSpreadsheet, Loader2, Plus, RefreshCw, Save, Send, ShieldCheck, Trash2, Undo2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  AlertCircle,
+  CheckCircle2,
+  ClipboardList,
+  Copy,
+  FileSpreadsheet,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Send,
+  ShieldCheck,
+  Trash2,
+  Undo2,
+} from "lucide-react"
 import {
   MONTHS,
-  annualEstimate,
-  allocationTotal,
+  createAuditEvent,
+  createBudgetDivision,
   createDraftSubmission,
   deleteBudgetLine,
   getBudgetDashboard,
@@ -13,6 +28,7 @@ import {
   getSubmissionDetail,
   saveBudgetLine,
   transitionSubmission,
+  updateSubmissionHeader,
   type BudgetCycle,
   type BudgetDivision,
   type BudgetLine,
@@ -21,19 +37,131 @@ import {
   type ExpenseLedger,
 } from "@/lib/budget-module"
 import { useAuth } from "@/contexts/AuthContext"
-import { exportToExcel, rowsToPdfTable, exportToPDF } from "@/lib/export"
+import { exportToExcel, exportToPDF, rowsToPdfTable } from "@/lib/export"
 
 type FundingSource = { id: string; code: string; name: string }
 type LookupState = { cycles: BudgetCycle[]; divisions: BudgetDivision[]; ledgers: ExpenseLedger[]; fundingSources: FundingSource[] }
 type CashflowRow = { budget_year: number; division_code: string; division_name: string; month_number: number; month_name: string; amount: number }
-type LineDraft = Partial<BudgetLine> & { line_number: number }
+type WorkflowRow = { action: string; from_status: string | null; to_status: string; comments: string | null; created_at: string; changed_by_email: string | null }
+
+type GridRow = {
+  clientId: string
+  id?: string
+  line_number: number
+  activity_reference: string
+  finance_code: string
+  expense_ledger_id: string
+  ledger_number: string
+  standard_description: string
+  budget_class: string
+  expense_category: string
+  line_item_description: string
+  business_justification: string
+  location_destination_provider: string
+  beneficiary_custodian_officer: string
+  start_date: string
+  end_date: string
+  quantity: number
+  unit_of_measure: string
+  unit_cost: number
+  frequency_periods: number
+  other_costs: number
+  months: number[]
+  priority: string
+  funding_source_id: string
+  procurement_method: string
+  responsible_officer: string
+  supporting_reference: string
+  comments: string
+}
 
 const emptyLookups: LookupState = { cycles: [], divisions: [], ledgers: [], fundingSources: [] }
-const money = (value: number) => `K ${Number(value || 0).toLocaleString()}`
-const newAllocations = (): BudgetMonthlyAllocation[] => MONTHS.map((month, index) => ({ month_number: index + 1, month_name: month, amount: 0 }))
+const money = (value: number) => `K ${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const clientId = () => `row-${Date.now()}-${Math.random().toString(36).slice(2)}`
+const blankMonths = () => Array.from({ length: 12 }, () => 0)
+const annualEstimate = (row: GridRow) => (Number(row.quantity) || 0) * (Number(row.unit_cost) || 0) * (Number(row.frequency_periods) || 0) + (Number(row.other_costs) || 0)
+const monthlyTotal = (row: GridRow) => row.months.reduce((sum, value) => sum + (Number(value) || 0), 0)
+const variance = (row: GridRow) => annualEstimate(row) - monthlyTotal(row)
+const isEmptyRow = (row: GridRow) => !row.expense_ledger_id && !row.line_item_description && !row.business_justification && annualEstimate(row) === 0 && monthlyTotal(row) === 0
+const hasMandatory = (row: GridRow) => Boolean(row.expense_ledger_id && row.line_item_description.trim() && row.business_justification.trim() && Number(row.quantity) > 0 && Number(row.unit_cost) >= 0 && Number(row.frequency_periods) > 0)
+const isValidLine = (row: GridRow) => !isEmptyRow(row) && hasMandatory(row) && Math.abs(variance(row)) < 0.01
+
+function newRow(lineNumber: number): GridRow {
+  return {
+    clientId: clientId(),
+    line_number: lineNumber,
+    activity_reference: "",
+    finance_code: "",
+    expense_ledger_id: "",
+    ledger_number: "",
+    standard_description: "",
+    budget_class: "",
+    expense_category: "",
+    line_item_description: "",
+    business_justification: "",
+    location_destination_provider: "",
+    beneficiary_custodian_officer: "",
+    start_date: "",
+    end_date: "",
+    quantity: 1,
+    unit_of_measure: "",
+    unit_cost: 0,
+    frequency_periods: 1,
+    other_costs: 0,
+    months: blankMonths(),
+    priority: "MEDIUM",
+    funding_source_id: "",
+    procurement_method: "",
+    responsible_officer: "",
+    supporting_reference: "",
+    comments: "",
+  }
+}
+
+function rowFromBudgetLine(line: BudgetLine): GridRow {
+  const months = blankMonths()
+  ;(line.allocations || []).forEach((allocation) => {
+    months[(allocation.month_number || 1) - 1] = Number(allocation.amount || 0)
+  })
+  return {
+    clientId: line.id,
+    id: line.id,
+    line_number: line.line_number,
+    activity_reference: line.activity_reference || "",
+    finance_code: line.ledger?.finance_code || "",
+    expense_ledger_id: line.expense_ledger_id || "",
+    ledger_number: line.ledger?.ledger_number || "",
+    standard_description: line.ledger?.standard_description || "",
+    budget_class: line.ledger?.budget_class || "",
+    expense_category: line.ledger?.expense_category || "",
+    line_item_description: line.line_item_description || "",
+    business_justification: line.business_justification || "",
+    location_destination_provider: line.location_destination_provider || "",
+    beneficiary_custodian_officer: line.beneficiary_custodian_officer || "",
+    start_date: line.start_date || "",
+    end_date: line.end_date || "",
+    quantity: Number(line.quantity || 0),
+    unit_of_measure: line.unit_of_measure || "",
+    unit_cost: Number(line.unit_cost || 0),
+    frequency_periods: Number(line.frequency_periods || 0),
+    other_costs: Number(line.other_costs || 0),
+    months,
+    priority: line.priority || "MEDIUM",
+    funding_source_id: line.funding_source_id || "",
+    procurement_method: line.procurement_method || "",
+    responsible_officer: line.responsible_officer || "",
+    supporting_reference: line.supporting_reference || "",
+    comments: line.comments || "",
+  }
+}
+
+function allocationsFor(row: GridRow): BudgetMonthlyAllocation[] {
+  return MONTHS.map((month, index) => ({ month_number: index + 1, month_name: month, amount: Number(row.months[index] || 0) }))
+}
 
 export default function BudgetTemplatePage() {
   const { profile, can } = useAuth()
+  const gridRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [lookups, setLookups] = useState<LookupState>(emptyLookups)
@@ -41,18 +169,48 @@ export default function BudgetTemplatePage() {
   const [cashflow, setCashflow] = useState<CashflowRow[]>([])
   const [selectedId, setSelectedId] = useState("")
   const [selected, setSelected] = useState<BudgetSubmission | null>(null)
-  const [lines, setLines] = useState<BudgetLine[]>([])
-  const [history, setHistory] = useState<{ action: string; from_status: string | null; to_status: string; comments: string | null; created_at: string; changed_by_email: string | null }[]>([])
+  const [gridRows, setGridRows] = useState<GridRow[]>([])
+  const [history, setHistory] = useState<WorkflowRow[]>([])
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null)
-
+  const [selectedRow, setSelectedRow] = useState("")
+  const [divisionSearch, setDivisionSearch] = useState("")
+  const [showAddDivision, setShowAddDivision] = useState(false)
+  const [newDivision, setNewDivision] = useState({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
   const [draftHeader, setDraftHeader] = useState({ cycle_id: "", division_id: "", budget_ceiling: "", submission_reference: "" })
-  const [lineDraft, setLineDraft] = useState<LineDraft>({ line_number: 1, quantity: 1, unit_cost: 0, frequency_periods: 1, other_costs: 0, priority: "MEDIUM" })
-  const [allocations, setAllocations] = useState<BudgetMonthlyAllocation[]>(newAllocations())
 
+  const canAdmin = can("masterdata.manage") || can("registry.manage") || can("users.manage") || can("budget.template.approve")
   const canEdit = can("budget.template") || can("budget.template.submit")
   const canReview = can("budget.template.review")
   const canApprove = can("budget.template.approve")
   const selectedLocked = selected?.is_locked || ["SUBMITTED", "RESUBMITTED", "REVIEWED", "APPROVED", "ARCHIVED"].includes(selected?.status || "")
+
+  const restrictedDivisionUser = !canAdmin && !canReview && !canApprove
+  const profileDepartment = profile?.department || ""
+  const assignedDivisions = useMemo(() => {
+    if (!restrictedDivisionUser || !profileDepartment) return lookups.divisions
+    const needle = profileDepartment.toLowerCase()
+    const matches = lookups.divisions.filter((division) =>
+      [division.name, division.code, division.cost_centre_name, division.cost_centre_code].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle))
+    )
+    return matches.length > 0 ? matches : lookups.divisions
+  }, [lookups.divisions, profileDepartment, restrictedDivisionUser])
+
+  const filteredDivisions = useMemo(() => {
+    const needle = divisionSearch.toLowerCase().trim()
+    return assignedDivisions.filter((division) => {
+      const label = `${division.code} ${division.name} ${division.cost_centre_code || ""} ${division.cost_centre_name || ""}`.toLowerCase()
+      return !needle || label.includes(needle)
+    })
+  }, [assignedDivisions, divisionSearch])
+
+  const selectedCycle = lookups.cycles.find((cycle) => cycle.id === draftHeader.cycle_id)
+  const selectedDivision = lookups.divisions.find((division) => division.id === draftHeader.division_id)
+  const totalProposed = gridRows.filter((row) => !isEmptyRow(row)).reduce((sum, row) => sum + annualEstimate(row), 0)
+  const totalMonthly = gridRows.filter((row) => !isEmptyRow(row)).reduce((sum, row) => sum + monthlyTotal(row), 0)
+  const totalVariance = totalProposed - totalMonthly
+  const hasVariance = gridRows.some((row) => !isEmptyRow(row) && Math.abs(variance(row)) >= 0.01)
+  const invalidLineCount = gridRows.filter((row) => !isEmptyRow(row) && !hasMandatory(row)).length
+  const validationLabel = gridRows.some((row) => !isEmptyRow(row)) && !hasVariance && invalidLineCount === 0 ? "VALID" : "CHECK VARIANCES"
 
   const loadDashboard = useCallback(async () => {
     setLoading(true)
@@ -65,7 +223,6 @@ export default function BudgetTemplatePage() {
         setDraftHeader((h) => ({ ...h, cycle_id: lookupData.cycles[0].id, budget_ceiling: String(lookupData.cycles[0].department_ceiling || "") }))
       }
     } catch (err) {
-      console.error(err)
       setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not load the budget template workspace." })
     } finally {
       setLoading(false)
@@ -74,20 +231,18 @@ export default function BudgetTemplatePage() {
 
   const loadSubmission = useCallback(async (id: string) => {
     if (!id) {
-      setSelected(null); setLines([]); setHistory([])
+      setSelected(null); setGridRows([]); setHistory([])
       return
     }
     setLoading(true)
     try {
       const detail = await getSubmissionDetail(id)
       setSelected(detail.submission)
-      setLines(detail.lines || [])
+      const rows = (detail.lines || []).map(rowFromBudgetLine)
+      setGridRows(rows.length > 0 ? rows : [newRow(1)])
       setHistory(detail.history || [])
-      const nextLine = (detail.lines || []).reduce((max, line) => Math.max(max, line.line_number || 0), 0) + 1
-      setLineDraft({ line_number: nextLine, quantity: 1, unit_cost: 0, frequency_periods: 1, other_costs: 0, priority: "MEDIUM" })
-      setAllocations(newAllocations())
+      setSelectedRow(rows[0]?.clientId || "")
     } catch (err) {
-      console.error(err)
       setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not load the selected submission." })
     } finally {
       setLoading(false)
@@ -104,31 +259,30 @@ export default function BudgetTemplatePage() {
     loadSubmission(selectedId)
   }, [selectedId, loadSubmission])
 
-  const selectedCycle = lookups.cycles.find((cycle) => cycle.id === draftHeader.cycle_id)
-  const selectedDivision = lookups.divisions.find((division) => division.id === draftHeader.division_id)
-  const lineEstimate = annualEstimate({
-    quantity: Number(lineDraft.quantity || 0),
-    unit_cost: Number(lineDraft.unit_cost || 0),
-    frequency_periods: Number(lineDraft.frequency_periods || 0),
-    other_costs: Number(lineDraft.other_costs || 0),
-  })
-  const monthlyTotal = allocationTotal(allocations)
-  const monthlyVariance = lineEstimate - monthlyTotal
+  const updateRow = (clientIdValue: string, patch: Partial<GridRow>) => {
+    setGridRows((rows) => rows.map((row) => row.clientId === clientIdValue ? { ...row, ...patch } : row))
+  }
 
-  const totalsByStatus = useMemo(() => {
-    return submissions.reduce<Record<string, number>>((acc, submission) => {
-      acc[submission.status] = (acc[submission.status] || 0) + 1
-      return acc
-    }, {})
-  }, [submissions])
-
-  const cashflowChart = useMemo(() => {
-    const activeYear = selected?.budget_year || selectedCycle?.budget_year || 2025
-    return MONTHS.map((month, index) => ({
-      month: month.slice(0, 3),
-      amount: cashflow.filter((row) => row.budget_year === activeYear && row.month_number === index + 1).reduce((sum, row) => sum + (row.amount || 0), 0),
+  const updateMonth = (clientIdValue: string, index: number, value: number) => {
+    setGridRows((rows) => rows.map((row) => {
+      if (row.clientId !== clientIdValue) return row
+      const months = [...row.months]
+      months[index] = Number(value || 0)
+      return { ...row, months }
     }))
-  }, [cashflow, selected?.budget_year, selectedCycle?.budget_year])
+  }
+
+  const selectFinanceCode = (clientIdValue: string, value: string) => {
+    const ledger = lookups.ledgers.find((item) => item.finance_code === value || item.id === value)
+    updateRow(clientIdValue, ledger ? {
+      finance_code: ledger.finance_code,
+      expense_ledger_id: ledger.id,
+      ledger_number: ledger.ledger_number || "",
+      standard_description: ledger.standard_description || "",
+      budget_class: ledger.budget_class || "",
+      expense_category: ledger.expense_category || "",
+    } : { finance_code: value, expense_ledger_id: "", ledger_number: "", standard_description: "", budget_class: "", expense_category: "" })
+  }
 
   const createSubmission = async () => {
     setMessage(null)
@@ -148,6 +302,7 @@ export default function BudgetTemplatePage() {
         submission_reference: draftHeader.submission_reference || null,
         prepared_by: profile?.id || null,
       })
+      await createAuditEvent({ action: "CREATE", entity_type: "BUDGET_SUBMISSION", entity_id: id, entity_reference: draftHeader.submission_reference || null, user_email: profile?.email || null, user_name: profile?.name || null })
       setSelectedId(id)
       setMessage({ type: "ok", text: "Draft divisional budget template created." })
       await loadDashboard()
@@ -158,47 +313,95 @@ export default function BudgetTemplatePage() {
     }
   }
 
-  const resetLineDraft = () => {
-    const nextLine = lines.reduce((max, line) => Math.max(max, line.line_number || 0), 0) + 1
-    setLineDraft({ line_number: nextLine, quantity: 1, unit_cost: 0, frequency_periods: 1, other_costs: 0, priority: "MEDIUM" })
-    setAllocations(newAllocations())
-  }
-
-  const saveLine = async () => {
-    if (!selected) return
-    setMessage(null)
-    if (!lineDraft.expense_ledger_id || !lineDraft.line_item_description || !lineDraft.business_justification) {
-      setMessage({ type: "err", text: "Finance code, line-item description and business justification are required." })
-      return
-    }
-    if (Math.abs(monthlyVariance) > 0.009) {
-      setMessage({ type: "err", text: "Monthly allocation must equal the annual estimate before saving." })
-      return
-    }
+  const addDivision = async () => {
+    if (!canAdmin || !newDivision.code.trim() || !newDivision.name.trim()) return
     setSaving(true)
     try {
-      await saveBudgetLine(selected.id, lineDraft, allocations)
-      await loadSubmission(selected.id)
+      const created = await createBudgetDivision({
+        code: newDivision.code.trim().toUpperCase(),
+        name: newDivision.name.trim(),
+        cost_centre_code: newDivision.cost_centre_code.trim() || newDivision.code.trim().toUpperCase(),
+        cost_centre_name: newDivision.cost_centre_name.trim() || `${newDivision.name.trim()} Cost Centre`,
+      })
+      setDraftHeader((h) => ({ ...h, division_id: created.id }))
+      setDivisionSearch(`${created.code} — ${created.name}`)
+      setNewDivision({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
+      setShowAddDivision(false)
       await loadDashboard()
-      resetLineDraft()
-      setMessage({ type: "ok", text: "Budget line saved with its monthly allocation." })
+      setMessage({ type: "ok", text: "Division added to the controlled division register." })
     } catch (err) {
-      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not save the budget line." })
+      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not add division." })
     } finally {
       setSaving(false)
     }
   }
 
-  const removeLine = async (lineId: string) => {
-    if (!selected || !confirm("Delete this budget line?")) return
+  const addRow = () => {
+    setGridRows((rows) => [...rows, newRow(rows.length + 1)])
+  }
+
+  const duplicateRow = () => {
+    const source = gridRows.find((row) => row.clientId === selectedRow)
+    if (!source) return
+    setGridRows((rows) => [...rows, { ...source, id: undefined, clientId: clientId(), line_number: rows.length + 1 }])
+  }
+
+  const removeSelectedRow = async () => {
+    const row = gridRows.find((item) => item.clientId === selectedRow)
+    if (!row) return
+    if (row.id && selected && !confirm("Delete this saved budget line?")) return
     setSaving(true)
     try {
-      await deleteBudgetLine(lineId)
+      if (row.id) {
+        await deleteBudgetLine(row.id)
+        await createAuditEvent({ action: "DELETE", entity_type: "BUDGET_LINE", entity_id: row.id, entity_reference: selected?.submission_number || null, user_email: profile?.email || null, user_name: profile?.name || null })
+      }
+      setGridRows((rows) => rows.filter((item) => item.clientId !== selectedRow).map((item, index) => ({ ...item, line_number: index + 1 })))
+      setSelectedRow("")
+      if (selected) await loadSubmission(selected.id)
+      await loadDashboard()
+    } catch (err) {
+      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not delete the row." })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const allocateEvenly = () => {
+    const row = gridRows.find((item) => item.clientId === selectedRow)
+    if (!row) return
+    const estimate = annualEstimate(row)
+    const perMonth = Math.floor((estimate / 12) * 100) / 100
+    const months = Array.from({ length: 12 }, () => perMonth)
+    months[11] = Number((months[11] + (estimate - months.reduce((sum, value) => sum + value, 0))).toFixed(2))
+    updateRow(row.clientId, { months })
+  }
+
+  const saveGridDraft = async () => {
+    if (!selected) return false
+    const rowsToSave = gridRows.filter((row) => !isEmptyRow(row))
+    const invalidRows = rowsToSave.filter((row) => !hasMandatory(row))
+    if (invalidRows.length > 0) {
+      setMessage({ type: "err", text: `Complete mandatory fields before saving. ${invalidRows.length} row(s) need attention.` })
+      return false
+    }
+    setSaving(true)
+    try {
+      await updateSubmissionHeader(selected.id, {
+        submission_reference: selected.submission_reference || null,
+        budget_ceiling: selected.budget_ceiling || 0,
+      })
+      for (const [index, row] of rowsToSave.entries()) {
+        await saveBudgetLine(selected.id, { ...row, line_number: index + 1 }, allocationsFor(row))
+      }
+      await createAuditEvent({ action: "SAVE_DRAFT_GRID", entity_type: "BUDGET_SUBMISSION", entity_id: selected.id, entity_reference: selected.submission_number, changes: { rows: rowsToSave.length, totalProposed, totalMonthly, totalVariance }, user_email: profile?.email || null, user_name: profile?.name || null })
       await loadSubmission(selected.id)
       await loadDashboard()
-      setMessage({ type: "ok", text: "Budget line deleted." })
+      setMessage({ type: "ok", text: "Spreadsheet draft saved." })
+      return true
     } catch (err) {
-      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not delete the line." })
+      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not save the spreadsheet draft." })
+      return false
     } finally {
       setSaving(false)
     }
@@ -206,10 +409,24 @@ export default function BudgetTemplatePage() {
 
   const runAction = async (action: "SUBMIT" | "RESUBMIT" | "RETURN" | "REVIEW" | "APPROVE" | "REJECT") => {
     if (!selected) return
+    const filledRows = gridRows.filter((row) => !isEmptyRow(row))
+    if (["SUBMIT", "RESUBMIT"].includes(action)) {
+      if (filledRows.length === 0) {
+        setMessage({ type: "err", text: "Add at least one valid budget line before submission." })
+        return
+      }
+      if (filledRows.some((row) => !isValidLine(row))) {
+        setMessage({ type: "err", text: "Submission blocked. Resolve missing fields and zero all monthly variances first." })
+        return
+      }
+      const saved = await saveGridDraft()
+      if (!saved) return
+    }
     const comments = action === "RETURN" || action === "REJECT" ? window.prompt("Comments / reason:") || "" : ""
     setSaving(true)
     try {
       await transitionSubmission(selected.id, action, comments, profile?.email || "")
+      await createAuditEvent({ action, entity_type: "BUDGET_SUBMISSION", entity_id: selected.id, entity_reference: selected.submission_number, changes: { comments }, user_email: profile?.email || null, user_name: profile?.name || null })
       await loadSubmission(selected.id)
       await loadDashboard()
       setMessage({ type: "ok", text: `Budget submission ${action.toLowerCase()} action completed.` })
@@ -220,34 +437,72 @@ export default function BudgetTemplatePage() {
     }
   }
 
-  const spreadEvenly = () => {
-    const perMonth = Math.floor((lineEstimate / 12) * 100) / 100
-    const next = newAllocations().map((month) => ({ ...month, amount: perMonth }))
-    const diff = lineEstimate - allocationTotal(next)
-    next[11].amount = Number((next[11].amount + diff).toFixed(2))
-    setAllocations(next)
+  const handleGridKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter") return
+    const inputs = Array.from(gridRef.current?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input,select,textarea") || [])
+    const current = event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    const index = inputs.indexOf(current)
+    if (index >= 0 && inputs[index + 1]) {
+      event.preventDefault()
+      inputs[index + 1].focus()
+    }
+  }
+
+  const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    if (selectedLocked) return
+    const text = event.clipboardData.getData("text")
+    if (!text.includes("\t") && !text.includes("\n")) return
+    event.preventDefault()
+    const rows = text.trim().split(/\r?\n/).map((line) => line.split("\t"))
+    if (rows.length === 0) return
+    setGridRows((existing) => {
+      const startIndex = Math.max(0, existing.findIndex((row) => row.clientId === selectedRow))
+      const next = [...existing]
+      rows.forEach((cols, offset) => {
+        const row = next[startIndex + offset] || newRow(next.length + 1)
+        const financeCode = cols[2]?.trim() || row.finance_code
+        const ledger = lookups.ledgers.find((item) => item.finance_code === financeCode)
+        const months = blankMonths().map((_, index) => Number(cols[19 + index] || row.months[index] || 0))
+        next[startIndex + offset] = {
+          ...row,
+          activity_reference: cols[1] || row.activity_reference,
+          finance_code: financeCode,
+          expense_ledger_id: ledger?.id || row.expense_ledger_id,
+          ledger_number: ledger?.ledger_number || row.ledger_number,
+          standard_description: ledger?.standard_description || row.standard_description,
+          budget_class: ledger?.budget_class || row.budget_class,
+          expense_category: ledger?.expense_category || row.expense_category,
+          line_item_description: cols[7] || row.line_item_description,
+          business_justification: cols[8] || row.business_justification,
+          location_destination_provider: cols[9] || row.location_destination_provider,
+          beneficiary_custodian_officer: cols[10] || row.beneficiary_custodian_officer,
+          start_date: cols[11] || row.start_date,
+          end_date: cols[12] || row.end_date,
+          quantity: Number(cols[13] || row.quantity || 0),
+          unit_of_measure: cols[14] || row.unit_of_measure,
+          unit_cost: Number(cols[15] || row.unit_cost || 0),
+          frequency_periods: Number(cols[16] || row.frequency_periods || 0),
+          other_costs: Number(cols[17] || row.other_costs || 0),
+          months,
+          priority: cols[33] || row.priority,
+          funding_source_id: lookups.fundingSources.find((source) => source.code === cols[34] || source.name === cols[34])?.id || row.funding_source_id,
+          procurement_method: cols[35] || row.procurement_method,
+          responsible_officer: cols[36] || row.responsible_officer,
+          supporting_reference: cols[37] || row.supporting_reference,
+          comments: cols[38] || row.comments,
+        }
+      })
+      return next.map((row, index) => ({ ...row, line_number: index + 1 }))
+    })
+    setMessage({ type: "ok", text: `${rows.length} pasted row(s) loaded into the grid. Review highlighted cells before saving.` })
   }
 
   const exportTemplate = (format: "excel" | "pdf") => {
-    if (!selected || lines.length === 0) return
-    const records = lines.map((line) => {
-      const months = Object.fromEntries(MONTHS.map((month, index) => [month.slice(0, 3), line.allocations?.find((a) => a.month_number === index + 1)?.amount || 0]))
-      return {
-        "Line #": line.line_number,
-        "Finance Code": line.ledger?.finance_code || "-",
-        Description: line.line_item_description,
-        Justification: line.business_justification,
-        Quantity: line.quantity || 0,
-        Unit: line.unit_of_measure || "-",
-        "Unit Cost": line.unit_cost || 0,
-        Frequency: line.frequency_periods || 0,
-        "Other Costs": line.other_costs || 0,
-        "Annual Estimate": line.annual_estimate || 0,
-        ...months,
-      }
-    })
+    if (!selected) return
+    const records = gridRows.filter((row) => !isEmptyRow(row)).map((row) => exportRecord(row))
+    if (records.length === 0) return
     const filename = `${selected.submission_number || "budget_template"}_${new Date().toISOString().split("T")[0]}`
-    const title = `Standard Divisional Budget Template — ${selected.division?.name || "Division"}`
+    const title = `NJSS Standard Divisional Budget Template — ${selected.division?.name || "Division"}`
     const subtitle = `FY${selected.budget_year} • ${selected.status}`
     if (format === "excel") exportToExcel(filename, records, { title, subtitle, sheetName: "Budget Template" })
     else {
@@ -256,20 +511,85 @@ export default function BudgetTemplatePage() {
     }
   }
 
+  const exportRecord = (row: GridRow) => {
+    const months = Object.fromEntries(MONTHS.map((month, index) => [month, row.months[index] || 0]))
+    return {
+      "Line No.": row.line_number,
+      "Activity Ref.": row.activity_reference,
+      "Finance Code": row.finance_code,
+      "Ledger No.": row.ledger_number,
+      "Expense Description": row.standard_description,
+      "Budget Class": row.budget_class,
+      "Expense Category": row.expense_category,
+      "Line Item / Activity Description": row.line_item_description,
+      "Business Justification / Expected Output": row.business_justification,
+      "Location / Destination / Provider": row.location_destination_provider,
+      "Beneficiary / Custodian / Officer": row.beneficiary_custodian_officer,
+      "Start Date": row.start_date,
+      "End Date": row.end_date,
+      Quantity: row.quantity,
+      Unit: row.unit_of_measure,
+      "Unit Cost (K)": row.unit_cost,
+      "Frequency / Periods": row.frequency_periods,
+      "Other Costs (K)": row.other_costs,
+      "Calculated Estimate (K)": annualEstimate(row),
+      ...months,
+      "Monthly Allocation Total": monthlyTotal(row),
+      "Variance (K)": variance(row),
+      Priority: row.priority,
+      "Funding Source": lookups.fundingSources.find((source) => source.id === row.funding_source_id)?.code || "",
+      "Procurement Method": row.procurement_method,
+      "Responsible Officer": row.responsible_officer,
+      "Supporting Reference": row.supporting_reference,
+      Comments: row.comments,
+    }
+  }
+
+  const cashflowChart = useMemo(() => {
+    const activeYear = selected?.budget_year || selectedCycle?.budget_year || 2026
+    return MONTHS.map((month, index) => ({
+      month: month.slice(0, 3),
+      amount: cashflow.filter((row) => row.budget_year === activeYear && row.month_number === index + 1).reduce((sum, row) => sum + (row.amount || 0), 0),
+    }))
+  }, [cashflow, selected?.budget_year, selectedCycle?.budget_year])
+
   return (
-    <div className="space-y-6">
-      <div className="relative overflow-hidden rounded-2xl border border-png-gold/40 bg-gradient-to-br from-png-maroon via-png-red to-png-maroon-dark p-6 text-white shadow-lg">
-        <div className="absolute right-0 top-0 h-full w-1/3 bg-[radial-gradient(circle_at_top_right,rgba(212,175,55,0.35),transparent_55%)]" />
-        <div className="relative flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-png-gold-soft">NJSS Budget Preparation</p>
-            <h1 className="mt-2 text-3xl font-bold">Standard Divisional Budget Template</h1>
-            <p className="mt-2 max-w-3xl text-sm text-white/80">Prepare activity-based budget submissions by finance code, justify every line item, allocate the annual estimate across all twelve months, then submit for review and approval.</p>
+    <div className="space-y-5">
+      <div className="sticky top-[57px] z-20 overflow-hidden rounded-xl border border-[#1f4e79] bg-white shadow-sm">
+        <div className="bg-[#1f4e79] px-5 py-3 text-white">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-blue-100">NJSS Standard Divisional Budget Template</p>
+              <h1 className="text-xl font-bold">Excel-style budget entry sheet</h1>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={loadDashboard} className="sheet-action"><RefreshCw className="h-4 w-4" /> Refresh</button>
+              {selected && <button onClick={() => exportTemplate("excel")} className="sheet-action"><FileSpreadsheet className="h-4 w-4" /> Excel</button>}
+              {selected && <button onClick={() => exportTemplate("pdf")} className="sheet-action"><FileSpreadsheet className="h-4 w-4" /> PDF</button>}
+            </div>
           </div>
-          <button onClick={loadDashboard} className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium hover:bg-white/20 flex items-center gap-2">
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </button>
         </div>
+
+        {selected ? (
+          <div className="grid gap-px bg-[#9fbad0] p-px text-xs md:grid-cols-4 xl:grid-cols-7">
+            <HeaderCell label="Budget Year / Cycle" value={`${selected.budget_year} / ${selected.cycle?.name || "-"}`} />
+            <HeaderCell label="Department" value={selected.division?.name || "-"} />
+            <HeaderCell label="Division" value={`${selected.division?.code || "-"} — ${selected.division?.name || "-"}`} />
+            <HeaderCell label="Cost Centre" value={selected.division?.cost_centre_code || selected.division?.cost_centre_name || "-"} />
+            <HeaderCell label="Prepared By" value={profile?.name || "-"} />
+            <HeaderCell label="Date Prepared" value={selected.date_prepared ? new Date(selected.date_prepared).toLocaleDateString("en-GB") : "-"} />
+            <HeaderCell label="Submission Reference" value={selected.submission_reference || "-"} />
+            <HeaderCell label="Version" value={String(selected.version || 1)} />
+            <HeaderCell label="Budget Ceiling" value={money(selected.budget_ceiling || 0)} />
+            <HeaderCell label="Total Proposed Budget" value={money(totalProposed)} strong />
+            <HeaderCell label="Monthly Allocation Total" value={money(totalMonthly)} strong />
+            <HeaderCell label="Unallocated / Variance" value={money(totalVariance)} alert={Math.abs(totalVariance) >= 0.01} />
+            <HeaderCell label="Status" value={selected.status} />
+            <HeaderCell label="Validation Status" value={validationLabel} alert={validationLabel !== "VALID"} />
+          </div>
+        ) : (
+          <div className="p-4 text-sm text-slate-600">Create or select a draft to open the spreadsheet.</div>
+        )}
       </div>
 
       {message && (
@@ -278,18 +598,13 @@ export default function BudgetTemplatePage() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Metric label="Drafts" value={totalsByStatus.DRAFT || 0} tone="slate" />
-        <Metric label="Submitted" value={(totalsByStatus.SUBMITTED || 0) + (totalsByStatus.RESUBMITTED || 0)} tone="gold" />
-        <Metric label="Reviewed" value={totalsByStatus.REVIEWED || 0} tone="maroon" />
-        <Metric label="Approved" value={totalsByStatus.APPROVED || 0} tone="green" />
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
-        <div className="space-y-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="font-semibold text-slate-900 flex items-center gap-2"><Plus className="h-4 w-4 text-png-red" /> New template</h2>
-            <div className="mt-4 space-y-3">
+      <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
+        <aside className="space-y-5">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+              <h2 className="font-semibold text-slate-900 flex items-center gap-2"><Plus className="h-4 w-4 text-[#1f4e79]" /> Create draft sheet</h2>
+            </div>
+            <div className="space-y-3 p-4">
               <Field label="Budget cycle">
                 <select value={draftHeader.cycle_id} onChange={(e) => setDraftHeader((h) => ({ ...h, cycle_id: e.target.value }))} className="input">
                   <option value="">Select cycle</option>
@@ -297,171 +612,207 @@ export default function BudgetTemplatePage() {
                 </select>
               </Field>
               <Field label="Division / cost centre">
-                <select value={draftHeader.division_id} onChange={(e) => setDraftHeader((h) => ({ ...h, division_id: e.target.value }))} className="input">
-                  <option value="">Select division</option>
-                  {lookups.divisions.map((division) => <option key={division.id} value={division.id}>{division.code} — {division.name}</option>)}
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
+                  <input value={divisionSearch} onChange={(e) => setDivisionSearch(e.target.value)} className="input pl-8" placeholder="Search division" />
+                </div>
+                <select value={draftHeader.division_id} onChange={(e) => setDraftHeader((h) => ({ ...h, division_id: e.target.value }))} className="input mt-2">
+                  <option value="">Select active division</option>
+                  {filteredDivisions.map((division) => <option key={division.id} value={division.id}>{division.code} — {division.name} — {division.cost_centre_code || division.cost_centre_name || "No cost centre"}</option>)}
                 </select>
+                {restrictedDivisionUser && <p className="mt-1 text-[11px] text-slate-500">Division list is restricted by your assigned profile where possible.</p>}
               </Field>
-              <Field label="Budget ceiling">
-                <input value={draftHeader.budget_ceiling} onChange={(e) => setDraftHeader((h) => ({ ...h, budget_ceiling: e.target.value }))} type="number" className="input text-right" placeholder="0.00" />
-              </Field>
-              <Field label="Internal reference">
-                <input value={draftHeader.submission_reference} onChange={(e) => setDraftHeader((h) => ({ ...h, submission_reference: e.target.value }))} className="input" placeholder="Optional reference / circular number" />
-              </Field>
-              <button onClick={createSubmission} disabled={saving || !canEdit} className="w-full rounded-lg bg-png-red px-4 py-2.5 text-sm font-semibold text-white hover:bg-png-maroon disabled:opacity-50 flex items-center justify-center gap-2">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />} Create Draft Template
-              </button>
+              {canAdmin && (
+                <div>
+                  <button type="button" onClick={() => setShowAddDivision((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">+ Add Division</button>
+                  {showAddDivision && <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3"><input className="input" placeholder="Division code" value={newDivision.code} onChange={(e) => setNewDivision((d) => ({ ...d, code: e.target.value }))} /><input className="input" placeholder="Division name" value={newDivision.name} onChange={(e) => setNewDivision((d) => ({ ...d, name: e.target.value }))} /><input className="input" placeholder="Cost centre code" value={newDivision.cost_centre_code} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_code: e.target.value }))} /><input className="input" placeholder="Cost centre name" value={newDivision.cost_centre_name} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_name: e.target.value }))} /><button type="button" onClick={addDivision} className="btn-primary w-full justify-center">Create controlled division</button></div>}
+                </div>
+              )}
+              <Field label="Budget ceiling"><input value={draftHeader.budget_ceiling} onChange={(e) => setDraftHeader((h) => ({ ...h, budget_ceiling: e.target.value }))} type="number" className="input text-right" /></Field>
+              <Field label="Submission reference"><input value={draftHeader.submission_reference} onChange={(e) => setDraftHeader((h) => ({ ...h, submission_reference: e.target.value }))} className="input" /></Field>
+              <button onClick={createSubmission} disabled={saving || !canEdit} className="btn-primary w-full justify-center"><ClipboardList className="h-4 w-4" /> Create Draft</button>
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h2 className="font-semibold text-slate-900">Submissions</h2>
-            </div>
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3"><h2 className="font-semibold text-slate-900">Submissions</h2></div>
             <div className="max-h-[520px] overflow-y-auto divide-y divide-slate-100">
-              {submissions.length === 0 ? <Empty message="No divisional budget templates yet." /> : submissions.map((submission) => (
-                <button key={submission.id} onClick={() => setSelectedId(submission.id)} className={`w-full p-4 text-left hover:bg-slate-50 ${selectedId === submission.id ? "bg-png-red/5" : ""}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-slate-900">{submission.submission_number || "Draft"}</span>
-                    <StatusBadge status={submission.status} />
-                  </div>
+              {submissions.length === 0 ? <Empty message="No budget templates yet." /> : submissions.map((submission) => (
+                <button key={submission.id} onClick={() => setSelectedId(submission.id)} className={`w-full p-4 text-left hover:bg-blue-50 ${selectedId === submission.id ? "bg-blue-50" : ""}`}>
+                  <div className="flex items-center justify-between gap-2"><span className="font-semibold text-slate-900">{submission.submission_number || "Draft"}</span><StatusBadge status={submission.status} /></div>
                   <p className="mt-1 text-sm text-slate-600">{submission.division?.code} — {submission.division?.name}</p>
-                  <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                    <span>FY{submission.budget_year}</span>
-                    <span>{money(submission.total_proposed_budget || 0)}</span>
-                  </div>
+                  <div className="mt-2 flex items-center justify-between text-xs text-slate-500"><span>FY{submission.budget_year}</span><span>{money(submission.total_proposed_budget || 0)}</span></div>
                 </button>
               ))}
             </div>
           </div>
-        </div>
+        </aside>
 
-        <div className="space-y-6">
+        <main className="space-y-5 min-w-0">
           {!selected ? (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Select or create a divisional budget template to start editing.</div>
+            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Select or create a divisional budget sheet to begin.</div>
           ) : (
             <>
-              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-bold text-slate-900">{selected.submission_number}</h2>
-                      <StatusBadge status={selected.status} />
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${selected.validation_status === "VALID" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>{selected.validation_status}</span>
-                    </div>
-                    <p className="mt-1 text-sm text-slate-600">{selected.division?.code} — {selected.division?.name} • FY{selected.budget_year}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => exportTemplate("excel")} className="btn-light"><FileSpreadsheet className="h-4 w-4" /> Excel</button>
-                    <button onClick={() => exportTemplate("pdf")} className="btn-light"><FileSpreadsheet className="h-4 w-4" /> PDF</button>
-                    {selected.status === "DRAFT" || selected.status === "RETURNED" ? <button onClick={() => runAction(selected.status === "RETURNED" ? "RESUBMIT" : "SUBMIT")} disabled={saving} className="btn-primary"><Send className="h-4 w-4" /> Submit</button> : null}
-                    {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && <button onClick={() => runAction("REVIEW")} disabled={saving} className="btn-primary"><ShieldCheck className="h-4 w-4" /> Mark Reviewed</button>}
-                    {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && <button onClick={() => runAction("RETURN")} disabled={saving} className="btn-light"><Undo2 className="h-4 w-4" /> Return</button>}
-                    {canApprove && selected.status === "REVIEWED" && <button onClick={() => runAction("APPROVE")} disabled={saving} className="btn-primary"><CheckCircle2 className="h-4 w-4" /> Approve</button>}
-                  </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={addRow} disabled={selectedLocked} className="btn-light"><Plus className="h-4 w-4" /> Add Row</button>
+                  <button onClick={duplicateRow} disabled={selectedLocked || !selectedRow} className="btn-light"><Copy className="h-4 w-4" /> Duplicate Row</button>
+                  <button onClick={removeSelectedRow} disabled={selectedLocked || !selectedRow} className="btn-light text-red-700"><Trash2 className="h-4 w-4" /> Delete Row</button>
+                  <button onClick={allocateEvenly} disabled={selectedLocked || !selectedRow} className="btn-light">Allocate Evenly</button>
                 </div>
-                <div className="mt-5 grid gap-3 md:grid-cols-4">
-                  <Metric label="Ceiling" value={money(selected.budget_ceiling || 0)} tone="slate" compact />
-                  <Metric label="Annual estimate" value={money(selected.total_proposed_budget || 0)} tone="maroon" compact />
-                  <Metric label="Monthly allocation" value={money(selected.total_monthly_allocation || 0)} tone="gold" compact />
-                  <Metric label="Variance" value={money(selected.unallocated_variance || 0)} tone={Math.abs(selected.unallocated_variance || 0) < 0.01 ? "green" : "red"} compact />
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={saveGridDraft} disabled={saving || selectedLocked} className="btn-primary"><Save className="h-4 w-4" /> Save Draft</button>
+                  {(selected.status === "DRAFT" || selected.status === "RETURNED") && <button onClick={() => runAction(selected.status === "RETURNED" ? "RESUBMIT" : "SUBMIT")} disabled={saving} className="btn-primary"><Send className="h-4 w-4" /> Submit</button>}
+                  {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && <button onClick={() => runAction("REVIEW")} className="btn-primary"><ShieldCheck className="h-4 w-4" /> Review</button>}
+                  {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && <button onClick={() => runAction("RETURN")} className="btn-light"><Undo2 className="h-4 w-4" /> Return</button>}
+                  {canApprove && selected.status === "REVIEWED" && <button onClick={() => runAction("APPROVE")} className="btn-primary"><CheckCircle2 className="h-4 w-4" /> Approve</button>}
                 </div>
               </div>
 
-              {!selectedLocked && canEdit && (
-                <div className="rounded-xl border border-png-gold/40 bg-white p-5 shadow-sm">
-                  <h3 className="font-semibold text-slate-900 flex items-center gap-2"><Save className="h-4 w-4 text-png-red" /> Add activity line</h3>
-                  <div className="mt-4 grid gap-3 md:grid-cols-12">
-                    <Field label="Line" className="md:col-span-1"><input className="input text-right" type="number" value={lineDraft.line_number} onChange={(e) => setLineDraft((l) => ({ ...l, line_number: Number(e.target.value) }))} /></Field>
-                    <Field label="Finance code" className="md:col-span-4"><select className="input" value={lineDraft.expense_ledger_id || ""} onChange={(e) => setLineDraft((l) => ({ ...l, expense_ledger_id: e.target.value }))}><option value="">Select posting code</option>{lookups.ledgers.filter((ledger) => ledger.is_posting).map((ledger) => <option key={ledger.id} value={ledger.id}>{ledger.finance_code} — {ledger.standard_description}</option>)}</select></Field>
-                    <Field label="Priority" className="md:col-span-2"><select className="input" value={lineDraft.priority || "MEDIUM"} onChange={(e) => setLineDraft((l) => ({ ...l, priority: e.target.value }))}>{["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((p) => <option key={p}>{p}</option>)}</select></Field>
-                    <Field label="Funding" className="md:col-span-3"><select className="input" value={lineDraft.funding_source_id || ""} onChange={(e) => setLineDraft((l) => ({ ...l, funding_source_id: e.target.value || null }))}><option value="">Optional funding source</option>{lookups.fundingSources.map((source) => <option key={source.id} value={source.id}>{source.code} — {source.name}</option>)}</select></Field>
-                    <Field label="Activity ref" className="md:col-span-2"><input className="input" value={lineDraft.activity_reference || ""} onChange={(e) => setLineDraft((l) => ({ ...l, activity_reference: e.target.value }))} /></Field>
-                    <Field label="Line-item / activity description" className="md:col-span-6"><input className="input" value={lineDraft.line_item_description || ""} onChange={(e) => setLineDraft((l) => ({ ...l, line_item_description: e.target.value }))} placeholder="e.g. Registry circuit travel for Q1 hearings" /></Field>
-                    <Field label="Business justification" className="md:col-span-6"><input className="input" value={lineDraft.business_justification || ""} onChange={(e) => setLineDraft((l) => ({ ...l, business_justification: e.target.value }))} placeholder="Why this activity is required" /></Field>
-                    <Field label="Expected output" className="md:col-span-4"><input className="input" value={lineDraft.expected_output || ""} onChange={(e) => setLineDraft((l) => ({ ...l, expected_output: e.target.value }))} /></Field>
-                    <Field label="Location / provider" className="md:col-span-4"><input className="input" value={lineDraft.location_destination_provider || ""} onChange={(e) => setLineDraft((l) => ({ ...l, location_destination_provider: e.target.value }))} /></Field>
-                    <Field label="Responsible officer" className="md:col-span-4"><input className="input" value={lineDraft.responsible_officer || ""} onChange={(e) => setLineDraft((l) => ({ ...l, responsible_officer: e.target.value }))} /></Field>
-                    <Field label="Qty" className="md:col-span-2"><input className="input text-right" type="number" value={lineDraft.quantity || 0} onChange={(e) => setLineDraft((l) => ({ ...l, quantity: Number(e.target.value) }))} /></Field>
-                    <Field label="Unit" className="md:col-span-2"><input className="input" value={lineDraft.unit_of_measure || ""} onChange={(e) => setLineDraft((l) => ({ ...l, unit_of_measure: e.target.value }))} /></Field>
-                    <Field label="Unit cost" className="md:col-span-2"><input className="input text-right" type="number" value={lineDraft.unit_cost || 0} onChange={(e) => setLineDraft((l) => ({ ...l, unit_cost: Number(e.target.value) }))} /></Field>
-                    <Field label="Frequency" className="md:col-span-2"><input className="input text-right" type="number" value={lineDraft.frequency_periods || 0} onChange={(e) => setLineDraft((l) => ({ ...l, frequency_periods: Number(e.target.value) }))} /></Field>
-                    <Field label="Other costs" className="md:col-span-2"><input className="input text-right" type="number" value={lineDraft.other_costs || 0} onChange={(e) => setLineDraft((l) => ({ ...l, other_costs: Number(e.target.value) }))} /></Field>
-                    <div className="md:col-span-2 rounded-lg bg-png-red/5 p-3 text-right"><p className="text-xs text-slate-500">Annual estimate</p><p className="font-bold text-png-maroon">{money(lineEstimate)}</p></div>
-                  </div>
-
-                  <div className="mt-5 rounded-lg border border-slate-200 p-4">
-                    <div className="flex items-center justify-between gap-3 mb-3">
-                      <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2"><CalendarDays className="h-4 w-4 text-png-gold" /> Monthly allocation</h4>
-                      <button onClick={spreadEvenly} type="button" className="text-xs font-medium text-png-red hover:text-png-maroon">Spread annual estimate evenly</button>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2">
-                      {allocations.map((month, index) => <label key={month.month_number} className="text-xs text-slate-500">{month.month_name}<input className="input mt-1 text-right" type="number" value={month.amount} onChange={(e) => setAllocations((items) => items.map((item, i) => i === index ? { ...item, amount: Number(e.target.value) } : item))} /></label>)}
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center justify-end gap-4 text-sm">
-                      <span>Allocated: <b>{money(monthlyTotal)}</b></span>
-                      <span className={Math.abs(monthlyVariance) < 0.01 ? "text-green-700" : "text-red-600"}>Variance: <b>{money(monthlyVariance)}</b></span>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex justify-end gap-2">
-                    <button onClick={resetLineDraft} className="btn-light" type="button">Clear</button>
-                    <button onClick={saveLine} disabled={saving} className="btn-primary" type="button">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save line</button>
-                  </div>
-                </div>
-              )}
-
-              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                <div className="border-b border-slate-200 px-5 py-4 flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-900">Budget template lines</h3>
-                  <span className="text-sm text-slate-500">{lines.length} line(s)</span>
-                </div>
-                {lines.length === 0 ? <Empty message="No budget lines added yet." /> : <div className="overflow-x-auto"><table className="w-full min-w-[1100px]"><thead className="bg-slate-50"><tr><Th>Line</Th><Th>Finance code</Th><Th>Description</Th><Th>Justification</Th><Th align="right">Annual</Th><Th align="right">Allocated</Th><Th align="right">Variance</Th><Th>Status</Th><Th><span className="sr-only">Actions</span></Th></tr></thead><tbody className="divide-y divide-slate-100">{lines.map((line) => <tr key={line.id} className="hover:bg-slate-50"><Td>{line.line_number}</Td><Td><span className="font-mono text-png-red">{line.ledger?.finance_code}</span><div className="text-xs text-slate-500">{line.ledger?.standard_description}</div></Td><Td>{line.line_item_description}</Td><Td className="max-w-xs truncate">{line.business_justification}</Td><Td align="right">{money(line.annual_estimate || 0)}</Td><Td align="right">{money(line.monthly_allocation_total || 0)}</Td><Td align="right"><span className={Math.abs(line.allocation_variance || 0) < 0.01 ? "text-green-700" : "text-red-600"}>{money(line.allocation_variance || 0)}</span></Td><Td><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">{line.priority}</span></Td><Td align="right">{!selectedLocked && <button onClick={() => removeLine(line.id)} className="rounded p-1 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>}</Td></tr>)}</tbody></table></div>}
+              <div ref={gridRef} onKeyDown={handleGridKeyDown} onPaste={handlePaste} className="sheet-wrap rounded-xl border border-[#1f4e79] bg-white shadow-sm">
+                <table className="budget-sheet min-w-[5200px] border-collapse text-xs">
+                  <thead>
+                    <tr>
+                      <SheetTh sticky left={0} width={70}>Line No.</SheetTh>
+                      <SheetTh sticky left={70} width={130}>Activity Ref.</SheetTh>
+                      <SheetTh sticky left={200} width={190}>Finance Code</SheetTh>
+                      <SheetTh width={110}>Ledger No.</SheetTh>
+                      <SheetTh width={230}>Expense Description</SheetTh>
+                      <SheetTh width={150}>Budget Class</SheetTh>
+                      <SheetTh width={170}>Expense Category</SheetTh>
+                      <SheetTh width={260}>Line Item / Activity Description</SheetTh>
+                      <SheetTh width={280}>Business Justification / Expected Output</SheetTh>
+                      <SheetTh width={220}>Location / Destination / Provider</SheetTh>
+                      <SheetTh width={220}>Beneficiary / Custodian / Officer</SheetTh>
+                      <SheetTh width={130}>Start Date</SheetTh>
+                      <SheetTh width={130}>End Date</SheetTh>
+                      <SheetTh width={100}>Quantity</SheetTh>
+                      <SheetTh width={100}>Unit</SheetTh>
+                      <SheetTh width={120}>Unit Cost (K)</SheetTh>
+                      <SheetTh width={130}>Frequency / Periods</SheetTh>
+                      <SheetTh width={120}>Other Costs (K)</SheetTh>
+                      <SheetTh width={150}>Calculated Estimate (K)</SheetTh>
+                      {MONTHS.map((month) => <SheetTh key={month} width={115}>{month}</SheetTh>)}
+                      <SheetTh width={155}>Monthly Allocation Total</SheetTh>
+                      <SheetTh width={120}>Variance (K)</SheetTh>
+                      <SheetTh width={120}>Priority</SheetTh>
+                      <SheetTh width={170}>Funding Source</SheetTh>
+                      <SheetTh width={170}>Procurement Method</SheetTh>
+                      <SheetTh width={180}>Responsible Officer</SheetTh>
+                      <SheetTh width={180}>Supporting Reference</SheetTh>
+                      <SheetTh width={220}>Comments</SheetTh>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gridRows.map((row) => {
+                      const rowVariance = variance(row)
+                      const lineInvalid = !isEmptyRow(row) && !hasMandatory(row)
+                      const lineHasVariance = !isEmptyRow(row) && Math.abs(rowVariance) >= 0.01
+                      const rowTone = lineHasVariance ? "bg-red-50" : lineInvalid ? "bg-amber-50" : "odd:bg-[#eaf3f8] even:bg-white"
+                      return (
+                        <tr key={row.clientId} onClick={() => setSelectedRow(row.clientId)} className={`${rowTone} ${selectedRow === row.clientId ? "outline outline-2 outline-[#1f4e79]" : ""}`}>
+                          <SheetTd sticky left={0} readOnly>{row.line_number}</SheetTd>
+                          <SheetTd sticky left={70}><SheetInput disabled={selectedLocked} value={row.activity_reference} onChange={(v) => updateRow(row.clientId, { activity_reference: v })} /></SheetTd>
+                          <SheetTd sticky left={200} required invalid={!isEmptyRow(row) && !row.expense_ledger_id}>
+                            <input disabled={selectedLocked} list="finance-code-options" className="sheet-input font-mono" value={row.finance_code} onChange={(e) => selectFinanceCode(row.clientId, e.target.value)} placeholder="Search code" />
+                          </SheetTd>
+                          <SheetTd readOnly>{row.ledger_number}</SheetTd>
+                          <SheetTd readOnly>{row.standard_description}</SheetTd>
+                          <SheetTd readOnly>{row.budget_class}</SheetTd>
+                          <SheetTd readOnly>{row.expense_category}</SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && !row.line_item_description.trim()}><SheetInput disabled={selectedLocked} value={row.line_item_description} onChange={(v) => updateRow(row.clientId, { line_item_description: v })} /></SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && !row.business_justification.trim()}><SheetInput disabled={selectedLocked} value={row.business_justification} onChange={(v) => updateRow(row.clientId, { business_justification: v })} /></SheetTd>
+                          <SheetTd><SheetInput disabled={selectedLocked} value={row.location_destination_provider} onChange={(v) => updateRow(row.clientId, { location_destination_provider: v })} /></SheetTd>
+                          <SheetTd><SheetInput disabled={selectedLocked} value={row.beneficiary_custodian_officer} onChange={(v) => updateRow(row.clientId, { beneficiary_custodian_officer: v })} /></SheetTd>
+                          <SheetTd><SheetInput type="date" disabled={selectedLocked} value={row.start_date} onChange={(v) => updateRow(row.clientId, { start_date: v })} /></SheetTd>
+                          <SheetTd><SheetInput type="date" disabled={selectedLocked} value={row.end_date} onChange={(v) => updateRow(row.clientId, { end_date: v })} /></SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.quantity) <= 0}><SheetNumber disabled={selectedLocked} value={row.quantity} onChange={(v) => updateRow(row.clientId, { quantity: v })} /></SheetTd>
+                          <SheetTd><SheetInput disabled={selectedLocked} value={row.unit_of_measure} onChange={(v) => updateRow(row.clientId, { unit_of_measure: v })} /></SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.unit_cost) < 0}><SheetNumber disabled={selectedLocked} value={row.unit_cost} onChange={(v) => updateRow(row.clientId, { unit_cost: v })} /></SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.frequency_periods) <= 0}><SheetNumber disabled={selectedLocked} value={row.frequency_periods} onChange={(v) => updateRow(row.clientId, { frequency_periods: v })} /></SheetTd>
+                          <SheetTd><SheetNumber disabled={selectedLocked} value={row.other_costs} onChange={(v) => updateRow(row.clientId, { other_costs: v })} /></SheetTd>
+                          <SheetTd readOnly align="right">{money(annualEstimate(row))}</SheetTd>
+                          {MONTHS.map((month, index) => <SheetTd key={month}><SheetNumber disabled={selectedLocked} value={row.months[index]} onChange={(v) => updateMonth(row.clientId, index, v)} /></SheetTd>)}
+                          <SheetTd readOnly align="right">{money(monthlyTotal(row))}</SheetTd>
+                          <SheetTd readOnly align="right" invalid={lineHasVariance}>{money(rowVariance)}</SheetTd>
+                          <SheetTd><select disabled={selectedLocked} className="sheet-input" value={row.priority} onChange={(e) => updateRow(row.clientId, { priority: e.target.value })}>{["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((p) => <option key={p}>{p}</option>)}</select></SheetTd>
+                          <SheetTd><select disabled={selectedLocked} className="sheet-input" value={row.funding_source_id} onChange={(e) => updateRow(row.clientId, { funding_source_id: e.target.value })}><option value="">Select</option>{lookups.fundingSources.map((source) => <option key={source.id} value={source.id}>{source.code} — {source.name}</option>)}</select></SheetTd>
+                          <SheetTd><SheetInput disabled={selectedLocked} value={row.procurement_method} onChange={(v) => updateRow(row.clientId, { procurement_method: v })} /></SheetTd>
+                          <SheetTd><SheetInput disabled={selectedLocked} value={row.responsible_officer} onChange={(v) => updateRow(row.clientId, { responsible_officer: v })} /></SheetTd>
+                          <SheetTd><SheetInput disabled={selectedLocked} value={row.supporting_reference} onChange={(v) => updateRow(row.clientId, { supporting_reference: v })} /></SheetTd>
+                          <SheetTd><SheetInput disabled={selectedLocked} value={row.comments} onChange={(v) => updateRow(row.clientId, { comments: v })} /></SheetTd>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td className="sticky left-0 z-20 border border-[#9fbad0] bg-[#1f4e79] px-2 py-2 font-bold text-white" colSpan={3}>Totals</td>
+                      <td className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 font-bold text-right" colSpan={16}>{money(totalProposed)}</td>
+                      {MONTHS.map((month, index) => <td key={month} className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 text-right font-bold">{money(gridRows.reduce((sum, row) => sum + (row.months[index] || 0), 0))}</td>)}
+                      <td className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 text-right font-bold">{money(totalMonthly)}</td>
+                      <td className={`border border-[#9fbad0] px-2 py-2 text-right font-bold ${Math.abs(totalVariance) >= 0.01 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>{money(totalVariance)}</td>
+                      <td className="border border-[#9fbad0] bg-[#d9eaf7]" colSpan={6}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+                <datalist id="finance-code-options">
+                  {lookups.ledgers.map((ledger) => <option key={ledger.id} value={ledger.finance_code}>{ledger.finance_code} — {ledger.standard_description}</option>)}
+                </datalist>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-2">
+              <div className="grid gap-5 lg:grid-cols-2">
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="font-semibold text-slate-900">Monthly cash-flow profile</h3>
+                  <h3 className="font-semibold text-slate-900">Reviewed / approved consolidated cash-flow</h3>
                   <div className="mt-4 grid grid-cols-6 gap-2">
-                    {cashflowChart.map((row) => <div key={row.month} className="rounded-lg bg-slate-50 p-2 text-center"><p className="text-xs text-slate-500">{row.month}</p><p className="text-xs font-bold text-png-maroon">{money(row.amount)}</p></div>)}
+                    {cashflowChart.map((row) => <div key={row.month} className="rounded-lg bg-blue-50 p-2 text-center"><p className="text-xs text-slate-500">{row.month}</p><p className="text-xs font-bold text-[#1f4e79]">{money(row.amount)}</p></div>)}
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                   <h3 className="font-semibold text-slate-900">Workflow history</h3>
-                  {history.length === 0 ? <p className="mt-4 text-sm text-slate-500">No workflow events yet.</p> : <div className="mt-4 space-y-3">{history.map((item, index) => <div key={index} className="rounded-lg bg-slate-50 p-3 text-sm"><div className="flex justify-between"><b>{item.action}</b><span className="text-xs text-slate-500">{new Date(item.created_at).toLocaleString("en-GB")}</span></div><p className="text-slate-600">{item.from_status || "START"} → {item.to_status}</p>{item.comments && <p className="mt-1 text-slate-500">{item.comments}</p>}</div>)}</div>}
+                  {history.length === 0 ? <p className="mt-4 text-sm text-slate-500">No workflow events yet.</p> : <div className="mt-4 max-h-72 space-y-3 overflow-y-auto">{history.map((item, index) => <div key={index} className="rounded-lg bg-slate-50 p-3 text-sm"><div className="flex justify-between"><b>{item.action}</b><span className="text-xs text-slate-500">{new Date(item.created_at).toLocaleString("en-GB")}</span></div><p className="text-slate-600">{item.from_status || "START"} → {item.to_status}</p>{item.comments && <p className="mt-1 text-slate-500">{item.comments}</p>}</div>)}</div>}
                 </div>
               </div>
             </>
           )}
-        </div>
+        </main>
       </div>
 
-      {loading && <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/40"><Loader2 className="h-8 w-8 animate-spin text-png-red" /></div>}
+      {loading && <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/40"><Loader2 className="h-8 w-8 animate-spin text-[#1f4e79]" /></div>}
 
       <style jsx global>{`
-        .input { width: 100%; border-radius: 0.5rem; border: 1px solid #e2e8f0; background: white; padding: 0.5rem 0.75rem; font-size: 0.875rem; outline: none; }
-        .input:focus { border-color: #8a1420; box-shadow: 0 0 0 2px rgba(138,20,32,0.15); }
-        .btn-primary { display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.5rem; background: #8a1420; color: white; padding: 0.55rem 0.85rem; font-size: 0.875rem; font-weight: 600; }
-        .btn-primary:hover { background: #4c0f16; }
-        .btn-primary:disabled { opacity: .5; }
-        .btn-light { display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.5rem; border: 1px solid #e2e8f0; background: white; color: #475569; padding: 0.55rem 0.85rem; font-size: 0.875rem; font-weight: 600; }
-        .btn-light:hover { background: #f8fafc; }
+        .input { width: 100%; border-radius: 0.375rem; border: 1px solid #cbd5e1; background: white; padding: 0.5rem 0.75rem; font-size: 0.875rem; outline: none; }
+        .input:focus { border-color: #1f4e79; box-shadow: 0 0 0 2px rgba(31,78,121,0.16); }
+        .btn-primary { display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.45rem; background: #1f4e79; color: white; padding: 0.55rem 0.85rem; font-size: 0.875rem; font-weight: 700; }
+        .btn-primary:hover { background: #173a5b; }
+        .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+        .btn-light { display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.45rem; border: 1px solid #b7c9d8; background: #f8fbfd; color: #1f4e79; padding: 0.55rem 0.85rem; font-size: 0.875rem; font-weight: 700; }
+        .btn-light:hover { background: #eaf3f8; }
+        .btn-light:disabled { opacity: .5; cursor: not-allowed; }
+        .sheet-action { display: inline-flex; align-items: center; gap: .4rem; border-radius: .4rem; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.12); padding: .45rem .7rem; font-size: .8rem; font-weight: 700; }
+        .sheet-action:hover { background: rgba(255,255,255,.2); }
+        .sheet-wrap { max-width: 100%; overflow: auto; max-height: calc(100vh - 245px); }
+        .budget-sheet thead th { position: sticky; top: 0; z-index: 10; }
+        .budget-sheet .sticky-col { position: sticky; z-index: 12; }
+        .budget-sheet thead .sticky-col { z-index: 18; }
+        .sheet-input { width: 100%; min-width: 0; border: 0; background: transparent; padding: .35rem .4rem; outline: none; }
+        .sheet-input:focus { background: white; box-shadow: inset 0 0 0 2px #1f4e79; }
+        .sheet-input:disabled { color: #475569; cursor: not-allowed; }
       `}</style>
     </div>
   )
 }
 
-function Field({ label, children, className = "" }: { label: string; children: React.ReactNode; className?: string }) {
-  return <label className={`block text-xs font-medium text-slate-500 ${className}`}>{label}<div className="mt-1">{children}</div></label>
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block text-xs font-semibold text-slate-600">{label}<div className="mt-1">{children}</div></label>
 }
 
-function Metric({ label, value, tone, compact = false }: { label: string; value: number | string; tone: "slate" | "gold" | "maroon" | "green" | "red"; compact?: boolean }) {
-  const tones = { slate: "bg-slate-50 text-slate-900", gold: "bg-png-gold/20 text-png-maroon", maroon: "bg-png-red/10 text-png-red", green: "bg-green-50 text-green-700", red: "bg-red-50 text-red-700" }
-  return <div className={`rounded-xl border border-slate-200 bg-white ${compact ? "p-3" : "p-4"}`}><p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p><p className={`${compact ? "text-lg" : "text-2xl"} mt-1 font-bold ${tones[tone].split(" ").at(-1)}`}>{value}</p></div>
+function HeaderCell({ label, value, strong = false, alert = false }: { label: string; value: string; strong?: boolean; alert?: boolean }) {
+  return <div className={`${alert ? "bg-red-50" : "bg-white"} p-2`}><p className="text-[10px] font-bold uppercase tracking-wide text-[#1f4e79]">{label}</p><p className={`mt-0.5 truncate ${strong ? "font-bold text-slate-950" : "text-slate-700"} ${alert ? "text-red-700" : ""}`}>{value}</p></div>
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const classes: Record<string, string> = { DRAFT: "bg-slate-100 text-slate-700", SUBMITTED: "bg-png-gold/20 text-png-maroon", RESUBMITTED: "bg-png-gold/20 text-png-maroon", RETURNED: "bg-orange-100 text-orange-700", REVIEWED: "bg-png-red/10 text-png-red", APPROVED: "bg-green-100 text-green-700", REJECTED: "bg-red-100 text-red-700", ARCHIVED: "bg-slate-200 text-slate-600" }
+  const classes: Record<string, string> = { DRAFT: "bg-slate-100 text-slate-700", SUBMITTED: "bg-blue-100 text-blue-700", RESUBMITTED: "bg-blue-100 text-blue-700", RETURNED: "bg-orange-100 text-orange-700", REVIEWED: "bg-amber-100 text-amber-800", APPROVED: "bg-green-100 text-green-700", REJECTED: "bg-red-100 text-red-700", ARCHIVED: "bg-slate-200 text-slate-600" }
   return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${classes[status] || classes.DRAFT}`}>{status}</span>
 }
 
@@ -469,10 +820,18 @@ function Empty({ message }: { message: string }) {
   return <div className="p-8 text-center text-sm text-slate-500">{message}</div>
 }
 
-function Th({ children, align = "left" }: { children: React.ReactNode; align?: "left" | "right" }) {
-  return <th className={`px-4 py-3 text-${align} text-xs font-semibold uppercase text-slate-600`}>{children}</th>
+function SheetTh({ children, width, sticky = false, left = 0 }: { children: React.ReactNode; width: number; sticky?: boolean; left?: number }) {
+  return <th style={{ width, minWidth: width, left: sticky ? left : undefined }} className={`${sticky ? "sticky-col" : ""} border border-[#9fbad0] bg-[#1f4e79] px-2 py-2 text-left align-bottom font-bold text-white`}>{children}</th>
 }
 
-function Td({ children, align = "left", className = "" }: { children: React.ReactNode; align?: "left" | "right"; className?: string }) {
-  return <td className={`px-4 py-3 text-${align} text-sm text-slate-700 ${className}`}>{children}</td>
+function SheetTd({ children, sticky = false, left = 0, readOnly = false, invalid = false, required = false, align = "left" }: { children: React.ReactNode; sticky?: boolean; left?: number; readOnly?: boolean; invalid?: boolean; required?: boolean; align?: "left" | "right" }) {
+  return <td style={{ left: sticky ? left : undefined }} className={`${sticky ? "sticky-col bg-inherit" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""} ${invalid ? "bg-red-100" : required ? "bg-amber-50" : ""} border border-[#9fbad0] align-top text-${align}`}>{children}</td>
+}
+
+function SheetInput({ value, onChange, disabled, type = "text" }: { value: string; onChange: (value: string) => void; disabled?: boolean; type?: string }) {
+  return <input type={type} disabled={disabled} className="sheet-input" value={value} onChange={(event) => onChange(event.target.value)} />
+}
+
+function SheetNumber({ value, onChange, disabled }: { value: number; onChange: (value: number) => void; disabled?: boolean }) {
+  return <input type="number" disabled={disabled} className="sheet-input text-right" value={Number.isFinite(value) ? value : 0} onChange={(event) => onChange(Number(event.target.value || 0))} />
 }

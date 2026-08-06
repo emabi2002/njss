@@ -140,7 +140,7 @@ export async function getBudgetLookups() {
   const [cycles, divisions, ledgers, fundingSources] = await Promise.all([
     supabase.from('budget_cycles').select('*').order('budget_year', { ascending: false }),
     supabase.from('budget_divisions').select('*').eq('is_active', true).order('name'),
-    supabase.from('expense_ledger').select('*').eq('is_active', true).order('finance_code'),
+    supabase.from('expense_ledger').select('*').eq('is_active', true).eq('is_posting', true).order('finance_code'),
     supabase.from('funding_sources').select('id, code, name').eq('is_active', true).order('name'),
   ])
   if (cycles.error) throw cycles.error
@@ -196,6 +196,39 @@ export async function getSubmissionDetail(id: string) {
   if (lines.error) throw lines.error
   if (history.error) throw history.error
   return { submission: submission.data as BudgetSubmission, lines: lines.data as BudgetLine[], history: history.data as BudgetWorkflowHistory[] }
+}
+
+export async function createBudgetDivision(input: { code: string; name: string; department_id?: string | null; section_id?: string | null; cost_centre_code?: string | null; cost_centre_name?: string | null }) {
+  const { data, error } = await supabase
+    .from('budget_divisions')
+    .insert({ ...input, is_active: true })
+    .select('*')
+    .single()
+  if (error) throw error
+  return data as BudgetDivision
+}
+
+export async function updateSubmissionHeader(id: string, input: Partial<Pick<BudgetSubmission, 'submission_reference' | 'budget_ceiling'>>) {
+  const { data, error } = await supabase
+    .from('divisional_budget_submissions')
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*, division:budget_divisions(*), cycle:budget_cycles(*)')
+    .single()
+  if (error) throw error
+  return data as BudgetSubmission
+}
+
+export async function createAuditEvent(input: { action: string; entity_type: string; entity_id?: string | null; entity_reference?: string | null; changes?: Record<string, unknown>; user_email?: string | null; user_name?: string | null }) {
+  await supabase.from('audit_logs').insert({
+    action: input.action,
+    entity_type: input.entity_type,
+    entity_id: input.entity_id || null,
+    entity_reference: input.entity_reference || null,
+    changes: input.changes || null,
+    user_email: input.user_email || null,
+    user_name: input.user_name || 'System',
+  })
 }
 
 export async function createDraftSubmission(input: { cycle_id: string; budget_year: number; division_id: string; department_id?: string | null; cost_centre?: string | null; budget_ceiling?: number; submission_reference?: string | null; prepared_by?: string | null }) {
