@@ -307,7 +307,7 @@ export default function BudgetTemplatePage() {
       setMessage({ type: "ok", text: "Draft divisional budget template created." })
       await loadDashboard()
     } catch (err) {
-      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not create the draft submission." })
+      setMessage({ type: "err", text: err instanceof Error ? `Could not create the draft submission: ${err.message}` : "Could not create the draft submission." })
     } finally {
       setSaving(false)
     }

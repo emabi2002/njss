@@ -232,12 +232,47 @@ export async function createAuditEvent(input: { action: string; entity_type: str
 }
 
 export async function createDraftSubmission(input: { cycle_id: string; budget_year: number; division_id: string; department_id?: string | null; cost_centre?: string | null; budget_ceiling?: number; submission_reference?: string | null; prepared_by?: string | null }) {
-  const { data, error } = await supabase
-    .from('divisional_budget_submissions')
-    .insert({ ...input, status: 'DRAFT', validation_status: 'PENDING', date_prepared: new Date().toISOString().slice(0, 10) })
-    .select('id')
-    .single()
-  if (error) throw error
+  const buildPayload = async () => {
+    const { data: existing, error: versionError } = await supabase
+      .from('divisional_budget_submissions')
+      .select('version')
+      .eq('cycle_id', input.cycle_id)
+      .eq('division_id', input.division_id)
+
+    if (versionError) throw versionError
+
+    const nextVersion = Math.max(0, ...(existing || []).map((row) => Number(row.version || 0))) + 1
+
+    return {
+      ...input,
+      version: nextVersion,
+      status: 'DRAFT',
+      validation_status: 'PENDING',
+      date_prepared: new Date().toISOString().slice(0, 10),
+    }
+  }
+
+  const insertPayload = async () => {
+    const payload = await buildPayload()
+    return supabase
+      .from('divisional_budget_submissions')
+      .insert(payload)
+      .select('id')
+      .single()
+  }
+
+  let { data, error } = await insertPayload()
+
+  // If another draft was created at the same time, recompute next version once.
+  if (error?.code === '23505') {
+    const retry = await insertPayload()
+    data = retry.data
+    error = retry.error
+  }
+
+  if (error || !data) {
+    throw new Error(error?.message || 'Could not create the draft submission.')
+  }
   return data.id as string
 }
 
