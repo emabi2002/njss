@@ -1,7 +1,21 @@
 import * as fs from 'fs'
 import * as path from 'path'
 
-const projectRef = 'qzsmmalfeinoagvronpb'
+function loadEnv() {
+  const envPath = path.join(process.cwd(), '.env.local')
+  if (!fs.existsSync(envPath)) return
+
+  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
+    if (m) process.env[m[1]] = m[2].replace(/^"|"$/g, '').trim()
+  }
+}
+
+loadEnv()
+
+const projectRef =
+  (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace('https://', '').split('.')[0] ||
+  '[your-project-ref]'
 
 async function runMigration() {
   console.log('═══════════════════════════════════════════════════════════')
@@ -59,15 +73,31 @@ async function runMigration() {
   console.log('📊 Tables that will be created:')
   console.log('')
   const tables = [
-    'departments', 'sections', 'provinces', 'projects',
-    'funding_sources', 'chart_of_accounts', 'expense_categories',
-    'roles', 'users', 'user_roles',
-    'annual_plan_headers', 'annual_plan_lines',
-    'budget_allocations', 'quarterly_releases',
-    'ff3_headers', 'ff3_items', 'ff3_quotations', 'ff3_attachments', 'ff3_approvals',
+    'departments',
+    'sections',
+    'provinces',
+    'projects',
+    'funding_sources',
+    'chart_of_accounts',
+    'expense_categories',
+    'roles',
+    'users',
+    'user_roles',
+    'annual_plan_headers',
+    'annual_plan_lines',
+    'budget_allocations',
+    'quarterly_releases',
+    'ff3_headers',
+    'ff3_items',
+    'ff3_quotations',
+    'ff3_attachments',
+    'ff3_approvals',
     'ff3_commitments',
-    'ff4_headers', 'ff4_attachments', 'payment_transactions',
-    'notifications', 'audit_logs'
+    'ff4_headers',
+    'ff4_attachments',
+    'payment_transactions',
+    'notifications',
+    'audit_logs',
   ]
 
   tables.forEach((table, i) => {

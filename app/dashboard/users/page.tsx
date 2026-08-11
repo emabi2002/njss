@@ -17,7 +17,6 @@ import {
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/contexts/AuthContext"
 import { AccessDenied } from "@/components/AccessDenied"
-import { PERMISSION_CATALOG } from "@/lib/rbac/config"
 import type { DataScopeType, RbacMenuItem, RbacModule, RbacPermission } from "@/lib/rbac/types"
 
 type User = {
@@ -124,13 +123,13 @@ export default function UsersPage() {
       setDepartments(deptsRes.data || [])
 
       if (rbacRes) {
-        setPermissions(rbacRes.permissions || PERMISSION_CATALOG)
+        setPermissions(rbacRes.permissions || [])
         setRolePermissions(rbacRes.rolePermissions || [])
         setRbacModules(rbacRes.modules || [])
         setRbacMenus(rbacRes.menus || [])
         setRoleScopes(rbacRes.roleScopes || [])
       } else {
-        setPermissions(PERMISSION_CATALOG)
+        setPermissions([])
       }
 
       if (!selectedRoleId && (rolesRes.data || []).length > 0) {

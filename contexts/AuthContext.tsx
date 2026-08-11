@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { supabase, isSupabaseNetworkEnabled } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { getUserProfile, type AuthUser } from '@/lib/auth'
 import type { Permission } from '@/lib/permissions'
 import type { RbacDataScope, RbacMenuItem } from '@/lib/rbac/types'
@@ -18,39 +18,8 @@ import {
   logAccessEvent,
 } from '@/lib/rbac/client'
 
-// ----------------------------------------------------------------------------
-// TESTING MODE
-// Mirrors the testing-mode bypass already used in `middleware.ts` and
-// `app/page.tsx`. When there is no real Supabase session we fall back to a
-// default "System Administrator" identity so the whole dashboard is usable and
-// EVERY module is visible + routable without first logging in. A real login
-// (any demo account) overrides this with that user's actual role/permissions.
-// To return to strict auth, set TESTING_MODE to false and restore the redirects.
-// ----------------------------------------------------------------------------
-const TESTING_MODE = true
-
-// Use the real "System Administrator" auth user id so id-keyed features
-// (notifications, realtime, etc.) behave exactly like a genuine admin login.
-const TESTING_ADMIN_ID = '50eade2c-8b50-47d5-ad6b-0fd05e6916f2'
-
-const TESTING_USER = {
-  id: TESTING_ADMIN_ID,
-  email: 'admin@pngjudiciary.gov.pg',
-  app_metadata: { provider: 'testing' },
-  user_metadata: { full_name: 'System Administrator' },
-  aud: 'authenticated',
-  created_at: new Date(0).toISOString(),
-} as unknown as User
-
-const TESTING_PROFILE: AuthUser = {
-  id: TESTING_ADMIN_ID,
-  authUserId: TESTING_ADMIN_ID,
-  email: 'admin@pngjudiciary.gov.pg',
-  name: 'System Administrator',
-  role: 'System Administrator',
-  roles: ['System Administrator'],
-  department: 'National Judiciary Staff Services',
-}
+// Authentication is provided exclusively by Supabase Auth. RBAC profile, roles,
+// permissions, menus and data scopes are loaded from the database after login.
 
 type AuthContextType = {
   user: User | null
@@ -65,7 +34,7 @@ type AuthContextType = {
   canAll: (perms: Permission[]) => boolean
   canOnRecord: (perm: Permission, record: Parameters<typeof canAccessRecord>[1]) => boolean
   loading: boolean
-  /** True when the current identity is the testing-mode placeholder (no real login). */
+  /** Deprecated compatibility flag; always false because placeholder login is disabled. */
   isTestingFallback: boolean
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
@@ -90,17 +59,12 @@ const AuthContext = createContext<AuthContextType>({
 })
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const useOfflineTestingFallback = TESTING_MODE && !isSupabaseNetworkEnabled
-  const [user, setUser] = useState<User | null>(useOfflineTestingFallback ? TESTING_USER : null)
-  const [profile, setProfile] = useState<AuthUser | null>(useOfflineTestingFallback ? TESTING_PROFILE : null)
-  const [permissions, setPermissions] = useState<string[]>(useOfflineTestingFallback ? ['all'] : [])
-  const [scopes, setScopes] = useState<RbacDataScope[]>(
-    useOfflineTestingFallback ? [{ scope_type: 'SYSTEM_WIDE' } as RbacDataScope] : [],
-  )
+  const [user, setUser] = useState<User | null>(null)
+  const [profile, setProfile] = useState<AuthUser | null>(null)
+  const [permissions, setPermissions] = useState<string[]>([])
+  const [scopes, setScopes] = useState<RbacDataScope[]>([])
   const [menus, setMenus] = useState<RbacMenuItem[]>([])
-  const [loading, setLoading] = useState(!useOfflineTestingFallback)
-  // True only while we're showing the default testing identity (no real login).
-  const [isTestingFallback, setIsTestingFallback] = useState(useOfflineTestingFallback)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadRbacNavigation(permissions).then(setMenus)
@@ -115,7 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const roles = p.roles?.length ? p.roles : [p.role].filter(Boolean)
       const roleRows = await getUserRoles(p.id).catch(() => [])
-      const effectivePermissions = await getUserPermissions(p.id, roles)
+      const effectivePermissions = await getUserPermissions(p.id)
       const effectiveScopes = await getUserDataScopes(
         p.id,
         roleRows.length ? roleRows : roles.map((name) => ({ id: name, name, description: null })),
@@ -125,22 +89,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(p)
       setPermissions(effectivePermissions)
       setScopes(effectiveScopes)
-    }
-
-    // Apply the default testing identity (used whenever there's no real session).
-    const applyTestingFallback = () => {
-      if (!TESTING_MODE) return
-      setUser(TESTING_USER)
-      setProfile(TESTING_PROFILE)
-      setPermissions(['all'])
-      setScopes([{ scope_type: 'SYSTEM_WIDE' } as RbacDataScope])
-      setIsTestingFallback(true)
-    }
-
-    if (useOfflineTestingFallback) {
-      return () => {
-        mounted = false
-      }
     }
 
     async function loadSession() {
@@ -159,7 +107,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: 'Staff',
           roles: ['Staff'],
         })
-        setIsTestingFallback(false)
         setLoading(false)
         loadAccessContext(session.user, session.user.email || '').catch((error) =>
           console.warn('RBAC profile load failed:', error),
@@ -171,8 +118,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           module: 'AUTH',
         }).catch((error) => console.warn('Login audit failed:', error))
       } else {
-        applyTestingFallback()
-        if (mounted) setLoading(false)
+        setUser(null)
+        setProfile(null)
+        setPermissions([])
+        setScopes([])
+        setLoading(false)
       }
     }
 
@@ -191,7 +141,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: 'Staff',
           roles: ['Staff'],
         })
-        setIsTestingFallback(false)
         setLoading(false)
         loadAccessContext(session.user, session.user.email || '').catch((error) =>
           console.warn('RBAC profile load failed:', error),
@@ -205,16 +154,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }).catch((error) => console.warn('Login audit failed:', error))
         }
       } else {
-        // No session — fall back to the testing identity instead of logging out.
-        if (TESTING_MODE) {
-          applyTestingFallback()
-        } else {
-          setUser(null)
-          setProfile(null)
-          setPermissions([])
-          setScopes([])
-          setIsTestingFallback(false)
-        }
+        setUser(null)
+        setProfile(null)
+        setPermissions([])
+        setScopes([])
       }
 
       setLoading(false)
@@ -224,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mounted = false
       sub.subscription.unsubscribe()
     }
-  }, [useOfflineTestingFallback])
+  }, [])
 
   const role = profile?.role || ''
   const roles = profile?.roles?.length ? profile.roles : role ? [role] : []
@@ -273,7 +216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (p) {
         const roleNames = p.roles?.length ? p.roles : [p.role]
         const roleRows = await getUserRoles(p.id).catch(() => [])
-        setPermissions(await getUserPermissions(p.id, roleNames))
+        setPermissions(await getUserPermissions(p.id))
         setScopes(
           await getUserDataScopes(
             p.id,
@@ -299,7 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         canAll,
         canOnRecord,
         loading,
-        isTestingFallback,
+        isTestingFallback: false,
         signOut: handleSignOut,
         refreshProfile,
       }}

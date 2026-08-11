@@ -8,18 +8,6 @@ import { NJSSLogo } from "../components/NJSSLogo"
 import { signIn } from "@/lib/auth"
 import { useAuth } from "@/contexts/AuthContext"
 
-const DEMO_PASSWORD = "Crms@2025"
-const DEMO_ACCOUNTS = [
-  { role: "System Administrator", email: "admin@pngjudiciary.gov.pg" },
-  { role: "Finance Manager", email: "finance@pngjudiciary.gov.pg" },
-  { role: "Department Head", email: "depthead@pngjudiciary.gov.pg" },
-  { role: "Section Head", email: "section@pngjudiciary.gov.pg" },
-  { role: "Approver", email: "approver@pngjudiciary.gov.pg" },
-  { role: "Requisition Officer", email: "officer@pngjudiciary.gov.pg" },
-  { role: "Auditor", email: "auditor@pngjudiciary.gov.pg" },
-  { role: "Executive Management", email: "exec@pngjudiciary.gov.pg" },
-]
-
 const LOGIN_TIMEOUT_MS = 10000
 
 async function withLoginTimeout<T>(promise: Promise<T>) {
@@ -205,31 +193,6 @@ function LoginContent() {
               )}
             </button>
           </form>
-
-          {/* Demo accounts — click to fill */}
-          <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
-            <p className="text-xs font-medium text-slate-700 mb-2">
-              Demo accounts — click to fill (password{" "}
-              <span className="font-mono text-slate-900">{DEMO_PASSWORD}</span>)
-            </p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {DEMO_ACCOUNTS.map((a) => (
-                <button
-                  key={a.email}
-                  type="button"
-                  onClick={() => {
-                    setEmail(a.email)
-                    setPassword(DEMO_PASSWORD)
-                    setError("")
-                  }}
-                  className="text-left px-2.5 py-1.5 rounded-md border border-slate-200 bg-white hover:border-red-300 hover:bg-red-50 transition-colors"
-                >
-                  <span className="block text-xs font-medium text-slate-800">{a.role}</span>
-                  <span className="block text-[11px] text-slate-500 truncate">{a.email}</span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Footer */}

@@ -1,7 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getRoutePermissions } from './client'
-import { ROLE_PERMISSIONS } from '@/lib/permissions'
 import type { DataScopeType, PermissionCode, RbacRole, UserAccessContext } from './types'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
@@ -37,15 +36,14 @@ export async function getServerAccessContext(request: NextRequest, response: Nex
     .maybeSingle()
 
   if (!profile) {
-    const fallbackRole = 'Executive Viewer'
     return {
       userId: user.id,
       authUserId: user.id,
       email: user.email || '',
       name: user.email?.split('@')[0] || 'User',
-      roles: [{ id: fallbackRole, name: fallbackRole, description: null }],
-      roleNames: [fallbackRole],
-      permissions: ROLE_PERMISSIONS[fallbackRole] || [],
+      roles: [],
+      roleNames: [],
+      permissions: [],
       scopes: [{ scope_type: 'OWN_RECORDS' }],
     }
   }
@@ -70,7 +68,6 @@ export async function getServerAccessContext(request: NextRequest, response: Nex
       .in('role_id', roleIds)
     permissions = Array.from(new Set((rows || []).map((row) => row.permission)))
   }
-  if (!permissions.length) permissions = Array.from(new Set(roles.flatMap((role) => ROLE_PERMISSIONS[role.name] || [])))
 
   let scopes = roles.map((role) => ({ scope_type: (role.data_scope_type || 'OWN_RECORDS') as UserAccessContext['scopes'][number]['scope_type'] }))
   try {

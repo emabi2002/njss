@@ -1,32 +1,17 @@
 import { createClient } from '@supabase/supabase-js'
 
-// The Supabase project URL and anon key are PUBLIC values: they are shipped to the
-// browser and access is protected by Row Level Security. We read them from env vars,
-// but fall back to the known-correct project values when an env var is missing or
-// malformed (e.g. a typo'd host like "...co" instead of "...supabase.co"). This stops
-// a misconfigured deployment from breaking auth. The SERVICE ROLE key is NOT placed
-// here — it stays strictly in server-side env (see createServerSupabaseClient below).
-const FALLBACK_SUPABASE_URL = 'https://qzsmmalfeinoagvronpb.supabase.co'
-const FALLBACK_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF6c21tYWxmZWlub2FndnJvbnBiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5MDc4ODYsImV4cCI6MjEwMTQ4Mzg4Nn0.Nt-QKzlhGjjoyaej46diDoiXmCgqnfgBcMRs9kRdmOQ'
-
-const EXPECTED_SUPABASE_REF = 'qzsmmalfeinoagvronpb'
 const SUPABASE_REQUEST_TIMEOUT_MS = 8000
 
-const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const envAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+function requiredEnv(name: string) {
+  const value = process.env[name]?.trim()
+  if (!value) throw new Error(`Missing required environment variable: ${name}`)
+  return value
+}
+
+const supabaseUrl = requiredEnv('NEXT_PUBLIC_SUPABASE_URL')
+const supabaseAnonKey = requiredEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY')
 
 export const isSupabaseNetworkEnabled = process.env.NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED !== 'false'
-
-function isExpectedSupabaseUrl(url: string | undefined) {
-  if (!url) return false
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'https:' && parsed.hostname === `${EXPECTED_SUPABASE_REF}.supabase.co`
-  } catch {
-    return false
-  }
-}
 
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
   const controller = new AbortController()
@@ -35,13 +20,6 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
     clearTimeout(timeout)
   )
 }
-
-// Only trust the exact NJSS Supabase project URL. A different .supabase.co host
-// may pass shape validation but will fail CORS and stall the dashboard.
-const supabaseUrl = isExpectedSupabaseUrl(envUrl) ? envUrl! : FALLBACK_SUPABASE_URL
-// Only trust an env anon key that looks like a JWT; otherwise use the fallback.
-const supabaseAnonKey =
-  envAnonKey && envAnonKey.startsWith('eyJ') ? envAnonKey : FALLBACK_SUPABASE_ANON_KEY
 
 export const activeSupabaseUrl = supabaseUrl
 
@@ -57,18 +35,19 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     flowType: 'pkce',
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
     storageKey: 'njss-crems-auth',
-    lock: undefined, // Disable lock to prevent the error
-  }
+    lock: undefined,
+  },
 })
 
 // Server-side Supabase client (with service role for admin operations)
 export function createServerSupabaseClient() {
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+  const serviceRoleKey = requiredEnv('SUPABASE_SERVICE_ROLE_KEY')
+
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
-      persistSession: false
-    }
+      persistSession: false,
+    },
   })
 }
 

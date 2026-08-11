@@ -16,7 +16,7 @@ import {
 import { NJSSLogo } from "../components/NJSSLogo"
 import { useAuth } from "@/contexts/AuthContext"
 import { NotificationsDropdown } from "@/components/NotificationsDropdown"
-import { ICONS, MENU_ITEMS } from "@/lib/rbac/config"
+import { ICONS } from "@/lib/rbac/config"
 import type { RbacMenuItem } from "@/lib/rbac/types"
 import { loadOrganization, DEFAULT_ORG, type OrganizationProfile } from "@/lib/org"
 
@@ -42,7 +42,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (user) loadOrganization().then(setOrg)
   }, [user])
 
-  const visibleNavigation: NavItem[] = (menus.length ? menus : MENU_ITEMS).filter((item) => !item.parent_code)
+  const visibleNavigation: NavItem[] = menus.filter((item) => !item.parent_code)
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/")
 

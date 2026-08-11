@@ -1,4 +1,4 @@
-import { supabase, isSupabaseNetworkEnabled } from './supabase'
+import { supabase } from './supabase'
 import type { User, Session } from '@supabase/supabase-js'
 
 export type AuthUser = {
@@ -15,116 +15,17 @@ export type AuthUser = {
   avatar?: string
 }
 
-const DEMO_PASSWORD = 'Crms@2025'
-const DEMO_PROFILES: Record<string, AuthUser> = {
-  'admin@pngjudiciary.gov.pg': {
-    id: '50eade2c-8b50-47d5-ad6b-0fd05e6916f2',
-    authUserId: '50eade2c-8b50-47d5-ad6b-0fd05e6916f2',
-    email: 'admin@pngjudiciary.gov.pg',
-    name: 'System Administrator',
-    role: 'System Administrator',
-    roles: ['System Administrator'],
-    department: 'National Judiciary Staff Services',
-  },
-  'finance@pngjudiciary.gov.pg': {
-    id: 'demo-finance-manager',
-    authUserId: 'demo-finance-manager',
-    email: 'finance@pngjudiciary.gov.pg',
-    name: 'Finance Manager',
-    role: 'Finance Manager',
-    roles: ['Finance Manager'],
-    department: 'Finance',
-  },
-  'depthead@pngjudiciary.gov.pg': {
-    id: 'demo-department-head',
-    authUserId: 'demo-department-head',
-    email: 'depthead@pngjudiciary.gov.pg',
-    name: 'Department Head',
-    role: 'Department Head',
-    roles: ['Department Head'],
-    department: 'Operations',
-  },
-  'section@pngjudiciary.gov.pg': {
-    id: 'demo-section-head',
-    authUserId: 'demo-section-head',
-    email: 'section@pngjudiciary.gov.pg',
-    name: 'Section Head',
-    role: 'Section Head',
-    roles: ['Section Head'],
-    department: 'Registry',
-  },
-  'approver@pngjudiciary.gov.pg': {
-    id: 'demo-approver',
-    authUserId: 'demo-approver',
-    email: 'approver@pngjudiciary.gov.pg',
-    name: 'Approver',
-    role: 'Approver',
-    roles: ['Approver'],
-    department: 'Approvals',
-  },
-  'officer@pngjudiciary.gov.pg': {
-    id: 'demo-requisition-officer',
-    authUserId: 'demo-requisition-officer',
-    email: 'officer@pngjudiciary.gov.pg',
-    name: 'Requisition Officer',
-    role: 'Requisition Officer',
-    roles: ['Requisition Officer'],
-    department: 'Registry',
-  },
-  'auditor@pngjudiciary.gov.pg': {
-    id: 'demo-auditor',
-    authUserId: 'demo-auditor',
-    email: 'auditor@pngjudiciary.gov.pg',
-    name: 'Auditor',
-    role: 'Auditor',
-    roles: ['Auditor'],
-    department: 'Internal Audit',
-  },
-  'exec@pngjudiciary.gov.pg': {
-    id: 'demo-executive-management',
-    authUserId: 'demo-executive-management',
-    email: 'exec@pngjudiciary.gov.pg',
-    name: 'Executive Management',
-    role: 'Executive Management',
-    roles: ['Executive Management'],
-    department: 'Executive',
-  },
-}
-
-// Sign in with email and password
+// Sign in with email and password through Supabase Auth only.
 export async function signIn(email: string, password: string) {
-  const normalizedEmail = email.trim().toLowerCase()
-
-  if (!isSupabaseNetworkEnabled) {
-    const profile = DEMO_PROFILES[normalizedEmail]
-    if (!profile || password !== DEMO_PASSWORD) {
-      throw new Error('Invalid login credentials')
-    }
-
-    return {
-      user: {
-        id: profile.id,
-        email: profile.email,
-        app_metadata: { provider: 'offline-demo' },
-        user_metadata: { full_name: profile.name },
-        aud: 'authenticated',
-        created_at: new Date(0).toISOString(),
-      } as User,
-      session: null,
-      profile,
-    }
-  }
-
   const { data, error } = await supabase.auth.signInWithPassword({
-    email,
+    email: email.trim().toLowerCase(),
     password,
   })
 
   if (error) throw error
 
   // Return immediately after Supabase authentication. Profile/RBAC enrichment is
-  // loaded by AuthContext in the background so login redirects are not blocked by
-  // slow profile, permission, or audit queries.
+  // loaded by AuthContext from the database in the background.
   const profile: AuthUser | null = data.user
     ? {
         id: data.user.id,

@@ -1,7 +1,6 @@
 import { supabase, isSupabaseNetworkEnabled } from '@/lib/supabase'
-import { MENU_ITEMS, MODULES, ROUTE_PERMISSIONS } from './config'
+import { ROUTE_PERMISSIONS } from './config'
 import type { PermissionCode, RbacDataScope, RbacMenuItem, RbacModule, RbacRole, ScopeableRecord, UserAccessContext } from './types'
-import { ROLE_PERMISSIONS } from '@/lib/permissions'
 
 export const DEFAULT_DATA_SCOPE: RbacDataScope = { scope_type: 'OWN_RECORDS' }
 
@@ -25,15 +24,14 @@ export function canPerformAllActions(permissions: PermissionCode[], required: Pe
 
 export function canAccessModule(permissions: PermissionCode[], module: RbacModule) {
   if (permissions.includes('all')) return true
-  const moduleMenus = MENU_ITEMS.filter((item) => item.module_code === module.code)
-  return moduleMenus.some((item) => canAccessMenu(permissions, item))
+  return false
 }
 
 export function canAccessMenu(permissions: PermissionCode[], menu: RbacMenuItem) {
   return canPerformAnyAction(permissions, menu.required_permissions)
 }
 
-export function getAuthorizedMenus(permissions: PermissionCode[], menus: RbacMenuItem[] = MENU_ITEMS) {
+export function getAuthorizedMenus(permissions: PermissionCode[], menus: RbacMenuItem[]) {
   return menus
     .filter((menu) => menu.is_active && canAccessMenu(permissions, menu))
     .sort((a, b) => a.sort_order - b.sort_order)
@@ -82,10 +80,8 @@ export async function getUserRoles(userId: string): Promise<RbacRole[]> {
     .filter((role): role is RbacRole => Boolean(role?.id))
 }
 
-export async function getUserPermissions(userId: string, roleNames: string[] = []): Promise<PermissionCode[]> {
-  if (!isSupabaseNetworkEnabled) {
-    return normalizePermissions(roleNames.flatMap((role) => ROLE_PERMISSIONS[role] || []))
-  }
+export async function getUserPermissions(userId: string): Promise<PermissionCode[]> {
+  if (!isSupabaseNetworkEnabled) return []
 
   try {
     const { data: roleRows, error: roleError } = await supabase
@@ -95,7 +91,7 @@ export async function getUserPermissions(userId: string, roleNames: string[] = [
 
     if (roleError) throw roleError
     const roleIds = (roleRows || []).map((row) => row.role_id).filter(Boolean)
-    if (!roleIds.length) return normalizePermissions(roleNames.flatMap((role) => ROLE_PERMISSIONS[role] || []))
+    if (!roleIds.length) return []
 
     const { data: permissions, error: permError } = await supabase
       .from('role_permissions')
@@ -116,8 +112,8 @@ export async function getUserPermissions(userId: string, roleNames: string[] = [
     const directAllow = (userOverrides || []).filter((row) => row.effect === 'ALLOW').map((row) => row.permission)
     return normalizePermissions([...allowed.filter((permission) => !denied.has(permission)), ...directAllow])
   } catch (error) {
-    console.warn('Falling back to bundled RBAC permissions:', error)
-    return normalizePermissions(roleNames.flatMap((role) => ROLE_PERMISSIONS[role] || []))
+    console.warn('Database RBAC permission lookup failed:', error)
+    return []
   }
 }
 
@@ -143,7 +139,7 @@ export async function getUserDataScopes(userId: string, roles: RbacRole[]): Prom
 }
 
 export async function loadRbacNavigation(permissions: PermissionCode[]) {
-  if (!isSupabaseNetworkEnabled) return getAuthorizedMenus(permissions)
+  if (!isSupabaseNetworkEnabled) return []
   try {
     const { data, error } = await supabase
       .from('menu_items')
@@ -154,13 +150,13 @@ export async function loadRbacNavigation(permissions: PermissionCode[]) {
     if (error) throw error
     return getAuthorizedMenus(permissions, (data || []) as RbacMenuItem[])
   } catch (error) {
-    console.warn('Falling back to bundled RBAC navigation:', error)
-    return getAuthorizedMenus(permissions)
+    console.warn('Database RBAC navigation lookup failed:', error)
+    return []
   }
 }
 
 export async function loadRbacModules() {
-  if (!isSupabaseNetworkEnabled) return MODULES
+  if (!isSupabaseNetworkEnabled) return []
   try {
     const { data, error } = await supabase
       .from('modules')
@@ -170,8 +166,8 @@ export async function loadRbacModules() {
     if (error) throw error
     return (data || []) as RbacModule[]
   } catch (error) {
-    console.warn('Falling back to bundled RBAC modules:', error)
-    return MODULES
+    console.warn('Database RBAC module lookup failed:', error)
+    return []
   }
 }
 

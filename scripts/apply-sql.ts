@@ -17,7 +17,8 @@ function loadEnv() {
 }
 loadEnv()
 
-const PROJECT_REF = 'qzsmmalfeinoagvronpb'
+const PROJECT_REF = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace('https://', '').split('.')[0]
+if (!PROJECT_REF) throw new Error('NEXT_PUBLIC_SUPABASE_URL is required to derive the Supabase project ref')
 const POOLER_HOST = 'aws-0-ap-northeast-1.pooler.supabase.com'
 const POOLER_PORT = 5432
 
