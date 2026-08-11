@@ -122,29 +122,19 @@ export async function signIn(email: string, password: string) {
 
   if (error) throw error
 
-  // Get user profile from our users table (optional - app works without it)
-  let profile: AuthUser | null = null
-  if (data.user) {
-    // Always create a fallback profile first
-    profile = {
-      id: data.user.id,
-      authUserId: data.user.id,
-      email: data.user.email || email,
-      name: data.user.email?.split('@')[0] || email.split('@')[0] || 'User',
-      role: 'Staff',
-      roles: ['Staff'],
-    }
-
-    // Try to get enhanced profile from users table (non-blocking)
-    try {
-      const enhancedProfile = await getUserProfile(data.user.id, data.user.email || email)
-      if (enhancedProfile) {
-        profile = enhancedProfile
+  // Return immediately after Supabase authentication. Profile/RBAC enrichment is
+  // loaded by AuthContext in the background so login redirects are not blocked by
+  // slow profile, permission, or audit queries.
+  const profile: AuthUser | null = data.user
+    ? {
+        id: data.user.id,
+        authUserId: data.user.id,
+        email: data.user.email || email,
+        name: data.user.email?.split('@')[0] || email.split('@')[0] || 'User',
+        role: 'Staff',
+        roles: ['Staff'],
       }
-    } catch (e) {
-      console.log('Could not fetch enhanced user profile, using basic auth data:', e)
-    }
-  }
+    : null
 
   return { user: data.user, session: data.session, profile }
 }

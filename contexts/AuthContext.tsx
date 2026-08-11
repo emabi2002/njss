@@ -94,7 +94,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(useOfflineTestingFallback ? TESTING_USER : null)
   const [profile, setProfile] = useState<AuthUser | null>(useOfflineTestingFallback ? TESTING_PROFILE : null)
   const [permissions, setPermissions] = useState<string[]>(useOfflineTestingFallback ? ['all'] : [])
-  const [scopes, setScopes] = useState<RbacDataScope[]>(useOfflineTestingFallback ? [{ scope_type: 'SYSTEM_WIDE' } as RbacDataScope] : [])
+  const [scopes, setScopes] = useState<RbacDataScope[]>(
+    useOfflineTestingFallback ? [{ scope_type: 'SYSTEM_WIDE' } as RbacDataScope] : [],
+  )
   const [menus, setMenus] = useState<RbacMenuItem[]>([])
   const [loading, setLoading] = useState(!useOfflineTestingFallback)
   // True only while we're showing the default testing identity (no real login).
@@ -149,19 +151,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (session?.user) {
         setUser(session.user)
+        setProfile({
+          id: session.user.id,
+          authUserId: session.user.id,
+          email: session.user.email || '',
+          name: session.user.email?.split('@')[0] || 'User',
+          role: 'Staff',
+          roles: ['Staff'],
+        })
         setIsTestingFallback(false)
-        await loadAccessContext(session.user, session.user.email || '')
-        await logAccessEvent({
+        setLoading(false)
+        loadAccessContext(session.user, session.user.email || '').catch((error) =>
+          console.warn('RBAC profile load failed:', error),
+        )
+        logAccessEvent({
           userId: session.user.id,
           userEmail: session.user.email,
           action: 'LOGIN',
           module: 'AUTH',
-        })
+        }).catch((error) => console.warn('Login audit failed:', error))
       } else {
         applyTestingFallback()
+        if (mounted) setLoading(false)
       }
-
-      if (mounted) setLoading(false)
     }
 
     loadSession()
@@ -171,15 +183,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (session?.user) {
         setUser(session.user)
+        setProfile({
+          id: session.user.id,
+          authUserId: session.user.id,
+          email: session.user.email || '',
+          name: session.user.email?.split('@')[0] || 'User',
+          role: 'Staff',
+          roles: ['Staff'],
+        })
         setIsTestingFallback(false)
-        await loadAccessContext(session.user, session.user.email || '')
+        setLoading(false)
+        loadAccessContext(session.user, session.user.email || '').catch((error) =>
+          console.warn('RBAC profile load failed:', error),
+        )
         if (event === 'SIGNED_IN') {
-          await logAccessEvent({
+          logAccessEvent({
             userId: session.user.id,
             userEmail: session.user.email,
             action: 'LOGIN',
             module: 'AUTH',
-          })
+          }).catch((error) => console.warn('Login audit failed:', error))
         }
       } else {
         // No session — fall back to the testing identity instead of logging out.

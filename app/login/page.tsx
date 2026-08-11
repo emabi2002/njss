@@ -20,6 +20,30 @@ const DEMO_ACCOUNTS = [
   { role: "Executive Management", email: "exec@pngjudiciary.gov.pg" },
 ]
 
+const LOGIN_TIMEOUT_MS = 10000
+
+async function withLoginTimeout<T>(promise: Promise<T>) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(
+          () =>
+            reject(
+              new Error(
+                "Sign in timed out. Please check the Supabase environment variables and try again."
+              )
+            ),
+          LOGIN_TIMEOUT_MS
+        )
+      }),
+    ])
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
+
 function LoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -32,7 +56,7 @@ function LoginContent() {
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState("")
 
-  const redirectTo = searchParams.get('redirect') || '/dashboard'
+  const redirectTo = searchParams.get("redirect") || "/dashboard"
 
   // Redirect if already logged in with a REAL session (ignore the testing-mode
   // placeholder identity so the login page stays reachable to switch roles).
@@ -53,21 +77,17 @@ function LoginContent() {
         throw new Error("Please enter both email and password")
       }
 
-      await signIn(email, password)
+      await withLoginTimeout(signIn(email, password))
       setSuccess("Login successful! Redirecting...")
 
-      // Small delay for UX
-      setTimeout(() => {
-        router.push(redirectTo)
-        router.refresh()
-      }, 500)
-
+      router.push(redirectTo)
+      router.refresh()
     } catch (err: unknown) {
-      console.error('Login error:', err)
+      console.error("Login error:", err)
       if (err instanceof Error) {
-        if (err.message.includes('Invalid login')) {
+        if (err.message.includes("Invalid login")) {
           setError("Invalid email or password. Please try again.")
-        } else if (err.message.includes('Email not confirmed')) {
+        } else if (err.message.includes("Email not confirmed")) {
           setError("Please verify your email address before signing in.")
         } else {
           setError(err.message)
@@ -190,14 +210,19 @@ function LoginContent() {
           {/* Demo accounts — click to fill */}
           <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
             <p className="text-xs font-medium text-slate-700 mb-2">
-              Demo accounts — click to fill (password <span className="font-mono text-slate-900">{DEMO_PASSWORD}</span>)
+              Demo accounts — click to fill (password{" "}
+              <span className="font-mono text-slate-900">{DEMO_PASSWORD}</span>)
             </p>
             <div className="grid grid-cols-2 gap-1.5">
               {DEMO_ACCOUNTS.map((a) => (
                 <button
                   key={a.email}
                   type="button"
-                  onClick={() => { setEmail(a.email); setPassword(DEMO_PASSWORD); setError("") }}
+                  onClick={() => {
+                    setEmail(a.email)
+                    setPassword(DEMO_PASSWORD)
+                    setError("")
+                  }}
                   className="text-left px-2.5 py-1.5 rounded-md border border-slate-200 bg-white hover:border-red-300 hover:bg-red-50 transition-colors"
                 >
                   <span className="block text-xs font-medium text-slate-800">{a.role}</span>
@@ -210,12 +235,8 @@ function LoginContent() {
 
         {/* Footer */}
         <div className="text-center mt-6">
-          <p className="text-sm text-slate-600">
-            National Judiciary Staff Services
-          </p>
-          <p className="text-xs text-slate-500 mt-1">
-            Papua New Guinea
-          </p>
+          <p className="text-sm text-slate-600">National Judiciary Staff Services</p>
+          <p className="text-xs text-slate-500 mt-1">Papua New Guinea</p>
         </div>
       </div>
     </div>
@@ -224,11 +245,13 @@ function LoginContent() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-red-50 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-red-600" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-red-50 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-red-600" />
+        </div>
+      }
+    >
       <LoginContent />
     </Suspense>
   )
