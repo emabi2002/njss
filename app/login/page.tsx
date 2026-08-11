@@ -80,8 +80,7 @@ function LoginContent() {
       await withLoginTimeout(signIn(email, password))
       setSuccess("Login successful! Redirecting...")
 
-      router.push(redirectTo)
-      router.refresh()
+      window.location.assign(redirectTo)
     } catch (err: unknown) {
       console.error("Login error:", err)
       if (err instanceof Error) {
