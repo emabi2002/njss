@@ -10,20 +10,46 @@ const FALLBACK_SUPABASE_URL = 'https://qzsmmalfeinoagvronpb.supabase.co'
 const FALLBACK_SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF6c21tYWxmZWlub2FndnJvbnBiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5MDc4ODYsImV4cCI6MjEwMTQ4Mzg4Nn0.Nt-QKzlhGjjoyaej46diDoiXmCgqnfgBcMRs9kRdmOQ'
 
+const EXPECTED_SUPABASE_REF = 'qzsmmalfeinoagvronpb'
+const SUPABASE_REQUEST_TIMEOUT_MS = 8000
+
 const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const envAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 export const isSupabaseNetworkEnabled = process.env.NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED !== 'false'
 
-// Only trust an env URL that actually looks like a Supabase URL; otherwise use the fallback.
-const supabaseUrl =
-  envUrl && envUrl.includes('.supabase.co') ? envUrl : FALLBACK_SUPABASE_URL
+function isExpectedSupabaseUrl(url: string | undefined) {
+  if (!url) return false
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' && parsed.hostname === `${EXPECTED_SUPABASE_REF}.supabase.co`
+  } catch {
+    return false
+  }
+}
+
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), SUPABASE_REQUEST_TIMEOUT_MS)
+  return fetch(input, { ...init, signal: init?.signal || controller.signal }).finally(() =>
+    clearTimeout(timeout)
+  )
+}
+
+// Only trust the exact NJSS Supabase project URL. A different .supabase.co host
+// may pass shape validation but will fail CORS and stall the dashboard.
+const supabaseUrl = isExpectedSupabaseUrl(envUrl) ? envUrl! : FALLBACK_SUPABASE_URL
 // Only trust an env anon key that looks like a JWT; otherwise use the fallback.
 const supabaseAnonKey =
   envAnonKey && envAnonKey.startsWith('eyJ') ? envAnonKey : FALLBACK_SUPABASE_ANON_KEY
 
+export const activeSupabaseUrl = supabaseUrl
+
 // Client-side Supabase client with proper auth config
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: {
+    fetch: fetchWithTimeout,
+  },
   auth: {
     persistSession: isSupabaseNetworkEnabled,
     autoRefreshToken: isSupabaseNetworkEnabled,

@@ -42,6 +42,22 @@ type CentreSpend = {
 
 type PlanStats = { total: number; draft: number; inflight: number; confirmed: number; value: number }
 
+type AllocationRow = { original_budget?: number; supplemental_budget?: number }
+type ReleaseRow = { quarter?: number; released_amount?: number }
+type CommitmentRow = { committed_amount?: number; paid_amount?: number }
+type BudgetCodeRow = {
+  cost_centre_code?: string | null
+  cost_centre_name?: string | null
+  section_name?: string | null
+  revised_budget?: number
+  committed_amount?: number
+  actual_expenditure?: number
+}
+type PlanRow = { status?: string; total_planned_budget?: number }
+type StatusRow = { status?: string }
+
+type DashboardQueryResult<T = Record<string, unknown>> = { data: T[] | null }
+
 // PNG Judiciary brand palette
 const COLORS = {
   maroon: '#4c0f16',
@@ -53,6 +69,32 @@ const COLORS = {
 }
 
 const PIE_COLORS = ['#15803d', '#d4af37', '#8a1420', '#cbd5e1']
+
+const DASHBOARD_QUERY_TIMEOUT_MS = 9000
+
+async function withDashboardTimeout<T extends DashboardQueryResult>(
+  query: PromiseLike<T>,
+  fallback: DashboardQueryResult = { data: [] },
+  label: string
+): Promise<DashboardQueryResult> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.resolve(query as PromiseLike<DashboardQueryResult>),
+      new Promise<DashboardQueryResult>((resolve) => {
+        timeoutId = setTimeout(() => {
+          console.warn(`Dashboard query timed out: ${label}`)
+          resolve(fallback)
+        }, DASHBOARD_QUERY_TIMEOUT_MS)
+      }),
+    ])
+  } catch (error) {
+    console.warn(`Dashboard query failed: ${label}`, error)
+    return fallback
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
 
 export default function DashboardPage() {
   const offlineQuarterlyData = ['Q1', 'Q2', 'Q3', 'Q4'].map((quarter) => ({ quarter, released: 0, spent: 0 }))
@@ -73,36 +115,74 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!isSupabaseNetworkEnabled) {
+      setLoading(false)
       return
     }
 
     async function fetchDashboardData() {
       try {
-        // Fetch budget allocations
-        const { data: allocations } = await supabase
-          .from('budget_allocations')
-          .select('original_budget, supplemental_budget')
-          .eq('financial_year', 2025)
-          .eq('is_active', true)
+        const [allocationsRes, releasesRes, commitmentsRes, codeRowsRes, plansRes, pendingRes, allFF3sRes, allFF4sRes] = await Promise.all([
+          withDashboardTimeout(
+            supabase.from('budget_allocations').select('original_budget, supplemental_budget').eq('financial_year', 2025).eq('is_active', true),
+            { data: [] },
+            'budget_allocations',
+          ),
+          withDashboardTimeout(
+            supabase.from('quarterly_releases').select('quarter, released_amount').eq('financial_year', 2025).order('quarter'),
+            { data: [] },
+            'quarterly_releases',
+          ),
+          withDashboardTimeout(
+            supabase.from('ff3_commitments').select('committed_amount, paid_amount').eq('financial_year', 2025),
+            { data: [] },
+            'ff3_commitments',
+          ),
+          withDashboardTimeout(
+            supabase.from('v_budget_by_code').select('cost_centre_code, cost_centre_name, section_name, revised_budget, committed_amount, actual_expenditure').eq('financial_year', 2025),
+            { data: [] },
+            'v_budget_by_code',
+          ),
+          withDashboardTimeout(
+            supabase.from('annual_plan_headers').select('status, total_planned_budget').eq('financial_year', 2025),
+            { data: [] },
+            'annual_plan_headers',
+          ),
+          withDashboardTimeout(
+            supabase
+              .from('ff3_headers')
+              .select('ff3_number, purpose, total_estimated_amount, status, urgency_level, created_at, section:sections(name)')
+              .in('status', ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'])
+              .order('created_at', { ascending: false })
+              .limit(5),
+            { data: [] },
+            'pending_ff3_headers',
+          ),
+          withDashboardTimeout(
+            supabase.from('ff3_headers').select('status').eq('financial_year', 2025),
+            { data: [] },
+            'ff3_stats',
+          ),
+          withDashboardTimeout(
+            supabase.from('ff4_headers').select('status').eq('financial_year', 2025),
+            { data: [] },
+            'ff4_stats',
+          ),
+        ])
 
-        // Fetch quarterly releases
-        const { data: releases } = await supabase
-          .from('quarterly_releases')
-          .select('quarter, released_amount')
-          .eq('financial_year', 2025)
-          .order('quarter')
-
-        // Fetch commitments
-        const { data: commitments } = await supabase
-          .from('ff3_commitments')
-          .select('committed_amount, paid_amount')
-          .eq('financial_year', 2025)
+        const allocations = (allocationsRes.data || []) as AllocationRow[]
+        const releases = (releasesRes.data || []) as ReleaseRow[]
+        const commitments = (commitmentsRes.data || []) as CommitmentRow[]
+        const codeRows = (codeRowsRes.data || []) as BudgetCodeRow[]
+        const plans = (plansRes.data || []) as PlanRow[]
+        const pending = (pendingRes.data || []) as PendingFF3[]
+        const allFF3s = (allFF3sRes.data || []) as StatusRow[]
+        const allFF4s = (allFF4sRes.data || []) as StatusRow[]
 
         // Calculate totals
-        const totalBudget = allocations?.reduce((sum, a) => sum + (a.original_budget || 0) + (a.supplemental_budget || 0), 0) || 0
-        const quarterlyReleased = releases?.reduce((sum, r) => sum + (r.released_amount || 0), 0) || 0
-        const committedAmount = commitments?.reduce((sum, c) => sum + ((c.committed_amount || 0) - (c.paid_amount || 0)), 0) || 0
-        const actualExpenditure = commitments?.reduce((sum, c) => sum + (c.paid_amount || 0), 0) || 0
+        const totalBudget = allocations.reduce((sum, a) => sum + (a.original_budget || 0) + (a.supplemental_budget || 0), 0)
+        const quarterlyReleased = releases.reduce((sum, r) => sum + (r.released_amount || 0), 0)
+        const committedAmount = commitments.reduce((sum, c) => sum + ((c.committed_amount || 0) - (c.paid_amount || 0)), 0)
+        const actualExpenditure = commitments.reduce((sum, c) => sum + (c.paid_amount || 0), 0)
         const availableBalance = quarterlyReleased - committedAmount - actualExpenditure
 
         setBudgetSummary({
@@ -116,20 +196,16 @@ export default function DashboardPage() {
         // Set quarterly chart data
         const quarterNames = ['Q1', 'Q2', 'Q3', 'Q4']
         const qData = quarterNames.map((q, i) => {
-          const release = releases?.find(r => r.quarter === i + 1)
+          const release = releases.find((r) => r.quarter === i + 1)
           return {
             quarter: q,
             released: release?.released_amount || 0,
-            spent: i < 2 ? (release?.released_amount || 0) * 0.7 : 0 // Simulated spent data
+            spent: i < 2 ? (release?.released_amount || 0) * 0.7 : 0
           }
         })
         setQuarterlyData(qData)
 
         // Budget by cost centre (from the consolidated v_budget_by_code view)
-        const { data: codeRows } = await supabase
-          .from('v_budget_by_code')
-          .select('cost_centre_code, cost_centre_name, section_name, revised_budget, committed_amount, actual_expenditure')
-          .eq('financial_year', 2025)
         const centreMap = new Map<string, { approved: number; used: number }>()
         ;(codeRows || []).forEach((r) => {
           const key = (r.cost_centre_code as string) || (r.section_name as string) || 'Unassigned'
@@ -146,37 +222,18 @@ export default function DashboardPage() {
         )
 
         // Annual plan statistics
-        const { data: plans } = await supabase
-          .from('annual_plan_headers')
-          .select('status, total_planned_budget')
-          .eq('financial_year', 2025)
         const inflightStatuses = ['SUBMITTED', 'REVIEWED', 'APPROVED_BY_DEPARTMENT', 'AUTHORIZED_BY_REGISTRAR']
         setPlanStats({
-          total: plans?.length || 0,
-          draft: plans?.filter((p) => p.status === 'DRAFT' || p.status === 'RETURNED_FOR_CORRECTION').length || 0,
-          inflight: plans?.filter((p) => inflightStatuses.includes(p.status)).length || 0,
-          confirmed: plans?.filter((p) => p.status === 'BUDGET_CONFIRMED').length || 0,
-          value: plans?.reduce((s, p) => s + (p.total_planned_budget || 0), 0) || 0,
+          total: plans.length,
+          draft: plans.filter((p) => p.status === 'DRAFT' || p.status === 'RETURNED_FOR_CORRECTION').length,
+          inflight: plans.filter((p) => !!p.status && inflightStatuses.includes(p.status)).length,
+          confirmed: plans.filter((p) => p.status === 'BUDGET_CONFIRMED').length,
+          value: plans.reduce((s, p) => s + (p.total_planned_budget || 0), 0),
         })
 
         // Fetch pending FF3s
-        const { data: pending } = await supabase
-          .from('ff3_headers')
-          .select(`
-            ff3_number,
-            purpose,
-            total_estimated_amount,
-            status,
-            urgency_level,
-            created_at,
-            section:sections(name)
-          `)
-          .in('status', ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'])
-          .order('created_at', { ascending: false })
-          .limit(5)
-
         const now = Date.now()
-        const pendingWithDays = (pending || []).map(ff3 => ({
+        const pendingWithDays = pending.map(ff3 => ({
           ...ff3,
           section: ff3.section as unknown as { name: string } | null,
           daysWaiting: Math.floor((now - new Date(ff3.created_at).getTime()) / (1000 * 60 * 60 * 24))
@@ -184,29 +241,19 @@ export default function DashboardPage() {
         setPendingFF3s(pendingWithDays)
 
         // Fetch FF3 stats
-        const { data: allFF3s } = await supabase
-          .from('ff3_headers')
-          .select('status')
-          .eq('financial_year', 2025)
-
         setFf3Stats({
-          total: allFF3s?.length || 0,
-          pending: allFF3s?.filter(f => ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'].includes(f.status)).length || 0,
-          approved: allFF3s?.filter(f => f.status === 'APPROVED').length || 0,
-          rejected: allFF3s?.filter(f => f.status === 'REJECTED').length || 0
+          total: allFF3s.length,
+          pending: allFF3s.filter(f => !!f.status && ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'].includes(f.status)).length,
+          approved: allFF3s.filter(f => f.status === 'APPROVED').length,
+          rejected: allFF3s.filter(f => f.status === 'REJECTED').length
         })
 
         // Fetch FF4 stats
-        const { data: allFF4s } = await supabase
-          .from('ff4_headers')
-          .select('status')
-          .eq('financial_year', 2025)
-
         setFf4Stats({
-          total: allFF4s?.length || 0,
-          pending: allFF4s?.filter(f => ['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED'].includes(f.status)).length || 0,
-          paid: allFF4s?.filter(f => f.status === 'PAID').length || 0,
-          reconciled: allFF4s?.filter(f => f.status === 'RECONCILED').length || 0
+          total: allFF4s.length,
+          pending: allFF4s.filter(f => !!f.status && ['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED'].includes(f.status)).length,
+          paid: allFF4s.filter(f => f.status === 'PAID').length,
+          reconciled: allFF4s.filter(f => f.status === 'RECONCILED').length
         })
 
       } catch (error) {
