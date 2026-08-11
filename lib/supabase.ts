@@ -2,14 +2,17 @@ import { createClient } from '@supabase/supabase-js'
 
 const SUPABASE_REQUEST_TIMEOUT_MS = 8000
 
-function requiredEnv(name: string) {
-  const value = process.env[name]?.trim()
-  if (!value) throw new Error(`Missing required environment variable: ${name}`)
-  return value
+function requireValue(name: string, value: string | undefined) {
+  const trimmed = value?.trim()
+  if (!trimmed) throw new Error(`Missing required environment variable: ${name}`)
+  return trimmed
 }
 
-const supabaseUrl = requiredEnv('NEXT_PUBLIC_SUPABASE_URL')
-const supabaseAnonKey = requiredEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY')
+const supabaseUrl = requireValue('NEXT_PUBLIC_SUPABASE_URL', process.env.NEXT_PUBLIC_SUPABASE_URL)
+const supabaseAnonKey = requireValue(
+  'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+)
 
 export const isSupabaseNetworkEnabled = process.env.NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED !== 'false'
 
@@ -41,7 +44,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 // Server-side Supabase client (with service role for admin operations)
 export function createServerSupabaseClient() {
-  const serviceRoleKey = requiredEnv('SUPABASE_SERVICE_ROLE_KEY')
+  const serviceRoleKey = requireValue('SUPABASE_SERVICE_ROLE_KEY', process.env.SUPABASE_SERVICE_ROLE_KEY)
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
