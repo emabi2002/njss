@@ -1,23 +1,20 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { guardDashboardRoute } from './lib/rbac/server'
 
-// TESTING MODE: Authentication disabled for testing
-// To re-enable auth, restore the original middleware code
+const RBAC_ENFORCED = process.env.NEXT_PUBLIC_RBAC_ENFORCED === 'true'
 
 export async function middleware(request: NextRequest) {
-  // Allow all routes without authentication for testing
+  if (!RBAC_ENFORCED) return NextResponse.next()
+
+  if (request.nextUrl.pathname.startsWith('/dashboard')) {
+    return guardDashboardRoute(request)
+  }
+
   return NextResponse.next()
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     * - api routes
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$|api).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

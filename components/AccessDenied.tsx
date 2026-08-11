@@ -4,7 +4,7 @@ import Link from "next/link"
 import { ShieldAlert, ArrowLeft } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 
-export function AccessDenied({ title }: { title?: string }) {
+export function AccessDenied({ title, message }: { title?: string; message?: string }) {
   const { role } = useAuth()
   return (
     <div className="flex items-center justify-center py-20">
@@ -14,8 +14,22 @@ export function AccessDenied({ title }: { title?: string }) {
         </div>
         <h2 className="text-xl font-semibold text-slate-900">Access Restricted</h2>
         <p className="text-slate-600 mt-2">
-          {title ? <>The <span className="font-medium">{title}</span> area is</> : 'This area is'} not available for your
-          current role (<span className="font-medium" suppressHydrationWarning>{role}</span>).
+          {message || (
+            <>
+              {title ? (
+                <>
+                  The <span className="font-medium">{title}</span> area is
+                </>
+              ) : (
+                "This area is"
+              )}{" "}
+              not available for your current role (
+              <span className="font-medium" suppressHydrationWarning>
+                {role}
+              </span>
+              ).
+            </>
+          )}
         </p>
         <p className="text-sm text-slate-500 mt-1">
           Switch roles from the user menu or contact a System Administrator for access.

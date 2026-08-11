@@ -5,92 +5,70 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard,
-  FileText,
-  DollarSign,
-  Users,
-  Settings,
   Menu,
   X,
   ChevronDown,
   LogOut,
   Search,
-  FileCheck,
-  Wallet,
-  Calculator,
-  BarChart3,
-  FolderOpen,
-  Calendar,
   Loader2,
   User,
-  ClipboardList,
-  BookOpen
 } from "lucide-react"
 import { NJSSLogo } from "../components/NJSSLogo"
 import { useAuth } from "@/contexts/AuthContext"
 import { NotificationsDropdown } from "@/components/NotificationsDropdown"
-import { hasAnyPermission, type Permission } from "@/lib/permissions"
+import { ICONS, MENU_ITEMS } from "@/lib/rbac/config"
+import type { RbacMenuItem } from "@/lib/rbac/types"
 import { loadOrganization, DEFAULT_ORG, type OrganizationProfile } from "@/lib/org"
 
-type NavItem = { name: string; href: string; icon: typeof LayoutDashboard; perms?: Permission[] }
+type NavItem = RbacMenuItem
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
-  const { user, profile, role, loading, signOut } = useAuth()
+  const { user, profile, role, loading, signOut, menus } = useAuth()
 
   // Redirect to login when there's no authenticated session
   useEffect(() => {
-    if (!loading && !user) router.replace('/login')
+    if (!loading && !user) router.replace("/login")
   }, [loading, user, router])
 
   // Cache the organization profile so report/export headers are always branded
   const [org, setOrg] = useState<OrganizationProfile>(DEFAULT_ORG)
   // Tracks the last logo URL that failed to load so we can fall back gracefully.
-  const [failedLogo, setFailedLogo] = useState('')
+  const [failedLogo, setFailedLogo] = useState("")
   useEffect(() => {
     if (user) loadOrganization().then(setOrg)
   }, [user])
 
-  const navigation: NavItem[] = [
-    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, perms: ["dashboard.view"] },
-    { name: "FF3 Requisitions", href: "/dashboard/ff3", icon: FileText, perms: ["ff3.create", "ff3.endorse", "ff3.approve", "ff3.reject"] },
-    { name: "FF4 Expenses", href: "/dashboard/ff4", icon: DollarSign, perms: ["ff4.create", "ff4.verify", "ff4.process"] },
-    { name: "Commitments", href: "/dashboard/commitments", icon: FileCheck, perms: ["budget.view", "ff4.verify", "ff4.process"] },
-    { name: "Budget Control", href: "/dashboard/budget", icon: Wallet, perms: ["budget.view"] },
-    { name: "Budget Template", href: "/dashboard/budget-template", icon: Calculator, perms: ["budget.template", "budget.template.submit", "budget.template.review", "budget.template.approve"] },
-    { name: "Annual Plans", href: "/dashboard/plans", icon: Calendar, perms: ["plans.create", "plans.review", "plans.authorize", "plans.confirm", "budget.view"] },
-    { name: "Reports", href: "/dashboard/reports", icon: BarChart3, perms: ["reports.view"] },
-    { name: "Audit Log", href: "/dashboard/audit-log", icon: ClipboardList, perms: ["audit.view"] },
-    { name: "Master Data", href: "/dashboard/master", icon: FolderOpen, perms: ["masterdata.manage", "registry.manage", "users.manage"] },
-    { name: "Users & Roles", href: "/dashboard/users", icon: Users, perms: ["users.manage"] },
-    { name: "User Guide", href: "/dashboard/help", icon: BookOpen },
-    { name: "Settings", href: "/dashboard/settings", icon: Settings },
-  ]
+  const visibleNavigation: NavItem[] = (menus.length ? menus : MENU_ITEMS).filter((item) => !item.parent_code)
 
-  const visibleNavigation = navigation.filter((item) => !item.perms || hasAnyPermission(role, item.perms))
-
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/')
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/")
 
   const handleLogout = async () => {
     try {
       await signOut()
-      router.push('/login')
+      router.push("/login")
     } catch (error) {
-      console.error('Logout error:', error)
+      console.error("Logout error:", error)
     }
   }
 
   // Get user initials for avatar
   const getInitials = () => {
     if (profile?.name) {
-      return profile.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+      return profile.name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
     }
     if (user?.email) {
       return user.email.slice(0, 2).toUpperCase()
     }
-    return 'U'
+    return "U"
   }
 
   // Show loading state while checking auth (or while redirecting to login)
@@ -132,8 +110,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <NJSSLogo size={32} />
               )}
               <div className="hidden xs:block">
-                <h1 className="text-sm font-bold text-slate-900">{org.short_name || 'NJSS'} CREMS</h1>
-                <p className="text-xs text-slate-500 hidden sm:block">{org.subtitle || 'Court Registry & Expense Monitoring System'}</p>
+                <h1 className="text-sm font-bold text-slate-900">{org.short_name || "NJSS"} CREMS</h1>
+                <p className="text-xs text-slate-500 hidden sm:block">
+                  {org.subtitle || "Court Registry & Expense Monitoring System"}
+                </p>
               </div>
             </div>
           </div>
@@ -164,25 +144,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <span className="text-sm font-semibold text-white">{getInitials()}</span>
                 </div>
                 <div className="hidden md:block text-left">
-                  <p className="text-sm font-medium text-slate-900">{profile?.name || user?.email?.split('@')[0] || 'User'}</p>
-                  <p className="text-xs text-slate-500" suppressHydrationWarning>{profile?.role || 'Staff'}</p>
+                  <p className="text-sm font-medium text-slate-900">{profile?.name || user?.email?.split("@")[0] || "User"}</p>
+                  <p className="text-xs text-slate-500" suppressHydrationWarning>
+                    {profile?.role || "Staff"}
+                  </p>
                 </div>
-                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform hidden sm:block ${userMenuOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown
+                  className={`h-4 w-4 text-slate-400 transition-transform hidden sm:block ${userMenuOpen ? "rotate-180" : ""}`}
+                />
               </button>
 
               {/* Dropdown Menu */}
               {userMenuOpen && (
                 <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50">
                   <div className="px-4 py-3 border-b border-slate-100">
-                    <p className="text-sm font-medium text-slate-900">{profile?.name || 'User'}</p>
+                    <p className="text-sm font-medium text-slate-900">{profile?.name || "User"}</p>
                     <p className="text-xs text-slate-500">{user?.email || profile?.email}</p>
                     <div className="flex items-center gap-2 mt-1.5">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-png-red/10 text-png-red">
-                        {role || 'No role'}
+                        {role || "No role"}
                       </span>
-                      {profile?.department && (
-                        <span className="text-xs text-slate-400">{profile.department}</span>
-                      )}
+                      {profile?.department && <span className="text-xs text-slate-400">{profile.department}</span>}
                     </div>
                   </div>
 
@@ -218,7 +200,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             fixed lg:static inset-y-0 left-0 z-30 w-64 border-r border-png-gold/30
             bg-[#faf7f1] print:hidden
             transform transition-transform duration-200 ease-in-out
-            ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+            ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
             pt-14 lg:pt-0
           `}
         >
@@ -227,24 +209,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               Main Menu
             </p>
             {visibleNavigation.map((item) => {
-              const Icon = item.icon
+              const Icon = ICONS[item.icon || "LayoutDashboard"] || LayoutDashboard
               const active = isActive(item.href)
               return (
                 <Link
-                  key={item.name}
+                  key={item.code}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
                   className={`
                     flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium
                     border-l-2 transition-all duration-150
-                    ${active
-                      ? 'bg-png-red/10 text-png-red border-png-gold'
-                      : 'text-slate-600 border-transparent hover:bg-png-red/5 hover:text-png-red'
-                    }
+                    ${active ? "bg-png-red/10 text-png-red border-png-gold" : "text-slate-600 border-transparent hover:bg-png-red/5 hover:text-png-red"}
                   `}
                 >
-                  <Icon className={`h-5 w-5 ${active ? 'text-png-red' : 'text-slate-400'}`} />
-                  {item.name}
+                  <Icon className={`h-5 w-5 ${active ? "text-png-red" : "text-slate-400"}`} />
+                  {item.label}
                 </Link>
               )
             })}
@@ -268,20 +247,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
 
       {/* Mobile Overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/20 z-20 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+      {sidebarOpen && <div className="fixed inset-0 bg-black/20 z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Click outside to close user menu */}
-      {userMenuOpen && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => setUserMenuOpen(false)}
-        />
-      )}
+      {userMenuOpen && <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />}
     </div>
   )
 }

@@ -316,14 +316,14 @@ export async function deleteBudgetLine(lineId: string) {
 }
 
 export async function transitionSubmission(id: string, action: 'SUBMIT' | 'RETURN' | 'RESUBMIT' | 'REVIEW' | 'APPROVE' | 'REJECT', comments = '', userEmail = '') {
-  const { data, error } = await supabase.rpc('transition_divisional_budget_submission', {
-    p_submission_id: id,
-    p_action: action,
-    p_comments: comments,
-    p_user_email: userEmail,
+  const response = await fetch('/api/workflows/budget', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operation: 'transition-submission', id, action, comments, userEmail }),
   })
-  if (error) throw error
-  return data
+  const json = await response.json()
+  if (!response.ok) throw new Error(json.error || 'Budget submission workflow action failed')
+  return json.data
 }
 
 export async function getConsolidatedBudget() {

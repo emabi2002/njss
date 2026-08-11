@@ -3,10 +3,15 @@ import type { User, Session } from '@supabase/supabase-js'
 
 export type AuthUser = {
   id: string
+  authUserId?: string | null
   email: string
   name: string
   role: string
+  roles?: string[]
+  roleIds?: string[]
   department?: string
+  departmentId?: string | null
+  sectionId?: string | null
   avatar?: string
 }
 
@@ -14,58 +19,74 @@ const DEMO_PASSWORD = 'Crms@2025'
 const DEMO_PROFILES: Record<string, AuthUser> = {
   'admin@pngjudiciary.gov.pg': {
     id: '50eade2c-8b50-47d5-ad6b-0fd05e6916f2',
+    authUserId: '50eade2c-8b50-47d5-ad6b-0fd05e6916f2',
     email: 'admin@pngjudiciary.gov.pg',
     name: 'System Administrator',
     role: 'System Administrator',
+    roles: ['System Administrator'],
     department: 'National Judiciary Staff Services',
   },
   'finance@pngjudiciary.gov.pg': {
     id: 'demo-finance-manager',
+    authUserId: 'demo-finance-manager',
     email: 'finance@pngjudiciary.gov.pg',
     name: 'Finance Manager',
     role: 'Finance Manager',
+    roles: ['Finance Manager'],
     department: 'Finance',
   },
   'depthead@pngjudiciary.gov.pg': {
     id: 'demo-department-head',
+    authUserId: 'demo-department-head',
     email: 'depthead@pngjudiciary.gov.pg',
     name: 'Department Head',
     role: 'Department Head',
+    roles: ['Department Head'],
     department: 'Operations',
   },
   'section@pngjudiciary.gov.pg': {
     id: 'demo-section-head',
+    authUserId: 'demo-section-head',
     email: 'section@pngjudiciary.gov.pg',
     name: 'Section Head',
     role: 'Section Head',
+    roles: ['Section Head'],
     department: 'Registry',
   },
   'approver@pngjudiciary.gov.pg': {
     id: 'demo-approver',
+    authUserId: 'demo-approver',
     email: 'approver@pngjudiciary.gov.pg',
     name: 'Approver',
     role: 'Approver',
+    roles: ['Approver'],
     department: 'Approvals',
   },
   'officer@pngjudiciary.gov.pg': {
     id: 'demo-requisition-officer',
+    authUserId: 'demo-requisition-officer',
     email: 'officer@pngjudiciary.gov.pg',
     name: 'Requisition Officer',
     role: 'Requisition Officer',
+    roles: ['Requisition Officer'],
     department: 'Registry',
   },
   'auditor@pngjudiciary.gov.pg': {
     id: 'demo-auditor',
+    authUserId: 'demo-auditor',
     email: 'auditor@pngjudiciary.gov.pg',
     name: 'Auditor',
     role: 'Auditor',
+    roles: ['Auditor'],
     department: 'Internal Audit',
   },
   'exec@pngjudiciary.gov.pg': {
     id: 'demo-executive-management',
+    authUserId: 'demo-executive-management',
     email: 'exec@pngjudiciary.gov.pg',
     name: 'Executive Management',
     role: 'Executive Management',
+    roles: ['Executive Management'],
     department: 'Executive',
   },
 }
@@ -107,9 +128,11 @@ export async function signIn(email: string, password: string) {
     // Always create a fallback profile first
     profile = {
       id: data.user.id,
+      authUserId: data.user.id,
       email: data.user.email || email,
       name: data.user.email?.split('@')[0] || email.split('@')[0] || 'User',
-      role: 'Staff'
+      role: 'Staff',
+      roles: ['Staff'],
     }
 
     // Try to get enhanced profile from users table (non-blocking)
@@ -146,27 +169,39 @@ export async function getCurrentUser(): Promise<User | null> {
 
 type UserRow = {
   id: string
+  auth_user_id: string | null
   email: string | null
   full_name: string | null
+  department_id: string | null
+  section_id: string | null
   department: { name: string } | null
-  user_roles: Array<{ role: { name: string } | null }> | null
+  user_roles: Array<{ role: { id: string; name: string } | null }> | null
 }
 
 // Default role when a profile has no role assigned (least privilege).
-const FALLBACK_ROLE = 'Executive Management'
+const FALLBACK_ROLE = 'Executive Viewer'
 
-// Get user profile (with department + role) from our users table.
+// Get user profile (with department + all assigned roles) from our users table.
 export async function getUserProfile(userId: string, email: string): Promise<AuthUser | null> {
-  const selectCols = 'id, email, full_name, department:departments(name), user_roles(role:roles(name))'
+  const selectCols = 'id, auth_user_id, email, full_name, department_id, section_id, department:departments(name), user_roles(role:roles(id, name))'
 
   const buildProfile = (row: UserRow): AuthUser => {
-    const roleName = row.user_roles?.find((ur) => ur.role?.name)?.role?.name || FALLBACK_ROLE
+    const assignedRoles = (row.user_roles || [])
+      .map((ur) => ur.role)
+      .filter((role): role is { id: string; name: string } => Boolean(role?.id && role.name))
+    const roleNames = assignedRoles.map((role) => role.name)
+    const primaryRole = roleNames[0] || FALLBACK_ROLE
     return {
       id: row.id,
+      authUserId: row.auth_user_id,
       email: row.email || email,
       name: row.full_name || email.split('@')[0],
-      role: roleName,
+      role: primaryRole,
+      roles: roleNames.length ? roleNames : [FALLBACK_ROLE],
+      roleIds: assignedRoles.map((role) => role.id),
       department: row.department?.name,
+      departmentId: row.department_id,
+      sectionId: row.section_id,
     }
   }
 
@@ -195,9 +230,11 @@ export async function getUserProfile(userId: string, email: string): Promise<Aut
   // Fallback: minimal profile from the auth user
   return {
     id: userId,
+    authUserId: userId,
     email,
     name: email.split('@')[0] || 'User',
     role: FALLBACK_ROLE,
+    roles: [FALLBACK_ROLE],
   }
 }
 
