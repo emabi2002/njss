@@ -202,49 +202,57 @@ export function useRealtimeNotifications(userId?: string) {
 
     if (!isSupabaseNetworkEnabled) return
 
-    // Subscribe to real-time changes
-    const channel: RealtimeChannel = supabase
-      .channel('notifications-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-        },
-        (payload) => {
-          const newNotification = payload.new as RealtimeNotification
-          handleNewNotification(newNotification)
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'notifications',
-        },
-        (payload) => {
-          const updatedNotification = payload.new as RealtimeNotification
-          setNotifications(prev =>
-            prev.map(n => n.id === updatedNotification.id ? updatedNotification : n)
-          )
-          // Recalculate unread count
-          setNotifications(prev => {
-            setUnreadCount(prev.filter(n => !n.is_read).length)
-            return prev
-          })
-        }
-      )
-      .subscribe()
+    let channel: RealtimeChannel | null = null
 
-    // Request notification permission
-    if ('Notification' in window && Notification.permission === 'default') {
-      // Don't auto-request, let user enable in settings
+    try {
+      // Use a unique channel name per hook instance. The dashboard may render
+      // notifications in multiple responsive areas, and Supabase does not allow
+      // adding postgres_changes callbacks to an already subscribed channel topic.
+      const channelName = `notifications-realtime-${userId || 'global'}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+      channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+          },
+          (payload) => {
+            const newNotification = payload.new as RealtimeNotification
+            handleNewNotification(newNotification)
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'notifications',
+          },
+          (payload) => {
+            const updatedNotification = payload.new as RealtimeNotification
+            setNotifications(prev => {
+              const next = prev.map(n => n.id === updatedNotification.id ? updatedNotification : n)
+              setUnreadCount(next.filter(n => !n.is_read).length)
+              return next
+            })
+          }
+        )
+        .subscribe((status, error) => {
+          if (error) {
+            console.warn('Notifications realtime subscription failed:', error)
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn('Notifications realtime subscription status:', status)
+          }
+        })
+    } catch (error) {
+      console.warn('Notifications realtime setup failed:', error)
     }
 
     return () => {
-      supabase.removeChannel(channel)
+      if (channel) supabase.removeChannel(channel)
     }
   }, [userId, fetchNotifications, handleNewNotification])
 
