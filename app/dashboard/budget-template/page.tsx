@@ -560,7 +560,7 @@ export default function BudgetTemplatePage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-blue-100">NJSS Standard Divisional Budget Template</p>
-              <h1 className="text-xl font-bold">Excel-style budget entry sheet</h1>
+              <h1 className="text-xl font-bold">Budget Entry Sheet</h1>
             </div>
             <div className="flex flex-wrap gap-2">
               <button onClick={loadDashboard} className="sheet-action"><RefreshCw className="h-4 w-4" /> Refresh</button>
