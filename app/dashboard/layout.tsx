@@ -3,31 +3,23 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import {
-  LayoutDashboard,
-  Menu,
-  X,
-  ChevronDown,
-  LogOut,
-  Search,
-  Loader2,
-  User,
-} from "lucide-react"
+import { LayoutDashboard, Menu, X, ChevronDown, LogOut, Search, Loader2, User } from "lucide-react"
 import { NJSSLogo } from "../components/NJSSLogo"
 import { useAuth } from "@/contexts/AuthContext"
 import { NotificationsDropdown } from "@/components/NotificationsDropdown"
 import { ICONS } from "@/lib/rbac/config"
-import type { RbacMenuItem } from "@/lib/rbac/types"
+import type { RbacMenuItem, RbacModule } from "@/lib/rbac/types"
 import { loadOrganization, DEFAULT_ORG, type OrganizationProfile } from "@/lib/org"
 
 type NavItem = RbacMenuItem
+type NavGroup = { module: RbacModule; items: NavItem[] }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
-  const { user, profile, role, loading, signOut, menus } = useAuth()
+  const { user, profile, role, loading, signOut, menus, modules } = useAuth()
 
   // Redirect to login when there's no authenticated session
   useEffect(() => {
@@ -43,6 +35,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [user])
 
   const visibleNavigation: NavItem[] = menus.filter((item) => !item.parent_code)
+  const groupedNavigation: NavGroup[] = modules
+    .map((module) => ({
+      module,
+      items: visibleNavigation
+        .filter((item) => item.module_code === module.code)
+        .sort((a, b) => a.sort_order - b.sort_order),
+    }))
+    .filter((group) => group.items.length > 0)
+    .sort((a, b) => a.module.sort_order - b.module.sort_order)
+
+  const ungroupedNavigation = visibleNavigation.filter(
+    (item) => !modules.some((module) => module.code === item.module_code),
+  )
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/")
 
@@ -144,13 +149,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <span className="text-sm font-semibold text-white">{getInitials()}</span>
                 </div>
                 <div className="hidden md:block text-left">
-                  <p className="text-sm font-medium text-slate-900">{profile?.name || user?.email?.split("@")[0] || "User"}</p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {profile?.name || user?.email?.split("@")[0] || "User"}
+                  </p>
                   <p className="text-xs text-slate-500" suppressHydrationWarning>
                     {profile?.role || "Staff"}
                   </p>
                 </div>
                 <ChevronDown
-                  className={`h-4 w-4 text-slate-400 transition-transform hidden sm:block ${userMenuOpen ? "rotate-180" : ""}`}
+                  className={`h-4 w-4 text-slate-400 transition-transform hidden sm:block ${
+                    userMenuOpen ? "rotate-180" : ""
+                  }`}
                 />
               </button>
 
@@ -206,27 +215,74 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         >
           <nav className="h-[calc(100vh-56px)] lg:h-screen overflow-y-auto p-4 space-y-1">
             <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-png-red/60">
-              Main Menu
+              Main Areas
             </p>
-            {visibleNavigation.map((item) => {
-              const Icon = ICONS[item.icon || "LayoutDashboard"] || LayoutDashboard
-              const active = isActive(item.href)
-              return (
-                <Link
-                  key={item.code}
-                  href={item.href}
-                  onClick={() => setSidebarOpen(false)}
-                  className={`
-                    flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium
-                    border-l-2 transition-all duration-150
-                    ${active ? "bg-png-red/10 text-png-red border-png-gold" : "text-slate-600 border-transparent hover:bg-png-red/5 hover:text-png-red"}
-                  `}
-                >
-                  <Icon className={`h-5 w-5 ${active ? "text-png-red" : "text-slate-400"}`} />
-                  {item.label}
-                </Link>
-              )
-            })}
+
+            {groupedNavigation.map((group) => (
+              <div key={group.module.code} className="pb-3">
+                <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                  {group.module.name}
+                </p>
+                <div className="space-y-1">
+                  {group.items.map((item) => {
+                    const Icon = ICONS[item.icon || "LayoutDashboard"] || LayoutDashboard
+                    const active = isActive(item.href)
+                    return (
+                      <Link
+                        key={item.code}
+                        href={item.href}
+                        onClick={() => setSidebarOpen(false)}
+                        className={`
+                          flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium
+                          border-l-2 transition-all duration-150
+                          ${
+                            active
+                              ? "bg-png-red/10 text-png-red border-png-gold"
+                              : "text-slate-600 border-transparent hover:bg-png-red/5 hover:text-png-red"
+                          }
+                        `}
+                      >
+                        <Icon className={`h-5 w-5 ${active ? "text-png-red" : "text-slate-400"}`} />
+                        {item.label}
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {ungroupedNavigation.length > 0 && (
+              <div className="pb-3">
+                <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                  Other
+                </p>
+                <div className="space-y-1">
+                  {ungroupedNavigation.map((item) => {
+                    const Icon = ICONS[item.icon || "LayoutDashboard"] || LayoutDashboard
+                    const active = isActive(item.href)
+                    return (
+                      <Link
+                        key={item.code}
+                        href={item.href}
+                        onClick={() => setSidebarOpen(false)}
+                        className={`
+                          flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium
+                          border-l-2 transition-all duration-150
+                          ${
+                            active
+                              ? "bg-png-red/10 text-png-red border-png-gold"
+                              : "text-slate-600 border-transparent hover:bg-png-red/5 hover:text-png-red"
+                          }
+                        `}
+                      >
+                        <Icon className={`h-5 w-5 ${active ? "text-png-red" : "text-slate-400"}`} />
+                        {item.label}
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="pt-4 mt-4 border-t border-png-gold/20">
               <button

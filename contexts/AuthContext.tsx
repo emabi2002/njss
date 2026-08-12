@@ -5,7 +5,7 @@ import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { getUserProfile, type AuthUser } from '@/lib/auth'
 import type { Permission } from '@/lib/permissions'
-import type { RbacDataScope, RbacMenuItem } from '@/lib/rbac/types'
+import type { RbacDataScope, RbacMenuItem, RbacModule } from '@/lib/rbac/types'
 import {
   canAccessRecord,
   canPerformAction,
@@ -14,6 +14,7 @@ import {
   getUserDataScopes,
   getUserPermissions,
   getUserRoles,
+  loadRbacModules,
   loadRbacNavigation,
   logAccessEvent,
 } from '@/lib/rbac/client'
@@ -29,6 +30,7 @@ type AuthContextType = {
   permissions: string[]
   scopes: RbacDataScope[]
   menus: RbacMenuItem[]
+  modules: RbacModule[]
   can: (perm: Permission) => boolean
   canAny: (perms: Permission[]) => boolean
   canAll: (perms: Permission[]) => boolean
@@ -48,6 +50,7 @@ const AuthContext = createContext<AuthContextType>({
   permissions: [],
   scopes: [],
   menus: [],
+  modules: [],
   can: () => false,
   canAny: () => false,
   canAll: () => false,
@@ -64,10 +67,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>([])
   const [scopes, setScopes] = useState<RbacDataScope[]>([])
   const [menus, setMenus] = useState<RbacMenuItem[]>([])
+  const [modules, setModules] = useState<RbacModule[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadRbacNavigation(permissions).then(setMenus)
+    loadRbacModules().then(setModules)
   }, [permissions])
 
   useEffect(() => {
@@ -237,6 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         permissions,
         scopes,
         menus,
+        modules,
         can,
         canAny,
         canAll,
