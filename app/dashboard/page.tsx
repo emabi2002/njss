@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { FileText, DollarSign, TrendingUp, Clock, CheckCircle2, Wallet, BarChart3, Calendar, Layers } from "lucide-react"
+import { FileText, DollarSign, TrendingUp, Clock, CheckCircle2, Wallet, BarChart3, Layers, Calculator } from "lucide-react"
 import Link from "next/link"
 import { supabase, isSupabaseNetworkEnabled } from "@/lib/supabase"
 import {
@@ -40,11 +40,18 @@ type CentreSpend = {
   available: number
 }
 
-type PlanStats = { total: number; draft: number; inflight: number; confirmed: number; value: number }
+type BudgetPreparationStats = {
+  draft: number
+  submitted: number
+  returned: number
+  reviewed: number
+  approved: number
+  approvedValue: number
+}
 
 type AllocationRow = { original_budget?: number; supplemental_budget?: number }
 type ReleaseRow = { quarter?: number; released_amount?: number }
-type CommitmentRow = { committed_amount?: number; paid_amount?: number }
+type CommitmentRow = { committed_amount?: number; paid_amount?: number; status?: string }
 type BudgetCodeRow = {
   cost_centre_code?: string | null
   cost_centre_name?: string | null
@@ -53,7 +60,7 @@ type BudgetCodeRow = {
   committed_amount?: number
   actual_expenditure?: number
 }
-type PlanRow = { status?: string; total_planned_budget?: number }
+type BudgetSubmissionRow = { status?: string; total_proposed_budget?: number }
 type StatusRow = { status?: string }
 
 type DashboardQueryResult<T = Record<string, unknown>> = { data: T[] | null }
@@ -97,6 +104,7 @@ async function withDashboardTimeout<T extends DashboardQueryResult>(
 }
 
 export default function DashboardPage() {
+  const activeFinancialYear = new Date().getFullYear()
   const offlineQuarterlyData = ['Q1', 'Q2', 'Q3', 'Q4'].map((quarter) => ({ quarter, released: 0, spent: 0 }))
   const [loading, setLoading] = useState(isSupabaseNetworkEnabled)
   const [budgetSummary, setBudgetSummary] = useState<BudgetSummary>({
@@ -111,41 +119,49 @@ export default function DashboardPage() {
   const [ff4Stats, setFf4Stats] = useState({ total: 0, pending: 0, paid: 0, reconciled: 0 })
   const [quarterlyData, setQuarterlyData] = useState<QuarterlyData[]>(offlineQuarterlyData)
   const [centreSpend, setCentreSpend] = useState<CentreSpend[]>([])
-  const [planStats, setPlanStats] = useState<PlanStats>({ total: 0, draft: 0, inflight: 0, confirmed: 0, value: 0 })
+  const [budgetPrepStats, setBudgetPrepStats] = useState<BudgetPreparationStats>({
+    draft: 0,
+    submitted: 0,
+    returned: 0,
+    reviewed: 0,
+    approved: 0,
+    approvedValue: 0
+  })
 
   useEffect(() => {
     if (!isSupabaseNetworkEnabled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(false)
       return
     }
 
     async function fetchDashboardData() {
       try {
-        const [allocationsRes, releasesRes, commitmentsRes, codeRowsRes, plansRes, pendingRes, allFF3sRes, allFF4sRes] = await Promise.all([
+        const [allocationsRes, releasesRes, commitmentsRes, codeRowsRes, budgetSubmissionsRes, pendingRes, allFF3sRes, allFF4sRes] = await Promise.all([
           withDashboardTimeout(
-            supabase.from('budget_allocations').select('original_budget, supplemental_budget').eq('financial_year', 2025).eq('is_active', true),
+            supabase.from('budget_allocations').select('original_budget, supplemental_budget').eq('financial_year', activeFinancialYear).eq('is_active', true),
             { data: [] },
             'budget_allocations',
           ),
           withDashboardTimeout(
-            supabase.from('quarterly_releases').select('quarter, released_amount').eq('financial_year', 2025).order('quarter'),
+            supabase.from('quarterly_releases').select('quarter, released_amount').eq('financial_year', activeFinancialYear).order('quarter'),
             { data: [] },
             'quarterly_releases',
           ),
           withDashboardTimeout(
-            supabase.from('ff3_commitments').select('committed_amount, paid_amount').eq('financial_year', 2025),
+            supabase.from('ff3_commitments').select('committed_amount, paid_amount, status').eq('financial_year', activeFinancialYear),
             { data: [] },
             'ff3_commitments',
           ),
           withDashboardTimeout(
-            supabase.from('v_budget_by_code').select('cost_centre_code, cost_centre_name, section_name, revised_budget, committed_amount, actual_expenditure').eq('financial_year', 2025),
+            supabase.from('v_budget_by_code').select('cost_centre_code, cost_centre_name, section_name, revised_budget, committed_amount, actual_expenditure').eq('financial_year', activeFinancialYear),
             { data: [] },
             'v_budget_by_code',
           ),
           withDashboardTimeout(
-            supabase.from('annual_plan_headers').select('status, total_planned_budget').eq('financial_year', 2025),
+            supabase.from('divisional_budget_submissions').select('status, total_proposed_budget').eq('budget_year', activeFinancialYear),
             { data: [] },
-            'annual_plan_headers',
+            'divisional_budget_submissions',
           ),
           withDashboardTimeout(
             supabase
@@ -158,12 +174,12 @@ export default function DashboardPage() {
             'pending_ff3_headers',
           ),
           withDashboardTimeout(
-            supabase.from('ff3_headers').select('status').eq('financial_year', 2025),
+            supabase.from('ff3_headers').select('status').eq('financial_year', activeFinancialYear),
             { data: [] },
             'ff3_stats',
           ),
           withDashboardTimeout(
-            supabase.from('ff4_headers').select('status').eq('financial_year', 2025),
+            supabase.from('ff4_headers').select('status').eq('financial_year', activeFinancialYear),
             { data: [] },
             'ff4_stats',
           ),
@@ -173,12 +189,11 @@ export default function DashboardPage() {
         const releases = (releasesRes.data || []) as ReleaseRow[]
         const commitments = (commitmentsRes.data || []) as CommitmentRow[]
         const codeRows = (codeRowsRes.data || []) as BudgetCodeRow[]
-        const plans = (plansRes.data || []) as PlanRow[]
+        const budgetSubmissions = (budgetSubmissionsRes.data || []) as BudgetSubmissionRow[]
         const pending = (pendingRes.data || []) as PendingFF3[]
         const allFF3s = (allFF3sRes.data || []) as StatusRow[]
         const allFF4s = (allFF4sRes.data || []) as StatusRow[]
 
-        // Calculate totals
         const totalBudget = allocations.reduce((sum, a) => sum + (a.original_budget || 0) + (a.supplemental_budget || 0), 0)
         const quarterlyReleased = releases.reduce((sum, r) => sum + (r.released_amount || 0), 0)
         const committedAmount = commitments.reduce((sum, c) => sum + ((c.committed_amount || 0) - (c.paid_amount || 0)), 0)
@@ -193,19 +208,19 @@ export default function DashboardPage() {
           availableBalance
         })
 
-        // Set quarterly chart data
         const quarterNames = ['Q1', 'Q2', 'Q3', 'Q4']
         const qData = quarterNames.map((q, i) => {
           const release = releases.find((r) => r.quarter === i + 1)
           return {
             quarter: q,
             released: release?.released_amount || 0,
-            spent: i < 2 ? (release?.released_amount || 0) * 0.7 : 0
+            spent: commitments
+              .filter((commitment) => commitment.status !== 'CANCELLED')
+              .reduce((sum, commitment) => sum + (commitment.paid_amount || 0), 0)
           }
         })
         setQuarterlyData(qData)
 
-        // Budget by cost centre (from the consolidated v_budget_by_code view)
         const centreMap = new Map<string, { approved: number; used: number }>()
         ;(codeRows || []).forEach((r) => {
           const key = (r.cost_centre_code as string) || (r.section_name as string) || 'Unassigned'
@@ -221,17 +236,17 @@ export default function DashboardPage() {
             .slice(0, 6)
         )
 
-        // Annual plan statistics
-        const inflightStatuses = ['SUBMITTED', 'REVIEWED', 'APPROVED_BY_DEPARTMENT', 'AUTHORIZED_BY_REGISTRAR']
-        setPlanStats({
-          total: plans.length,
-          draft: plans.filter((p) => p.status === 'DRAFT' || p.status === 'RETURNED_FOR_CORRECTION').length,
-          inflight: plans.filter((p) => !!p.status && inflightStatuses.includes(p.status)).length,
-          confirmed: plans.filter((p) => p.status === 'BUDGET_CONFIRMED').length,
-          value: plans.reduce((s, p) => s + (p.total_planned_budget || 0), 0),
+        setBudgetPrepStats({
+          draft: budgetSubmissions.filter((budget) => budget.status === 'DRAFT').length,
+          submitted: budgetSubmissions.filter((budget) => budget.status === 'SUBMITTED' || budget.status === 'RESUBMITTED').length,
+          returned: budgetSubmissions.filter((budget) => budget.status === 'RETURNED').length,
+          reviewed: budgetSubmissions.filter((budget) => budget.status === 'REVIEWED').length,
+          approved: budgetSubmissions.filter((budget) => budget.status === 'APPROVED').length,
+          approvedValue: budgetSubmissions
+            .filter((budget) => budget.status === 'APPROVED')
+            .reduce((sum, budget) => sum + (budget.total_proposed_budget || 0), 0),
         })
 
-        // Fetch pending FF3s
         const now = Date.now()
         const pendingWithDays = pending.map(ff3 => ({
           ...ff3,
@@ -240,7 +255,6 @@ export default function DashboardPage() {
         })) as PendingFF3[]
         setPendingFF3s(pendingWithDays)
 
-        // Fetch FF3 stats
         setFf3Stats({
           total: allFF3s.length,
           pending: allFF3s.filter(f => !!f.status && ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'].includes(f.status)).length,
@@ -248,7 +262,6 @@ export default function DashboardPage() {
           rejected: allFF3s.filter(f => f.status === 'REJECTED').length
         })
 
-        // Fetch FF4 stats
         setFf4Stats({
           total: allFF4s.length,
           pending: allFF4s.filter(f => !!f.status && ['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED'].includes(f.status)).length,
@@ -264,9 +277,8 @@ export default function DashboardPage() {
     }
 
     fetchDashboardData()
-  }, [])
+  }, [activeFinancialYear])
 
-  // Prepare pie chart data
   const budgetPieData = [
     { name: 'Available', value: budgetSummary.availableBalance },
     { name: 'Committed', value: budgetSummary.committedAmount },
@@ -290,11 +302,10 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-slate-600 mt-1">Financial Year 2025 Overview</p>
+          <p className="text-slate-600 mt-1">Financial Year {activeFinancialYear} Overview</p>
         </div>
         <div className="flex items-center gap-2 text-sm text-slate-600">
           <BarChart3 className="h-4 w-4" />
@@ -302,7 +313,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Budget Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <MetricCard
           title="Total Budget"
@@ -341,9 +351,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Charts Row */}
       <div className="grid lg:grid-cols-2 gap-6">
-        {/* Budget Allocation Pie Chart */}
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Budget Allocation</h2>
           <div className="h-64">
@@ -371,7 +379,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Quarterly Releases & Spending */}
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Quarterly Releases & Spending</h2>
           <div className="h-64">
@@ -390,29 +397,28 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Planning Row — Annual Plans + Budget by Cost Centre */}
+      {/* Budget Preparation Row — workflow statistics + Budget by Cost Centre */}
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Annual Plans status */}
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-png-red" /> Annual Plans
+              <Calculator className="h-5 w-5 text-png-red" /> Budget Preparation
             </h2>
-            <Link href="/dashboard/plans" className="text-sm text-png-red hover:text-png-maroon font-medium">View All →</Link>
+            <Link href="/dashboard/budget-template" className="text-sm text-png-red hover:text-png-maroon font-medium">Open Grid →</Link>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <PlanStat label="Total Plans" value={planStats.total} tone="slate" />
-            <PlanStat label="Draft / Returned" value={planStats.draft} tone="slate" />
-            <PlanStat label="In Workflow" value={planStats.inflight} tone="gold" />
-            <PlanStat label="Budget Confirmed" value={planStats.confirmed} tone="green" />
+            <PlanStat label="Draft" value={budgetPrepStats.draft} tone="slate" />
+            <PlanStat label="Submitted" value={budgetPrepStats.submitted} tone="gold" />
+            <PlanStat label="Returned" value={budgetPrepStats.returned} tone="gold" />
+            <PlanStat label="Reviewed" value={budgetPrepStats.reviewed} tone="slate" />
+            <PlanStat label="Approved" value={budgetPrepStats.approved} tone="green" />
           </div>
           <div className="mt-4 p-4 rounded-lg bg-png-red/5 border border-png-gold/30">
-            <p className="text-xs font-medium text-png-red/70 uppercase tracking-wide">Total Planned Value</p>
-            <p className="text-2xl font-bold text-png-maroon mt-1">K {planStats.value.toLocaleString()}</p>
+            <p className="text-xs font-medium text-png-red/70 uppercase tracking-wide">Total Approved Budget</p>
+            <p className="text-2xl font-bold text-png-maroon mt-1">K {budgetPrepStats.approvedValue.toLocaleString()}</p>
           </div>
         </div>
 
-        {/* Budget by Cost Centre */}
         <div className="bg-white rounded-lg border border-slate-200 p-6 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
@@ -437,15 +443,13 @@ export default function DashboardPage() {
           ) : (
             <div className="h-64 flex flex-col items-center justify-center text-slate-400">
               <Layers className="h-10 w-10 mb-2 text-slate-200" />
-              <p className="text-sm">No confirmed budget yet — confirm an annual plan to populate cost-centre budgets.</p>
+              <p className="text-sm">No approved Excel budget yet — approve a Budget Preparation submission to populate cost-centre budgets.</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* FF3 and FF4 Stats */}
       <div className="grid lg:grid-cols-2 gap-6">
-        {/* FF3 Status Distribution */}
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-slate-900">FF3 Requisitions</h2>
@@ -494,7 +498,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* FF4 Status Distribution */}
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-slate-900">FF4 Expenses</h2>
@@ -536,9 +539,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Pending Approvals */}
       <div className="grid lg:grid-cols-2 gap-6">
-        {/* FF3 Pending Approvals */}
         <div className="bg-white rounded-lg border border-slate-200">
           <div className="p-6 border-b border-slate-200">
             <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
@@ -573,7 +574,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Budget Balance Trend */}
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Available Balance Formula</h2>
           <div className="space-y-3">

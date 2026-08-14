@@ -259,37 +259,32 @@ function ProcessDocumentation() {
       </Card>
 
       {/* PHASE 2 */}
-      <SectionTitle id="p-plan" num="4." icon={Calendar} title="Annual Activity Planning" subtitle="Sections plan their year; the plan becomes the budget" />
+      <SectionTitle id="p-plan" num="4." icon={Calendar} title="Excel-Style Budget Preparation" subtitle="Create once, approve once, use throughout NJSS" />
       <Card>
-        <PhaseMeta role={<><RolePill>Section Manager</RolePill> <RolePill>Department Head</RolePill> <RolePill>Registrar</RolePill> <RolePill>Administrator</RolePill></>} screen="Annual Plans" purpose="Capture each section's planned activities and turn the authorised plan into the working budget." />
+        <PhaseMeta role={<><RolePill>Budget Officer</RolePill> <RolePill>Budget Reviewer</RolePill> <RolePill>Budget Approver</RolePill></>} screen="Budget Preparation" purpose="Capture the divisional budget in the spreadsheet grid and automatically create operational allocations on approval." />
         <h4 className="font-semibold text-slate-900 mt-4 mb-2">Workflow &amp; status path</h4>
-        <Step n={1} title="Prepare the plan (DRAFT)" role="Section Manager">
-          Create a plan for the financial year and cost centre. Add activity lines — each with an <b>expense code</b>,
-          <b> quantity</b> and <b>unit cost</b>; the line total and plan total calculate automatically.
+        <Step n={1} title="Prepare the budget (DRAFT)" role="Budget Officer">
+          Use the spreadsheet-style grid to enter finance code, activity description, justification, quantity, unit cost, frequency, other costs and January–December allocations.
         </Step>
-        <Step n={2} title="Submit (SUBMITTED)" role="Section Manager">Lock the draft and send it for departmental review.</Step>
-        <Step n={3} title="Review (REVIEWED)" role="Department Head">Check the activities and amounts; may return for correction.</Step>
-        <Step n={4} title="Approve at department (APPROVED_BY_DEPARTMENT)" role="Department Head">Departmental sign-off that the plan is sound.</Step>
-        <Step n={5} title="Authorize (AUTHORIZED_BY_REGISTRAR)" role="Registrar">Executive authorisation that the plan may become budget.</Step>
-        <Step n={6} title="Confirm to budget (BUDGET_CONFIRMED)" role="Administrator">
-          The decisive step: the system converts every plan line into an active <b>budget allocation</b> against its
-          expense code. This is what populates Budget Control.
+        <Step n={2} title="Submit (SUBMITTED)" role="Budget Officer">The system validates required fields, active ledger codes, budget ceiling and zero monthly variance before submission.</Step>
+        <Step n={3} title="Return or Review" role="Budget Reviewer">Submitted budgets can be returned for correction or marked reviewed when acceptable.</Step>
+        <Step n={4} title="Approve (APPROVED)" role="Budget Approver">
+          Approval performs server-side validation and automatically converts approved budget lines into operational <b>budget allocations</b> used by Budget Control, FF3 and reports.
         </Step>
         <Callout type="info" title="Result">
-          A set of <b>budget allocations</b> (the approved annual ceiling) per expense code, ready for quarterly release.
+          One approved Excel-style budget becomes the authoritative annual ceiling and monthly cash-flow profile for quarterly releases and transaction control.
         </Callout>
       </Card>
 
       {/* PHASE 3 */}
-      <SectionTitle id="p-consolidate" num="5." icon={Building2} title="Budget Consolidation" subtitle="Roll section plans up to a department budget" />
+      <SectionTitle id="p-consolidate" num="5." icon={Building2} title="Budget Consolidation" subtitle="Roll approved divisional budgets up to department totals" />
       <Card>
-        <PhaseMeta role={<><RolePill>Administrator</RolePill> <RolePill>Registrar</RolePill></>} screen="Budget Control → Consolidation" purpose="Produce a single consolidated budget figure per department from its authorised/confirmed section plans." />
+        <PhaseMeta role={<><RolePill>Administrator</RolePill> <RolePill>Budget Manager</RolePill></>} screen="Budget Control → Consolidation" purpose="Produce consolidated department totals from approved Excel-style divisional budgets." />
         <Step n={1} title="Run consolidation" role="Administrator">
-          On <b>Budget Control → Consolidation</b>, choose a department and run the roll-up. The system totals all
-          authorised &amp; confirmed plans, counts the sections and plans, and stores a <b>CONSOLIDATED</b> record.
+          On <b>Budget Control → Consolidation</b>, choose a department and run the roll-up. The system totals all approved divisional budgets and stores a <b>CONSOLIDATED</b> record.
         </Step>
-        <Step n={2} title="Review the consolidated budget" role="Registrar">
-          The consolidation table shows each department&apos;s total budget, section count and plan count for the year.
+        <Step n={2} title="Review the consolidated budget" role="Budget Manager">
+          The consolidation table shows each department&apos;s total approved budget, division count and budget count for the year.
         </Step>
       </Card>
 
@@ -303,7 +298,7 @@ function ProcessDocumentation() {
         </Step>
         <Step n={2} title="Release for a quarter" role="Finance Manager">
           Enter the quarter (Q1–Q4), the amount and the date, then submit. A release number (e.g.
-          <span className="font-mono text-png-red"> QR-2025-00001</span>) is generated automatically.
+          <span className="font-mono text-png-red"> QR-FY-00001</span>) is generated automatically.
         </Step>
         <Callout type="warn" title="Hard limit">
           Cumulative releases for a code can never exceed its <b>approved budget</b>. The system blocks any release that would breach the ceiling.
@@ -332,7 +327,7 @@ function ProcessDocumentation() {
           Final approval. The system immediately creates a <b>commitment</b> against the budget code, reserving the funds.
         </Step>
         <Callout type="info" title="Result — the Commitment Ledger">
-          Each approved FF3 produces a commitment (e.g. <span className="font-mono text-png-red">CMT-2025-00001</span>)
+          Each approved FF3 produces a commitment (e.g. <span className="font-mono text-png-red">CMT-FY-00001</span>)
           tracking <b>committed</b>, <b>paid</b> and <b>remaining balance</b>. Committed funds reduce availability immediately.
         </Callout>
       </Card>
@@ -457,23 +452,23 @@ function TrainingManual() {
         <Callout type="tip">Build codes for every cost-centre/category combination your sections will plan against.</Callout>
       </HowTo>
 
-      <HowTo id="t-plan" num="3." title="Create &amp; Submit an Annual Plan" role="Section Manager" screen="Annual Plans" goal="Capture your section's planned activities for the year.">
-        <Step n={1} title="Start a new plan">Open <b>Annual Plans</b> → <b>New Annual Plan</b>. Choose the financial year, department, section and cost centre, and give the plan a title.</Step>
-        <Step n={2} title="Add activity lines">For each activity, enter a description, choose the <b>expense code</b>, the <b>quantity</b>, <b>unit cost</b> and the <b>quarter</b>. The line total and grand total update live. Use <b>Add line</b> for more.</Step>
-        <Step n={3} title="Create the plan">Click <b>Create Plan</b>. It is saved as <b>DRAFT</b>.</Step>
-        <Step n={4} title="Submit for review">On the plan row, click <b>Submit</b>. Its status becomes <b>SUBMITTED</b> and it goes to your Department Head.</Step>
-        <Callout type="warn">A plan needs at least one valid line (description + amount &gt; 0) before it can be created.</Callout>
+      <HowTo id="t-plan" num="3." title="Create &amp; Submit an Excel Budget" role="Budget Officer" screen="Budget Preparation" goal="Capture the divisional budget once in the spreadsheet-style grid.">
+        <Step n={1} title="Start a budget draft">Open <b>Budget Preparation</b>. Choose the budget cycle, division and cost centre, then create the draft.</Step>
+        <Step n={2} title="Add budget lines">For each line, select the <b>finance code</b>, enter activity description, business justification, quantity, unit cost, frequency and other costs.</Step>
+        <Step n={3} title="Allocate months">Enter January–December amounts or use <b>Allocate Evenly</b>. The monthly allocation total must equal the annual estimate and variance must be zero.</Step>
+        <Step n={4} title="Submit for review">Click <b>Submit</b>. The system validates mandatory fields, active ledger codes and ceiling rules before locking the submission.</Step>
+        <Callout type="warn">A budget needs at least one valid line and total variance of zero before it can be submitted.</Callout>
       </HowTo>
 
-      <HowTo id="t-approve-plan" num="4." title="Review, Authorize &amp; Confirm a Plan" role="Dept Head · Registrar · Administrator" screen="Annual Plans" goal="Move a plan through approval until it becomes budget.">
-        <Step n={1} title="Review (Department Head)">Open <b>Annual Plans</b>, expand the plan to inspect its lines, then click <b>Review</b>, then <b>Approve (Dept)</b>. Use <b>Return</b> to send back for correction.</Step>
-        <Step n={2} title="Authorize (Registrar)">On an approved plan, click <b>Authorize</b>. Use <b>Reject</b> if it cannot proceed.</Step>
-        <Step n={3} title="Confirm to budget (Administrator)">On an authorised plan, click <b>Confirm to Budget</b>. The system creates the budget allocations — the plan is now <b>BUDGET_CONFIRMED</b> and visible in Budget Control.</Step>
+      <HowTo id="t-approve-plan" num="4." title="Review, Return &amp; Approve an Excel Budget" role="Budget Reviewer · Budget Approver" screen="Budget Preparation" goal="Approve the Excel budget and automatically create operational allocations.">
+        <Step n={1} title="Review submitted budget">Open <b>Budget Preparation</b>, select a submitted budget and inspect the full spreadsheet grid.</Step>
+        <Step n={2} title="Return or review">Use <b>Return</b> with comments if correction is required, or <b>Review</b> when acceptable.</Step>
+        <Step n={3} title="Approve">On a reviewed budget, click <b>Approve</b>. Server-side validation runs again and operational budget allocations are created for Budget Control and FF3.</Step>
       </HowTo>
 
       <HowTo id="t-consolidate" num="5." title="Consolidate Department Budgets" role="Administrator" screen="Budget Control → Consolidation" goal="Produce a department-level budget total.">
         <Step n={1} title="Open the Consolidation tab">Go to <b>Budget Control</b> and select the <b>Consolidation</b> tab.</Step>
-        <Step n={2} title="Run the roll-up">Choose the department and click <b>Run Consolidation</b>. The consolidated total, section and plan counts appear in the table.</Step>
+        <Step n={2} title="Run the roll-up">Choose the department and click <b>Run Consolidation</b>. The consolidated total, division count and budget count appear in the table.</Step>
       </HowTo>
 
       <HowTo id="t-release" num="6." title="Release Quarterly Funds" role="Administrator / Finance Manager" screen="Budget Control → Releases" goal="Make cash available against approved codes.">
@@ -571,7 +566,7 @@ const STATUS_GROUPS: { title: string; items: { s: string; d: string }[] }[] = [
     { s: "REVIEWED", d: "Checked by the department head." },
     { s: "APPROVED_BY_DEPARTMENT", d: "Department sign-off complete." },
     { s: "AUTHORIZED_BY_REGISTRAR", d: "Authorised by the Registrar." },
-    { s: "BUDGET_CONFIRMED", d: "Converted into budget allocations." },
+    { s: "APPROVED", d: "Excel budget approved and converted into operational allocations." },
     { s: "RETURNED_FOR_CORRECTION / REJECTED", d: "Sent back or stopped." },
   ]},
   { title: "FF3 Requisition", items: [

@@ -27,6 +27,7 @@ export default function FF3ListPage() {
   const [ff3Records, setFf3Records] = useState<FF3Record[]>([])
   const [stats, setStats] = useState({ total: 0, draft: 0, pending: 0, approved: 0, rejected: 0 })
   const { can } = useAuth()
+  const activeFinancialYear = new Date().getFullYear()
 
   const fetchFF3Records = useCallback(async () => {
     setLoading(true)
@@ -44,7 +45,7 @@ export default function FF3ListPage() {
           created_at,
           section:sections(name)
         `)
-        .eq('financial_year', 2025)
+        .eq('financial_year', activeFinancialYear)
         .order('created_at', { ascending: false })
 
       if (statusFilter !== 'ALL') {
@@ -65,7 +66,7 @@ export default function FF3ListPage() {
       const { data: allRecords } = await supabase
         .from('ff3_headers')
         .select('status')
-        .eq('financial_year', 2025)
+        .eq('financial_year', activeFinancialYear)
 
       if (allRecords) {
         setStats({
@@ -82,7 +83,7 @@ export default function FF3ListPage() {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter])
+  }, [activeFinancialYear, statusFilter])
 
   useEffect(() => {
     // Data fetch on mount / filter change is the intended effect here.

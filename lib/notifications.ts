@@ -533,18 +533,18 @@ export async function getNotificationCount(userId?: string): Promise<number> {
 // Budget Check Helper (call this when creating FF3)
 // ==========================================
 
-export async function checkBudgetAndNotify(requestedAmount: number, userId?: string): Promise<boolean> {
+export async function checkBudgetAndNotify(requestedAmount: number, userId?: string, financialYear = new Date().getFullYear()): Promise<boolean> {
   try {
     // Get current budget status
     const { data: releases } = await supabase
       .from('quarterly_releases')
       .select('released_amount')
-      .eq('financial_year', 2025)
+      .eq('financial_year', financialYear)
 
     const { data: commitments } = await supabase
       .from('ff3_commitments')
       .select('committed_amount, paid_amount')
-      .eq('financial_year', 2025)
+      .eq('financial_year', financialYear)
 
     const quarterlyReleased = releases?.reduce((sum, r) => sum + (r.released_amount || 0), 0) || 0
     const committedAmount = commitments?.reduce((sum, c) => sum + ((c.committed_amount || 0) - (c.paid_amount || 0)), 0) || 0

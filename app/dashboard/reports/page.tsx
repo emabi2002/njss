@@ -56,8 +56,9 @@ const quarterOf = (d: string | null) => (d ? Math.floor(new Date(d).getMonth() /
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-GB") : "-")
 
 export default function ReportsPage() {
+  const currentYear = new Date().getFullYear()
   const [selectedReport, setSelectedReport] = useState("")
-  const [dateRange, setDateRange] = useState({ start: "2025-01-01", end: "2025-12-31" })
+  const [dateRange, setDateRange] = useState({ start: `${currentYear}-01-01`, end: `${currentYear}-12-31` })
   const [filters, setFilters] = useState({
     department: "",
     section: "",
@@ -69,7 +70,7 @@ export default function ReportsPage() {
   const [exportSuccess, setExportSuccess] = useState("")
   const [exportError, setExportError] = useState("")
 
-  const fyOf = () => new Date(dateRange.start).getFullYear() || 2025
+  const fyOf = () => new Date(dateRange.start).getFullYear() || currentYear
   // The financial_year column is the authoritative scope. The calendar range is
   // an optional refinement: when left at the full default year we don't apply a
   // date filter (so all rows for the FY are returned regardless of seed dates).
@@ -86,8 +87,12 @@ export default function ReportsPage() {
         { id: "budget-by-cost-centre", name: "Budget by Cost Centre", description: "Approved / committed / actual per cost centre", icon: PieChart },
         { id: "budget-by-code", name: "Budget by Expense Code", description: "Position for each full expense code", icon: BarChart3 },
         { id: "available-balance", name: "Available Balance Report", description: "Remaining balance per expense code", icon: TrendingUp },
-        { id: "plans-by-section", name: "Annual Plans by Section", description: "Section activity plans & status", icon: FileText },
-        { id: "plans-by-department", name: "Annual Plans by Department", description: "Department plans & planned value", icon: FileText },
+        { id: "approved-budget-by-division", name: "Approved Budget by Division", description: "Approved Excel divisional budgets", icon: FileText },
+        { id: "approved-budget-by-department", name: "Approved Budget by Department", description: "Approved budget rolled up by department", icon: BarChart3 },
+        { id: "approved-budget-by-finance-code", name: "Approved Budget by Finance Code", description: "Approved budget by canonical finance code", icon: BarChart3 },
+        { id: "monthly-cashflow", name: "Monthly Cash-Flow Plan", description: "January to December approved budget profile", icon: TrendingUp },
+        { id: "quarterly-cashflow", name: "Quarterly Cash-Flow Requirement", description: "Q1 to Q4 planned requirements", icon: TrendingUp },
+        { id: "budget-submission-status", name: "Budget Submission Status", description: "Draft, submitted, returned, reviewed and approved budgets", icon: FileText },
       ]
     },
     {
@@ -301,7 +306,7 @@ export default function ReportsPage() {
     }
   }
 
-  const PLANNING_IDS = ['consolidated-budget', 'budget-by-cost-centre', 'budget-by-code', 'available-balance', 'plans-by-section', 'plans-by-department']
+  const PLANNING_IDS = ['consolidated-budget', 'budget-by-cost-centre', 'budget-by-code', 'available-balance', 'approved-budget-by-division', 'approved-budget-by-department', 'approved-budget-by-finance-code', 'monthly-cashflow', 'quarterly-cashflow', 'budget-submission-status']
   const datasetFor = (id: string): 'ff3' | 'ff4' | 'budget' | 'audit' | 'planning' => {
     if (PLANNING_IDS.includes(id)) return 'planning'
     if (id.startsWith('ff4')) return 'ff4'
@@ -552,23 +557,66 @@ export default function ReportsPage() {
     }
 
     if (ds === 'planning') {
-      if (id === 'plans-by-section' || id === 'plans-by-department') {
+      if (id === 'budget-submission-status') {
         const { data } = await supabase
-          .from('annual_plan_headers')
-          .select('plan_number, plan_title, status, total_planned_budget, department:departments(name), section:sections(name)')
-          .eq('financial_year', fy)
-          .order('plan_number')
-        const rows = (data || []) as unknown as Array<{ plan_number: string; plan_title: string | null; status: string; total_planned_budget: number | null; department: { name: string } | null; section: { name: string } | null }>
-        if (id === 'plans-by-department') {
-          const map = new Map<string, number>()
-          rows.forEach((r) => { const k = r.department?.name || '-'; map.set(k, (map.get(k) || 0) + (r.total_planned_budget || 0)) })
-          return { title: 'Annual Plans by Department', records: Array.from(map).map(([dept, total]) => ({ Department: dept, 'Planned (K)': total })) }
-        }
+          .from('divisional_budget_submissions')
+          .select('submission_number, submission_reference, budget_year, status, total_proposed_budget, total_monthly_allocation, unallocated_variance, division:budget_divisions(name, code)')
+          .eq('budget_year', fy)
+          .order('created_at', { ascending: false })
+        const rows = (data || []) as unknown as Array<{ submission_number: string | null; submission_reference: string | null; status: string; total_proposed_budget: number | null; total_monthly_allocation: number | null; unallocated_variance: number | null; division: { name: string; code: string } | null }>
         return {
-          title: 'Annual Plans by Section',
-          records: rows.map((r) => ({ Plan: r.plan_number, Title: r.plan_title || '-', Department: r.department?.name || '-', Section: r.section?.name || '-', Status: r.status, 'Planned (K)': r.total_planned_budget || 0 })),
+          title: 'Budget Submission Status',
+          records: rows.map((row) => ({
+            Submission: row.submission_number || row.submission_reference || '-',
+            Division: row.division ? `${row.division.code} — ${row.division.name}` : '-',
+            Status: row.status,
+            'Annual Estimate (K)': row.total_proposed_budget || 0,
+            'Monthly Allocation (K)': row.total_monthly_allocation || 0,
+            'Variance (K)': row.unallocated_variance || 0,
+          })),
         }
       }
+
+      if (id === 'approved-budget-by-division' || id === 'approved-budget-by-department' || id === 'approved-budget-by-finance-code') {
+        const { data } = await supabase.from('v_department_consolidated_budget').select('*').eq('budget_year', fy)
+        const rows = (data || []) as Array<{ department_name: string | null; division_name: string | null; finance_code: string | null; standard_description: string | null; proposed_budget: number }>
+        const label = id === 'approved-budget-by-division' ? 'Division' : id === 'approved-budget-by-department' ? 'Department' : 'Finance Code'
+        const map = new Map<string, number>()
+        rows.forEach((row) => {
+          const key = id === 'approved-budget-by-division'
+            ? row.division_name || '-'
+            : id === 'approved-budget-by-department'
+              ? row.department_name || '-'
+              : `${row.finance_code || '-'} — ${row.standard_description || ''}`
+          map.set(key, (map.get(key) || 0) + (row.proposed_budget || 0))
+        })
+        return { title: id === 'approved-budget-by-division' ? 'Approved Budget by Division' : id === 'approved-budget-by-department' ? 'Approved Budget by Department' : 'Approved Budget by Finance Code', records: Array.from(map).map(([key, total]) => ({ [label]: key, 'Approved Budget (K)': total })) }
+      }
+
+      if (id === 'monthly-cashflow' || id === 'quarterly-cashflow') {
+        const { data } = await supabase.from('v_department_consolidated_budget_monthly').select('*').eq('budget_year', fy)
+        const rows = (data || []) as Array<{ department_name: string | null; division_name: string | null; finance_code: string | null; month_number: number; month_name: string; monthly_amount: number }>
+        if (id === 'monthly-cashflow') {
+          return {
+            title: 'Monthly Cash-Flow Plan',
+            records: rows.map((row) => ({ Department: row.department_name || '-', Division: row.division_name || '-', 'Finance Code': row.finance_code || '-', Month: row.month_name, 'Amount (K)': row.monthly_amount || 0 })),
+          }
+        }
+        const quarterMap = new Map<string, number>()
+        rows.forEach((row) => {
+          const quarter = `Q${Math.floor((row.month_number - 1) / 3) + 1}`
+          const key = `${row.department_name || '-'}|${row.division_name || '-'}|${row.finance_code || '-'}|${quarter}`
+          quarterMap.set(key, (quarterMap.get(key) || 0) + (row.monthly_amount || 0))
+        })
+        return {
+          title: 'Quarterly Cash-Flow Requirement',
+          records: Array.from(quarterMap).map(([key, amount]) => {
+            const [department, division, financeCode, quarter] = key.split('|')
+            return { Department: department, Division: division, 'Finance Code': financeCode, Quarter: quarter, 'Planned Requirement (K)': amount }
+          }),
+        }
+      }
+
       const { data } = await supabase.from('v_budget_by_code').select('*').eq('financial_year', fy)
       const vrows = (data || []) as Array<{ department_name: string | null; section_name: string | null; cost_centre_code: string | null; cost_centre_name: string | null; full_expense_code: string | null; revised_budget: number; committed_amount: number; actual_expenditure: number }>
       if (id === 'consolidated-budget') {

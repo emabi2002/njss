@@ -20,6 +20,7 @@ type ApprovedFF3 = {
 
 export default function NewFF4Page() {
   const router = useRouter()
+  const activeFinancialYear = new Date().getFullYear()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
@@ -59,7 +60,7 @@ export default function NewFF4Page() {
         .from('ff3_headers')
         .select('id, ff3_number, purpose')
         .eq('status', 'APPROVED')
-        .eq('financial_year', 2025)
+        .eq('financial_year', activeFinancialYear)
 
       if (ff3Error) throw ff3Error
 
@@ -98,7 +99,7 @@ export default function NewFF4Page() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeFinancialYear])
 
   useEffect(() => {
     // Data fetch on mount is the intended effect here.
@@ -170,7 +171,7 @@ export default function NewFF4Page() {
       const { data: header, error: headerError } = await supabase
         .from('ff4_headers')
         .insert({
-          financial_year: 2025,
+          financial_year: activeFinancialYear,
           ff3_header_id: formData.ff3_header_id || null,
           commitment_id: formData.commitment_id || null,
           payee_type: formData.payee_type,

@@ -53,6 +53,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     const savedCollapsed = window.localStorage.getItem("njss-sidebar-collapsed")
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (savedCollapsed) setSidebarCollapsed(savedCollapsed === "true")
 
     const savedGroups = window.localStorage.getItem("njss-sidebar-groups")
@@ -121,6 +122,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [modules, visibleNavigation, pathname])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setExpandedGroups((current) => {
       const next = { ...current }
       for (const group of groupedNavigation) {

@@ -21,6 +21,7 @@ type BudgetCheck = { revised: number; released: number; committed: number; spent
 
 export default function NewFF3Page() {
   const router = useRouter()
+  const activeFinancialYear = new Date().getFullYear()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
@@ -38,7 +39,7 @@ export default function NewFF3Page() {
   const [budgetCheck, setBudgetCheck] = useState<BudgetCheck>(null)
 
   const [formData, setFormData] = useState({
-    financial_year: 2025,
+    financial_year: activeFinancialYear,
     department_id: "",
     section_id: "",
     cost_centre_id: "",
@@ -87,18 +88,32 @@ export default function NewFF3Page() {
         setProvinces(provRes.data || [])
         setFundingSources(fundRes.data || [])
         setCostCentres(ccRes.data || [])
-        setExpenseCodes(codeRes.data || [])
+
+        const { data: approvedBudgetCodes } = await supabase
+          .from('v_budget_by_code')
+          .select('expense_code_registry_id, full_expense_code, section_id')
+          .eq('financial_year', activeFinancialYear)
+
+        const approvedCodes = (approvedBudgetCodes || [])
+          .filter((code) => code.expense_code_registry_id)
+          .map((code) => ({
+            id: String(code.expense_code_registry_id),
+            full_expense_code: code.full_expense_code || '',
+            section_id: code.section_id || null,
+          }))
+
+        setExpenseCodes(approvedCodes.length > 0 ? approvedCodes : (codeRes.data || []))
 
         // Fetch budget info
         const { data: releases } = await supabase
           .from('quarterly_releases')
           .select('released_amount')
-          .eq('financial_year', 2025)
+          .eq('financial_year', activeFinancialYear)
 
         const { data: commitments } = await supabase
           .from('ff3_commitments')
           .select('committed_amount, paid_amount')
-          .eq('financial_year', 2025)
+          .eq('financial_year', activeFinancialYear)
 
         const quarterlyReleased = releases?.reduce((sum, r) => sum + (r.released_amount || 0), 0) || 0
         const committedAmount = commitments?.reduce((sum, c) => sum + ((c.committed_amount || 0) - (c.paid_amount || 0)), 0) || 0
@@ -117,7 +132,7 @@ export default function NewFF3Page() {
     }
 
     fetchMasterData()
-  }, [])
+  }, [activeFinancialYear])
 
   // Sections available for the selected department (derived state)
   const filteredSections = useMemo(
@@ -249,11 +264,17 @@ export default function NewFF3Page() {
     setSubmitting(true)
 
     try {
-      // Check budget before submitting
+      // Check budget before submitting against the approved Excel budget allocation.
       if (status === 'SUBMITTED') {
-        const budgetOk = await checkBudgetAndNotify(totalEstimate)
-        if (!budgetOk) {
-          setError("This request exceeds the available budget. A budget exceeded notification has been sent to finance administrators.")
+        const latestBudget = await checkBudgetAvailability({
+          financialYear: formData.financial_year,
+          expenseCodeId: formData.expense_code_registry_id || null,
+          sectionId: formData.section_id || null,
+          amount: totalEstimate,
+        })
+        if (!latestBudget.hasAllocation || !latestBudget.withinBudget) {
+          await checkBudgetAndNotify(totalEstimate, undefined, formData.financial_year)
+          setError("This request exceeds the available approved Excel budget allocation.")
           setSubmitting(false)
           return
         }

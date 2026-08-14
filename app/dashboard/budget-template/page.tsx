@@ -179,7 +179,7 @@ export default function BudgetTemplatePage() {
   const [draftHeader, setDraftHeader] = useState({ cycle_id: "", division_id: "", budget_ceiling: "", submission_reference: "" })
 
   const canAdmin = can("masterdata.manage") || can("registry.manage") || can("users.manage") || can("budget.template.approve")
-  const canEdit = can("budget.template") || can("budget.template.submit")
+  const canEdit = can("budget.template.edit") || can("budget.template.create") || can("budget.template") || can("budget.template.submit")
   const canReview = can("budget.template.review")
   const canApprove = can("budget.template.approve")
   const selectedLocked = selected?.is_locked || ["SUBMITTED", "RESUBMITTED", "REVIEWED", "APPROVED", "ARCHIVED"].includes(selected?.status || "")

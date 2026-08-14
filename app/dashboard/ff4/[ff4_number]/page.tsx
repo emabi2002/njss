@@ -466,7 +466,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
                 type="text"
                 value={paymentReference}
                 onChange={(e) => setPaymentReference(e.target.value)}
-                placeholder="e.g., EFT-2025-001234"
+                placeholder="e.g., EFT-FY-001234"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>

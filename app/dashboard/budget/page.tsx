@@ -68,7 +68,8 @@ const CHART_COLORS = ["#8a1420", "#4c0f16", "#d4af37", "#a8324a", "#b8860b", "#6
 export default function BudgetControlPage() {
   const { can } = useAuth()
   const [tab, setTab] = useState<Tab>("code")
-  const [year, setYear] = useState(2025)
+  const currentYear = new Date().getFullYear()
+  const [year, setYear] = useState(currentYear)
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<CodeRow[]>([])
   const [consolidations, setConsolidations] = useState<Consolidation[]>([])
@@ -182,7 +183,7 @@ export default function BudgetControlPage() {
         <div className="flex items-center gap-2">
           <select value={year} onChange={(e) => setYear(parseInt(e.target.value))}
             className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
-            {[2024, 2025, 2026].map((y) => <option key={y} value={y}>FY{y}</option>)}
+            {[currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map((y) => <option key={y} value={y}>FY{y}</option>)}
           </select>
           <button onClick={() => fetchData()} className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50" title="Refresh">
             <RefreshCw className="h-4 w-4 text-slate-600" />
@@ -227,14 +228,14 @@ export default function BudgetControlPage() {
       ) : tab === "releases" ? (
         <ReleasesView year={year} releases={releases} allocations={allocations} canRelease={can("budget.release")} onChanged={fetchData} />
       ) : (
-        <ConsolidationView year={year} depts={depts} consolidations={consolidations} canRun={can("consolidation.run")} onChanged={fetchData} />
+        <ConsolidationView year={year} depts={depts} consolidations={consolidations} canRun={can("budget.consolidate") || can("consolidation.run")} onChanged={fetchData} />
       )}
     </div>
   )
 }
 
 function ByCodeTable({ rows }: { rows: CodeRow[] }) {
-  if (rows.length === 0) return <EmptyState message="No confirmed budget allocations yet. Confirm an annual plan to populate budget codes." />
+  if (rows.length === 0) return <EmptyState message="No approved Excel budget allocations yet. Approve a Budget Preparation submission to populate budget control." />
   return (
     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
       <div className="overflow-x-auto">
@@ -473,7 +474,7 @@ function ConsolidationView({ year, depts, consolidations, canRun, onChanged }: {
     setRunning(true); setMsg(null)
     try {
       const res = await consolidateDepartmentBudget(year, deptId)
-      setMsg({ type: "ok", text: `Consolidated ${depts.find((d) => d.id === deptId)?.name}: K ${(res?.total_amount || 0).toLocaleString()} across ${res?.plan_count || 0} plan(s).` })
+      setMsg({ type: "ok", text: `Consolidated ${depts.find((d) => d.id === deptId)?.name}: K ${(res?.total_amount || 0).toLocaleString()} across ${res?.plan_count || 0} approved divisional budget(s).` })
       onChanged()
     } catch (err: unknown) {
       setMsg({ type: "err", text: err instanceof Error ? err.message : "Consolidation failed." })
@@ -489,7 +490,7 @@ function ConsolidationView({ year, depts, consolidations, canRun, onChanged }: {
       {canRun && (
         <div className="bg-white rounded-lg border border-png-gold/40 p-5">
           <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-1"><Building2 className="h-4 w-4 text-png-gold" /> Run Department Consolidation</h3>
-          <p className="text-xs text-slate-500 mb-4">Roll up all authorized &amp; budget-confirmed section plans for a department into a consolidated budget for FY{year}.</p>
+          <p className="text-xs text-slate-500 mb-4">Roll up all approved Excel-style divisional budgets for a department into a consolidated budget for FY{year}.</p>
           {msg && (
             <div className={`mb-3 rounded-lg p-2.5 text-sm flex items-center gap-2 ${msg.type === "ok" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
               {msg.type === "ok" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />} {msg.text}
@@ -526,8 +527,8 @@ function ConsolidationView({ year, depts, consolidations, canRun, onChanged }: {
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Department</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Status</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Sections</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Plans</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Divisions</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Budgets</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Total Budget</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Consolidated</th>
                 </tr>

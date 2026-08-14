@@ -508,66 +508,32 @@ export async function getFinancialYears() {
 }
 
 // ==========================================
-// ANNUAL ACTIVITY PLAN WORKFLOW
-// DRAFT → SUBMITTED → REVIEWED → APPROVED_BY_DEPARTMENT
-//       → AUTHORIZED_BY_REGISTRAR → BUDGET_CONFIRMED
+// HISTORICAL ANNUAL ACTIVITY PLAN WORKFLOW (retired)
+// New budgets use Budget Preparation: DRAFT → SUBMITTED/RESUBMITTED
+// → REVIEWED → APPROVED, which creates operational allocations.
 // ==========================================
 
 export type PlanAction = 'SUBMIT' | 'REVIEW' | 'APPROVE_DEPARTMENT' | 'AUTHORIZE_REGISTRAR' | 'CONFIRM_BUDGET' | 'REJECT' | 'RETURN'
 
-export async function transitionAnnualPlan(planId: string, action: PlanAction, comments?: string) {
-  const response = await fetch('/api/workflows/budget', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ operation: 'transition-plan', planId, action, comments }),
-  })
-  const json = await response.json()
-  if (!response.ok) throw new Error(json.error || 'Annual plan workflow action failed')
-  return json.data
+export async function transitionAnnualPlan(_planId: string, _action: PlanAction, _comments?: string) {
+  throw new Error('Annual Activity Plan workflow is retired. Use Budget Preparation for submission, review and approval.')
 }
 
-// Turn an authorized plan's lines into active budget allocations
-export async function confirmPlanToBudget(planId: string) {
-  const response = await fetch('/api/workflows/budget', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ operation: 'transition-plan', planId, action: 'CONFIRM_BUDGET' }),
-  })
-  const json = await response.json()
-  if (!response.ok) throw new Error(json.error || 'Budget confirmation failed')
-  return json.allocationResult || { created: 0 }
+// Historical Annual Plan data is preserved read-only; Confirm to Budget is retired.
+export async function confirmPlanToBudget(_planId: string) {
+  throw new Error('Confirm to Budget is retired. Approval of an Excel Budget Preparation submission now creates operational allocations automatically.')
 }
 
 // ==========================================
-// BUDGET CONSOLIDATION (department roll-up of confirmed plans)
+// BUDGET CONSOLIDATION (approved Excel divisional budgets)
 // ==========================================
 
 export async function consolidateDepartmentBudget(financialYear: number, departmentId: string) {
-  const { data: plans, error } = await supabase
-    .from('annual_plan_headers')
-    .select('id, section_id, total_planned_budget, status')
-    .eq('financial_year', financialYear)
-    .eq('department_id', departmentId)
-    .in('status', ['AUTHORIZED_BY_REGISTRAR', 'BUDGET_CONFIRMED'])
+  const { data, error } = await supabase.rpc('consolidate_approved_excel_budgets', {
+    p_financial_year: financialYear,
+    p_department_id: departmentId,
+  })
   if (error) throw error
-
-  const total = (plans || []).reduce((s, p) => s + (p.total_planned_budget || 0), 0)
-  const sections = new Set((plans || []).map((p) => p.section_id).filter(Boolean))
-
-  const { data, error: upErr } = await supabase
-    .from('budget_consolidations')
-    .upsert({
-      financial_year: financialYear,
-      department_id: departmentId,
-      status: 'CONSOLIDATED',
-      total_amount: total,
-      section_count: sections.size,
-      plan_count: (plans || []).length,
-      consolidated_at: new Date().toISOString(),
-    }, { onConflict: 'financial_year,department_id' })
-    .select()
-    .single()
-  if (upErr) throw upErr
   return data
 }
 

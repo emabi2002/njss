@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
   const { data: current, error: currentError } = await supabase
     .from('ff3_headers')
-    .select('id, ff3_number, financial_year, total_estimated_amount, department_id, section_id, funding_source_id, created_by, requesting_officer_id, supervisor_endorsed_by, section_head_endorsed_by')
+    .select('id, ff3_number, financial_year, total_estimated_amount, department_id, section_id, expense_code_registry_id, funding_source_id, created_by, requesting_officer_id, supervisor_endorsed_by, section_head_endorsed_by')
     .eq('id', ff3Id)
     .single()
 
@@ -93,14 +93,33 @@ export async function POST(request: NextRequest) {
     let budgetAllocationId: string | null = null
     let allocQuery = supabase
       .from('budget_allocations')
-      .select('id')
+      .select('id, revised_budget')
       .eq('financial_year', current.financial_year)
       .eq('is_active', true)
       .limit(1)
+    if (current.expense_code_registry_id) allocQuery = allocQuery.eq('expense_code_registry_id', current.expense_code_registry_id)
     if (current.department_id) allocQuery = allocQuery.eq('department_id', current.department_id)
     if (current.section_id) allocQuery = allocQuery.eq('section_id', current.section_id)
-    const { data: alloc } = await allocQuery.maybeSingle()
-    budgetAllocationId = alloc?.id || null
+    if (current.funding_source_id) allocQuery = allocQuery.eq('funding_source_id', current.funding_source_id)
+    let { data: alloc } = await allocQuery.maybeSingle()
+
+    if (!alloc && current.expense_code_registry_id) {
+      let fallbackQuery = supabase
+        .from('budget_allocations')
+        .select('id, revised_budget')
+        .eq('financial_year', current.financial_year)
+        .eq('expense_code_registry_id', current.expense_code_registry_id)
+        .eq('is_active', true)
+        .limit(1)
+      if (current.department_id) fallbackQuery = fallbackQuery.eq('department_id', current.department_id)
+      const fallback = await fallbackQuery.maybeSingle()
+      alloc = fallback.data
+    }
+
+    if (!alloc) {
+      return NextResponse.json({ error: 'No approved Excel budget allocation found for this FF3 finance code/section.' }, { status: 400 })
+    }
+    budgetAllocationId = alloc.id
 
     const { data: createdCommitment, error: commitmentError } = await supabase
       .from('ff3_commitments')
