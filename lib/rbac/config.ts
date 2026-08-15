@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Banknote,
   BookOpen,
   Calculator,
   ClipboardList,
@@ -27,6 +28,7 @@ export const MODULES: RbacModule[] = [
 export const MENU_ITEMS: RbacMenuItem[] = [
   { code: 'dashboard.home', module_code: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard', sort_order: 10, required_permissions: ['dashboard.view'], is_active: true },
   { code: 'budget.control', module_code: 'budget', label: 'Budget Control', href: '/dashboard/budget', icon: 'Wallet', sort_order: 20, required_permissions: ['budget.view', 'budget.module.view'], is_active: true },
+  { code: 'budget.funding', module_code: 'budget', label: 'Funding Management', href: '/dashboard/budget/funding', icon: 'Banknote', sort_order: 25, required_permissions: ['funding.view'], is_active: true },
   { code: 'budget.template', module_code: 'budget', label: 'Budget Preparation', href: '/dashboard/budget-template', icon: 'Calculator', sort_order: 10, required_permissions: ['budget.template.view', 'budget.template.create', 'budget.template.edit', 'budget.template.submit', 'budget.template.review', 'budget.template.approve', 'budget.template'], is_active: true },
   { code: 'budget.plans', module_code: 'budget', label: 'Historical Annual Plans', href: '/dashboard/plans', icon: 'BookOpen', sort_order: 90, required_permissions: ['all'], is_active: false },
   { code: 'budget.commitments', module_code: 'budget', label: 'Commitments', href: '/dashboard/commitments', icon: 'FileCheck', sort_order: 50, required_permissions: ['budget.view', 'ff4.verify', 'ff4.process'], is_active: true },
@@ -86,6 +88,15 @@ const BUDGET_PERMISSIONS = [
   ['budget.report.export', 'Export budget reports'],
   ['budget.export', 'Export budget reports'],
   ['consolidation.run', 'Run budget consolidation'],
+  ['funding.view', 'View funding management'],
+  ['funding.create', 'Create funding authorities and receipts'],
+  ['funding.submit', 'Submit funding records'],
+  ['funding.verify', 'Verify funding records'],
+  ['funding.approve', 'Approve funding records'],
+  ['funding.reject', 'Reject funding records'],
+  ['funding.allocate', 'Allocate funding to approved budgets'],
+  ['funding.allocation.approve', 'Approve funding allocations'],
+  ['budget.control.view', 'View authoritative budget control'],
 ]
 
 const ADMIN_PERMISSIONS = [
@@ -113,6 +124,7 @@ export const PERMISSION_CATALOG: RbacPermission[] = [
 
 export const ICONS: Record<string, LucideIcon> = {
   BarChart3,
+  Banknote,
   BookOpen,
   Calculator,
   ClipboardList,
@@ -129,6 +141,7 @@ export const ICONS: Record<string, LucideIcon> = {
 export const ROUTE_PERMISSIONS: Array<{ pattern: RegExp; permissions: PermissionCode[] }> = [
   { pattern: /^\/dashboard$/, permissions: ['dashboard.view'] },
   { pattern: /^\/dashboard\/budget($|\/)/, permissions: ['budget.view', 'budget.module.view'] },
+  { pattern: /^\/dashboard\/budget\/funding($|\/)/, permissions: ['funding.view'] },
   { pattern: /^\/dashboard\/budget-template($|\/)/, permissions: ['budget.template.view', 'budget.template.create', 'budget.template.edit', 'budget.template.submit', 'budget.template.review', 'budget.template.approve', 'budget.template'] },
   { pattern: /^\/dashboard\/plans($|\/)/, permissions: ['all'] },
   { pattern: /^\/dashboard\/commitments($|\/)/, permissions: ['budget.view', 'ff4.verify', 'ff4.process'] },

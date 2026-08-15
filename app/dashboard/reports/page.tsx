@@ -73,9 +73,6 @@ export default function ReportsPage() {
   const [exportError, setExportError] = useState("")
 
   const fyOf = () => new Date(dateRange.start).getFullYear() || currentYear
-  // The financial_year column is the authoritative scope. The calendar range is
-  // an optional refinement: when left at the full default year we don't apply a
-  // date filter (so all rows for the FY are returned regardless of seed dates).
   const isFullYearRange = () => {
     const fy = fyOf()
     return dateRange.start === `${fy}-01-01` && dateRange.end === `${fy}-12-31`
@@ -103,6 +100,20 @@ export default function ReportsPage() {
         { id: "budget-vs-actual", name: "Budget vs Commitment vs Actual", description: "Comprehensive budget utilization analysis", icon: BarChart3 },
         { id: "quarterly-utilization", name: "Quarterly Utilization Report", description: "Budget spending by quarter", icon: TrendingUp },
         { id: "supplemental-impact", name: "Supplemental Budget Impact", description: "Analysis of budget revisions", icon: PieChart },
+      ]
+    },
+    {
+      category: "Funding Reports",
+      reports: [
+        { id: "funding-authority-register", name: "Funding Authority Register", description: "Authorities with approved receipts and remaining authority", icon: FileText },
+        { id: "funding-receipt-register", name: "Funding Receipt Register", description: "Receipts with authority and unallocated balances", icon: FileText },
+        { id: "funding-allocation-report", name: "Funding Allocation Report", description: "Funding allocated against operational budget lines", icon: BarChart3 },
+        { id: "funding-source-report", name: "Funding Source Report", description: "Authority, receipt and allocation totals by funding source", icon: PieChart },
+        { id: "funding-vs-approved-budget", name: "Funding vs Approved Budget", description: "Approved budget compared with funded amount", icon: BarChart3 },
+        { id: "funding-vs-releases", name: "Funding vs Releases", description: "Funded amounts compared with actual releases", icon: TrendingUp },
+        { id: "unfunded-budget-report", name: "Unfunded Budget Report", description: "Approved budget not yet funded", icon: FileText },
+        { id: "unreleased-funding-report", name: "Unreleased Funding Report", description: "Funded amounts not yet released", icon: FileText },
+        { id: "budget-position-report", name: "Budget Position Report", description: "Authoritative approved, funded, released and available position", icon: BarChart3 },
       ]
     },
     {
@@ -160,7 +171,6 @@ export default function ReportsPage() {
 
   const visibleReportCategories = dbReportCategories || reportCategories
 
-  // Bulk export FF3s into a single combined PDF
   const exportBulkFF3 = async () => {
     setExporting(true)
     setExportError("")
@@ -251,7 +261,6 @@ export default function ReportsPage() {
     }
   }
 
-  // Bulk export FF4s into a single combined PDF
   const exportBulkFF4 = async () => {
     setExporting(true)
     setExportError("")
@@ -328,31 +337,54 @@ export default function ReportsPage() {
   }
 
   const PLANNING_IDS = ['consolidated-budget', 'budget-by-cost-centre', 'budget-by-code', 'available-balance', 'approved-budget-by-division', 'approved-budget-by-department', 'approved-budget-by-finance-code', 'monthly-cashflow', 'quarterly-cashflow', 'budget-submission-status']
-  const datasetFor = (id: string): 'ff3' | 'ff4' | 'budget' | 'audit' | 'planning' => {
+  const FUNDING_IDS = ['funding-authority-register', 'funding-receipt-register', 'funding-allocation-report', 'funding-source-report', 'funding-vs-approved-budget', 'funding-vs-releases', 'unfunded-budget-report', 'unreleased-funding-report', 'budget-position-report']
+  const datasetFor = (id: string): 'ff3' | 'ff4' | 'budget' | 'audit' | 'planning' | 'funding' => {
     if (PLANNING_IDS.includes(id)) return 'planning'
+    if (FUNDING_IDS.includes(id)) return 'funding'
     if (id.startsWith('ff4')) return 'ff4'
     if (id.startsWith('ff3')) return 'ff3'
     if (id.startsWith('audit')) return 'audit'
     return 'budget'
   }
 
-  // Build a titled, tabular dataset for any report id.
   const buildReport = async (id: string): Promise<{ title: string; records: ExportRow[] }> => {
     const fy = fyOf()
 
-    // ---------- Budget analytics ----------
+    if (FUNDING_IDS.includes(id)) {
+      if (id === 'funding-authority-register') {
+        const { data } = await supabase.from('v_funding_authority_register').select('*').eq('financial_year', fy).order('authority_number')
+        const rows = (data || []) as Array<{ authority_number: string | null; authority_type: string; funding_source_name: string | null; source_agency: string | null; status: string; approved_amount: number; approved_receipts: number; authority_remaining: number }>
+        return { title: 'Funding Authority Register', records: rows.map((r) => ({ Authority: r.authority_number || '-', Type: r.authority_type, Source: r.funding_source_name || r.source_agency || '-', Status: r.status, 'Authority Amount (K)': r.approved_amount || 0, 'Approved Receipts (K)': r.approved_receipts || 0, 'Authority Remaining (K)': r.authority_remaining || 0 })) }
+      }
+      if (id === 'funding-receipt-register') {
+        const { data } = await supabase.from('v_funding_receipt_register').select('*').eq('financial_year', fy).order('receipt_number')
+        const rows = (data || []) as Array<{ receipt_number: string | null; authority_number: string | null; funding_source_name: string | null; receipt_date: string; status: string; amount_received: number; previous_approved_receipts: number; authority_balance_before_this_receipt: number; receipt_unallocated_balance: number }>
+        return { title: 'Funding Receipt Register', records: rows.map((r) => ({ Receipt: r.receipt_number || '-', Authority: r.authority_number || '-', Source: r.funding_source_name || '-', Date: r.receipt_date, Status: r.status, 'Receipt Amount (K)': r.amount_received || 0, 'Previous Receipts (K)': r.previous_approved_receipts || 0, 'Authority Balance (K)': r.authority_balance_before_this_receipt || 0, 'Unallocated Receipt Balance (K)': r.receipt_unallocated_balance || 0 })) }
+      }
+      if (id === 'funding-allocation-report') {
+        const { data } = await supabase.from('v_funding_allocation_register').select('*').eq('financial_year', fy).order('allocation_number')
+        const rows = (data || []) as Array<{ allocation_number: string | null; receipt_number: string | null; authority_number: string | null; funding_source_name: string | null; department_name: string | null; cost_centre_code: string | null; full_expense_code: string | null; status: string; approved_budget: number; allocated_amount: number; released_from_allocation: number; allocation_unreleased_balance: number }>
+        return { title: 'Funding Allocation Report', records: rows.map((r) => ({ Allocation: r.allocation_number || '-', Receipt: r.receipt_number || '-', Authority: r.authority_number || '-', Source: r.funding_source_name || '-', Department: r.department_name || '-', 'Cost Centre': r.cost_centre_code || '-', 'Finance Code': r.full_expense_code || '-', Status: r.status, 'Approved Budget (K)': r.approved_budget || 0, 'Allocated (K)': r.allocated_amount || 0, 'Released (K)': r.released_from_allocation || 0, 'Unreleased (K)': r.allocation_unreleased_balance || 0 })) }
+      }
+      if (id === 'funding-source-report') {
+        const { data } = await supabase.from('v_funding_source_report').select('*').eq('financial_year', fy).order('funding_source_name')
+        const rows = (data || []) as Array<{ funding_source_code: string | null; funding_source_name: string | null; authority_amount: number; received_amount: number; allocated_amount: number }>
+        return { title: 'Funding Source Report', records: rows.map((r) => ({ Source: r.funding_source_code ? `${r.funding_source_code} — ${r.funding_source_name}` : r.funding_source_name || '-', 'Authority Amount (K)': r.authority_amount || 0, 'Received (K)': r.received_amount || 0, 'Allocated (K)': r.allocated_amount || 0, 'Unallocated Receipts (K)': (r.received_amount || 0) - (r.allocated_amount || 0) })) }
+      }
+      const { data } = await supabase.from('v_authoritative_budget_position').select('*').eq('financial_year', fy).order('department_name')
+      let rows = (data || []) as Array<{ full_expense_code: string | null; department_name: string | null; section_name: string | null; cost_centre_code: string | null; funding_source_name: string | null; approved_budget: number; funded_amount: number; released_amount: number; pending_amount: number; outstanding_commitment: number; actual_expenditure: number; available_amount: number; unfunded_amount: number; unreleased_funding: number }>
+      if (id === 'unfunded-budget-report') rows = rows.filter((r) => (r.unfunded_amount || 0) > 0)
+      if (id === 'unreleased-funding-report') rows = rows.filter((r) => (r.unreleased_funding || 0) > 0)
+      const title = id === 'funding-vs-approved-budget' ? 'Funding vs Approved Budget' : id === 'funding-vs-releases' ? 'Funding vs Releases' : id === 'unfunded-budget-report' ? 'Unfunded Budget Report' : id === 'unreleased-funding-report' ? 'Unreleased Funding Report' : 'Budget Position Report'
+      return { title, records: rows.map((r) => ({ 'Finance Code': r.full_expense_code || '-', Department: r.department_name || '-', Section: r.section_name || '-', 'Cost Centre': r.cost_centre_code || '-', 'Funding Source': r.funding_source_name || '-', 'Approved (K)': r.approved_budget || 0, 'Funded (K)': r.funded_amount || 0, 'Released (K)': r.released_amount || 0, 'Pending (K)': r.pending_amount || 0, 'Committed (K)': r.outstanding_commitment || 0, 'Actual (K)': r.actual_expenditure || 0, 'Available (K)': r.available_amount || 0, 'Unfunded (K)': r.unfunded_amount || 0, 'Unreleased Funding (K)': r.unreleased_funding || 0 })) }
+    }
+
     if (id === 'budget-vs-actual') {
       const { data } = await supabase.from('v_budget_by_code').select('*').eq('financial_year', fy)
       const vrows = (data || []) as Array<{ department_name: string | null; revised_budget: number; committed_amount: number; actual_expenditure: number }>
       const map = new Map<string, { rev: number; com: number; act: number }>()
       vrows.forEach((r) => { const k = r.department_name || '-'; const e = map.get(k) || { rev: 0, com: 0, act: 0 }; e.rev += r.revised_budget || 0; e.com += r.committed_amount || 0; e.act += r.actual_expenditure || 0; map.set(k, e) })
-      return {
-        title: 'Budget vs Commitment vs Actual',
-        records: Array.from(map).map(([dept, v]) => ({
-          Department: dept, 'Approved (K)': v.rev, 'Committed (K)': v.com, 'Actual (K)': v.act,
-          'Available (K)': v.rev - v.com - v.act, 'Utilisation %': v.rev ? round1(((v.com + v.act) / v.rev) * 100) : 0,
-        })),
-      }
+      return { title: 'Budget vs Commitment vs Actual', records: Array.from(map).map(([dept, v]) => ({ Department: dept, 'Approved (K)': v.rev, 'Committed (K)': v.com, 'Actual (K)': v.act, 'Available (K)': v.rev - v.com - v.act, 'Utilisation %': v.rev ? round1(((v.com + v.act) / v.rev) * 100) : 0 })) }
     }
 
     if (id === 'quarterly-utilization') {
@@ -365,20 +397,11 @@ export default function ReportsPage() {
       ;((qr || []) as Array<{ quarter: number; released_amount: number }>).forEach((r) => { if (q[r.quarter]) q[r.quarter].rel += r.released_amount || 0 })
       ;((ff4q || []) as Array<{ payment_request_date: string; net_amount: number }>).forEach((r) => { const n = quarterOf(r.payment_request_date); if (q[n]) q[n].spent += r.net_amount || 0 })
       ;((comq || []) as Array<{ commitment_date: string; committed_amount: number; status: string }>).forEach((r) => { if (r.status !== 'CANCELLED') { const n = quarterOf(r.commitment_date); if (q[n]) q[n].com += r.committed_amount || 0 } })
-      return {
-        title: 'Quarterly Utilization Report',
-        records: [1, 2, 3, 4].map((n) => ({
-          Quarter: `Q${n}`, 'Released (K)': q[n].rel, 'Committed (K)': q[n].com, 'Spent (K)': q[n].spent,
-          'Utilisation %': q[n].rel ? round1((q[n].spent / q[n].rel) * 100) : 0,
-        })),
-      }
+      return { title: 'Quarterly Utilization Report', records: [1, 2, 3, 4].map((n) => ({ Quarter: `Q${n}`, 'Released (K)': q[n].rel, 'Committed (K)': q[n].com, 'Spent (K)': q[n].spent, 'Utilisation %': q[n].rel ? round1((q[n].spent / q[n].rel) * 100) : 0 })) }
     }
 
     if (id === 'supplemental-impact') {
-      const { data } = await supabase
-        .from('budget_allocations')
-        .select('original_budget, supplemental_budget, revised_budget, department:departments(name)')
-        .eq('financial_year', fy).eq('is_active', true)
+      const { data } = await supabase.from('budget_allocations').select('original_budget, supplemental_budget, revised_budget, department:departments(name)').eq('financial_year', fy).eq('is_active', true)
       const rows = (data || []) as unknown as Array<{ original_budget: number; supplemental_budget: number | null; revised_budget: number | null; department: { name: string } | null }>
       const map = new Map<string, { orig: number; supp: number; rev: number }>()
       rows.forEach((r) => {
@@ -387,39 +410,20 @@ export default function ReportsPage() {
         e.orig += r.original_budget || 0; e.supp += r.supplemental_budget || 0
         e.rev += r.revised_budget || ((r.original_budget || 0) + (r.supplemental_budget || 0)); map.set(k, e)
       })
-      return {
-        title: 'Supplemental Budget Impact',
-        records: Array.from(map).map(([dept, v]) => ({
-          Department: dept, 'Original (K)': v.orig, 'Supplemental (K)': v.supp, 'Revised (K)': v.rev,
-          'Impact %': v.orig ? round1((v.supp / v.orig) * 100) : 0,
-        })),
-      }
+      return { title: 'Supplemental Budget Impact', records: Array.from(map).map(([dept, v]) => ({ Department: dept, 'Original (K)': v.orig, 'Supplemental (K)': v.supp, 'Revised (K)': v.rev, 'Impact %': v.orig ? round1((v.supp / v.orig) * 100) : 0 })) }
     }
 
-    // ---------- FF3 analytics ----------
     if (id === 'ff3-turnaround') {
-      let q = supabase
-        .from('ff3_headers')
-        .select('ff3_number, status, created_at, updated_at, request_date, total_estimated_amount')
-        .eq('financial_year', fy).order('ff3_number')
+      let q = supabase.from('ff3_headers').select('ff3_number, status, created_at, updated_at, request_date, total_estimated_amount').eq('financial_year', fy).order('ff3_number')
       if (!isFullYearRange()) q = q.gte('request_date', dateRange.start).lte('request_date', dateRange.end)
       if (filters.status) q = q.eq('status', filters.status)
       const { data } = await q
       const rows = (data || []) as unknown as Array<{ ff3_number: string; status: string; created_at: string; updated_at: string; total_estimated_amount: number | null }>
-      return {
-        title: 'Approval Turnaround Time',
-        records: rows.map((r) => ({
-          'FF3 Number': r.ff3_number, Status: r.status, Created: fmtDate(r.created_at), 'Last Action': fmtDate(r.updated_at),
-          'Turnaround (days)': round1(Math.max(0, (new Date(r.updated_at).getTime() - new Date(r.created_at).getTime()) / 86400000)),
-          'Amount (K)': r.total_estimated_amount || 0,
-        })),
-      }
+      return { title: 'Approval Turnaround Time', records: rows.map((r) => ({ 'FF3 Number': r.ff3_number, Status: r.status, Created: fmtDate(r.created_at), 'Last Action': fmtDate(r.updated_at), 'Turnaround (days)': round1(Math.max(0, (new Date(r.updated_at).getTime() - new Date(r.created_at).getTime()) / 86400000)), 'Amount (K)': r.total_estimated_amount || 0 })) }
     }
 
     if (id === 'quotation-analysis') {
-      const { data } = await supabase
-        .from('ff3_quotations')
-        .select('quotation_amount, is_selected, supplier_name, ff3:ff3_headers(ff3_number)')
+      const { data } = await supabase.from('ff3_quotations').select('quotation_amount, is_selected, supplier_name, ff3:ff3_headers(ff3_number)')
       const rows = (data || []) as unknown as Array<{ quotation_amount: number; is_selected: boolean; supplier_name: string; ff3: { ff3_number: string } | null }>
       const map = new Map<string, { count: number; min: number; max: number; selected: number; supplier: string }>()
       rows.forEach((r) => {
@@ -429,36 +433,17 @@ export default function ReportsPage() {
         if (r.is_selected) { e.selected = r.quotation_amount; e.supplier = r.supplier_name }
         map.set(k, e)
       })
-      return {
-        title: 'Supplier Quotation Analysis',
-        records: Array.from(map).map(([ff3, v]) => {
-          const base = v.selected || (v.min === Infinity ? 0 : v.min)
-          return {
-            'FF3 Number': ff3, Quotes: v.count, 'Lowest (K)': v.min === Infinity ? 0 : v.min, 'Highest (K)': v.max,
-            'Selected (K)': v.selected, 'Selected Supplier': v.supplier, 'Savings vs Highest (K)': Math.max(0, v.max - base),
-          }
-        }),
-      }
+      return { title: 'Supplier Quotation Analysis', records: Array.from(map).map(([ff3, v]) => { const base = v.selected || (v.min === Infinity ? 0 : v.min); return { 'FF3 Number': ff3, Quotes: v.count, 'Lowest (K)': v.min === Infinity ? 0 : v.min, 'Highest (K)': v.max, 'Selected (K)': v.selected, 'Selected Supplier': v.supplier, 'Savings vs Highest (K)': Math.max(0, v.max - base) } }) }
     }
 
-    // ---------- Expenditure analysis ----------
     if (id === 'exp-account') {
       const { data } = await supabase.from('v_budget_by_code').select('full_expense_code, department_name, committed_amount, actual_expenditure').eq('financial_year', fy)
       const rows = (data || []) as Array<{ full_expense_code: string | null; department_name: string | null; committed_amount: number; actual_expenditure: number }>
-      return {
-        title: 'Expenditure by Ledger Account',
-        records: rows.map((r) => ({
-          Account: r.full_expense_code || '-', Department: r.department_name || '-',
-          'Committed (K)': r.committed_amount || 0, 'Actual (K)': r.actual_expenditure || 0,
-        })),
-      }
+      return { title: 'Expenditure by Ledger Account', records: rows.map((r) => ({ Account: r.full_expense_code || '-', Department: r.department_name || '-', 'Committed (K)': r.committed_amount || 0, 'Actual (K)': r.actual_expenditure || 0 })) }
     }
 
     if (id === 'exp-section' || id === 'exp-project' || id === 'exp-province') {
-      let q = supabase
-        .from('ff4_headers')
-        .select('net_amount, status, payment_request_date, ff3:ff3_headers(section:sections(name), province:provinces(name), project:projects(name))')
-        .eq('financial_year', fy)
+      let q = supabase.from('ff4_headers').select('net_amount, status, payment_request_date, ff3:ff3_headers(section:sections(name), province:provinces(name), project:projects(name))').eq('financial_year', fy)
       if (!isFullYearRange()) q = q.gte('payment_request_date', dateRange.start).lte('payment_request_date', dateRange.end)
       const { data } = await q
       const rows = (data || []) as unknown as Array<{ net_amount: number; ff3: { section: { name: string } | null; province: { name: string } | null; project: { name: string } | null } | null }>
@@ -471,15 +456,9 @@ export default function ReportsPage() {
       const map = new Map<string, { amount: number; count: number }>()
       let total = 0
       rows.forEach((r) => { const k = keyOf(r); const e = map.get(k) || { amount: 0, count: 0 }; e.amount += r.net_amount || 0; e.count += 1; total += r.net_amount || 0; map.set(k, e) })
-      return {
-        title: `Expenditure by ${label}`,
-        records: Array.from(map).map(([k, v]) => ({
-          [label]: k, Payments: v.count, 'Expenditure (K)': v.amount, 'Share %': total ? round1((v.amount / total) * 100) : 0,
-        })),
-      }
+      return { title: `Expenditure by ${label}`, records: Array.from(map).map(([k, v]) => ({ [label]: k, Payments: v.count, 'Expenditure (K)': v.amount, 'Share %': total ? round1((v.amount / total) * 100) : 0 })) }
     }
 
-    // ---------- User activity ----------
     if (id === 'user-activity') {
       const { data } = await supabase.from('audit_logs').select('user_name, action, created_at').order('created_at', { ascending: false }).limit(1000)
       const rows = (data || []) as Array<{ user_name: string | null; action: string; created_at: string }>
@@ -493,109 +472,42 @@ export default function ReportsPage() {
         if (new Date(r.created_at) > new Date(e.last)) e.last = r.created_at
         map.set(u, e)
       })
-      return {
-        title: 'User Activity Report',
-        records: Array.from(map).map(([user, v]) => ({
-          User: user, 'Total Actions': v.total, Creates: v.creates, 'Other Actions': v.updates,
-          'Last Activity': new Date(v.last).toLocaleString('en-GB'),
-        })),
-      }
+      return { title: 'User Activity Report', records: Array.from(map).map(([user, v]) => ({ User: user, 'Total Actions': v.total, Creates: v.creates, 'Other Actions': v.updates, 'Last Activity': new Date(v.last).toLocaleString('en-GB') })) }
     }
 
     const ds = datasetFor(id)
 
     if (ds === 'ff3') {
-      let q = supabase
-        .from('ff3_headers')
-        .select('ff3_number, request_date, status, urgency_level, total_estimated_amount, department:departments(name), section:sections(name)')
-        .eq('financial_year', fy)
-        .order('ff3_number')
+      let q = supabase.from('ff3_headers').select('ff3_number, request_date, status, urgency_level, total_estimated_amount, department:departments(name), section:sections(name)').eq('financial_year', fy).order('ff3_number')
       if (!isFullYearRange()) q = q.gte('request_date', dateRange.start).lte('request_date', dateRange.end)
       if (id === 'ff3-pending') q = q.in('status', ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'])
       else if (filters.status) q = q.eq('status', filters.status)
       const { data } = await q
       const rows = (data || []) as unknown as Array<{ ff3_number: string; request_date: string; status: string; urgency_level: string | null; total_estimated_amount: number | null; department: { name: string } | null; section: { name: string } | null }>
-      return {
-        title: id === 'ff3-pending' ? 'FF3 Pending Approvals' : 'FF3 Requisitions Report',
-        records: rows.map((r) => ({
-          'FF3 Number': r.ff3_number,
-          Date: r.request_date,
-          Department: r.department?.name || '-',
-          Section: r.section?.name || '-',
-          Urgency: r.urgency_level || '-',
-          Status: r.status,
-          'Amount (K)': r.total_estimated_amount || 0,
-        })),
-      }
+      return { title: id === 'ff3-pending' ? 'FF3 Pending Approvals' : 'FF3 Requisitions Report', records: rows.map((r) => ({ 'FF3 Number': r.ff3_number, Date: r.request_date, Department: r.department?.name || '-', Section: r.section?.name || '-', Urgency: r.urgency_level || '-', Status: r.status, 'Amount (K)': r.total_estimated_amount || 0 })) }
     }
 
     if (ds === 'ff4') {
-      let q = supabase
-        .from('ff4_headers')
-        .select('ff4_number, payment_request_date, payee_name, status, gross_amount, net_amount, payment_date, ff3:ff3_headers(ff3_number)')
-        .eq('financial_year', fy)
-        .order('ff4_number')
+      let q = supabase.from('ff4_headers').select('ff4_number, payment_request_date, payee_name, status, gross_amount, net_amount, payment_date, ff3:ff3_headers(ff3_number)').eq('financial_year', fy).order('ff4_number')
       if (!isFullYearRange()) q = q.gte('payment_request_date', dateRange.start).lte('payment_request_date', dateRange.end)
       if (id === 'ff4-reconciliation') q = q.neq('status', 'RECONCILED')
       else if (filters.status) q = q.eq('status', filters.status)
       const { data } = await q
       const rows = (data || []) as unknown as Array<{ ff4_number: string; payment_request_date: string; payee_name: string; status: string; gross_amount: number; net_amount: number; payment_date: string | null; ff3: { ff3_number: string } | null }>
-      return {
-        title: id === 'ff4-reconciliation' ? 'FF4 Reconciliation Report' : 'FF4 Expenses Report',
-        records: rows.map((r) => ({
-          'FF4 Number': r.ff4_number,
-          Date: r.payment_request_date,
-          Payee: r.payee_name,
-          'Linked FF3': r.ff3?.ff3_number || '-',
-          Status: r.status,
-          'Gross (K)': r.gross_amount || 0,
-          'Net (K)': r.net_amount || 0,
-          'Paid Date': r.payment_date || '-',
-        })),
-      }
+      return { title: id === 'ff4-reconciliation' ? 'FF4 Reconciliation Report' : 'FF4 Expenses Report', records: rows.map((r) => ({ 'FF4 Number': r.ff4_number, Date: r.payment_request_date, Payee: r.payee_name, 'Linked FF3': r.ff3?.ff3_number || '-', Status: r.status, 'Gross (K)': r.gross_amount || 0, 'Net (K)': r.net_amount || 0, 'Paid Date': r.payment_date || '-' })) }
     }
 
     if (ds === 'audit') {
-      const { data } = await supabase
-        .from('audit_logs')
-        .select('created_at, user_name, action, entity_type, entity_reference, changes')
-        .order('created_at', { ascending: false })
-        .limit(500)
+      const { data } = await supabase.from('audit_logs').select('created_at, user_name, action, entity_type, entity_reference, changes').order('created_at', { ascending: false }).limit(500)
       const rows = (data || []) as unknown as Array<{ created_at: string; user_name: string | null; action: string; entity_type: string; entity_reference: string | null; changes: Record<string, unknown> | null }>
-      return {
-        title: 'Audit Trail Report',
-        records: rows.map((r) => ({
-          Timestamp: new Date(r.created_at).toLocaleString('en-GB'),
-          User: r.user_name || 'System',
-          Action: r.action,
-          Entity: r.entity_type,
-          Reference: r.entity_reference || '-',
-          Change: r.changes && typeof r.changes === 'object' && 'old_status' in r.changes
-            ? `${(r.changes as Record<string, unknown>).old_status} -> ${(r.changes as Record<string, unknown>).new_status}`
-            : '',
-        })),
-      }
+      return { title: 'Audit Trail Report', records: rows.map((r) => ({ Timestamp: new Date(r.created_at).toLocaleString('en-GB'), User: r.user_name || 'System', Action: r.action, Entity: r.entity_type, Reference: r.entity_reference || '-', Change: r.changes && typeof r.changes === 'object' && 'old_status' in r.changes ? `${(r.changes as Record<string, unknown>).old_status} -> ${(r.changes as Record<string, unknown>).new_status}` : '' })) }
     }
 
     if (ds === 'planning') {
       if (id === 'budget-submission-status') {
-        const { data } = await supabase
-          .from('divisional_budget_submissions')
-          .select('submission_number, submission_reference, budget_year, status, total_proposed_budget, total_monthly_allocation, unallocated_variance, division:budget_divisions(name, code)')
-          .eq('budget_year', fy)
-          .order('created_at', { ascending: false })
+        const { data } = await supabase.from('divisional_budget_submissions').select('submission_number, submission_reference, budget_year, status, total_proposed_budget, total_monthly_allocation, unallocated_variance, division:budget_divisions(name, code)').eq('budget_year', fy).order('created_at', { ascending: false })
         const rows = (data || []) as unknown as Array<{ submission_number: string | null; submission_reference: string | null; status: string; total_proposed_budget: number | null; total_monthly_allocation: number | null; unallocated_variance: number | null; division: { name: string; code: string } | null }>
-        return {
-          title: 'Budget Submission Status',
-          records: rows.map((row) => ({
-            Submission: row.submission_number || row.submission_reference || '-',
-            Division: row.division ? `${row.division.code} — ${row.division.name}` : '-',
-            Status: row.status,
-            'Annual Estimate (K)': row.total_proposed_budget || 0,
-            'Monthly Allocation (K)': row.total_monthly_allocation || 0,
-            'Variance (K)': row.unallocated_variance || 0,
-          })),
-        }
+        return { title: 'Budget Submission Status', records: rows.map((row) => ({ Submission: row.submission_number || row.submission_reference || '-', Division: row.division ? `${row.division.code} — ${row.division.name}` : '-', Status: row.status, 'Annual Estimate (K)': row.total_proposed_budget || 0, 'Monthly Allocation (K)': row.total_monthly_allocation || 0, 'Variance (K)': row.unallocated_variance || 0 })) }
       }
 
       if (id === 'approved-budget-by-division' || id === 'approved-budget-by-department' || id === 'approved-budget-by-finance-code') {
@@ -618,10 +530,7 @@ export default function ReportsPage() {
         const { data } = await supabase.from('v_department_consolidated_budget_monthly').select('*').eq('budget_year', fy)
         const rows = (data || []) as Array<{ department_name: string | null; division_name: string | null; finance_code: string | null; month_number: number; month_name: string; monthly_amount: number }>
         if (id === 'monthly-cashflow') {
-          return {
-            title: 'Monthly Cash-Flow Plan',
-            records: rows.map((row) => ({ Department: row.department_name || '-', Division: row.division_name || '-', 'Finance Code': row.finance_code || '-', Month: row.month_name, 'Amount (K)': row.monthly_amount || 0 })),
-          }
+          return { title: 'Monthly Cash-Flow Plan', records: rows.map((row) => ({ Department: row.department_name || '-', Division: row.division_name || '-', 'Finance Code': row.finance_code || '-', Month: row.month_name, 'Amount (K)': row.monthly_amount || 0 })) }
         }
         const quarterMap = new Map<string, number>()
         rows.forEach((row) => {
@@ -629,13 +538,7 @@ export default function ReportsPage() {
           const key = `${row.department_name || '-'}|${row.division_name || '-'}|${row.finance_code || '-'}|${quarter}`
           quarterMap.set(key, (quarterMap.get(key) || 0) + (row.monthly_amount || 0))
         })
-        return {
-          title: 'Quarterly Cash-Flow Requirement',
-          records: Array.from(quarterMap).map(([key, amount]) => {
-            const [department, division, financeCode, quarter] = key.split('|')
-            return { Department: department, Division: division, 'Finance Code': financeCode, Quarter: quarter, 'Planned Requirement (K)': amount }
-          }),
-        }
+        return { title: 'Quarterly Cash-Flow Requirement', records: Array.from(quarterMap).map(([key, amount]) => { const [department, division, financeCode, quarter] = key.split('|'); return { Department: department, Division: division, 'Finance Code': financeCode, Quarter: quarter, 'Planned Requirement (K)': amount } }) }
       }
 
       const { data } = await supabase.from('v_budget_by_code').select('*').eq('financial_year', fy)
@@ -651,16 +554,11 @@ export default function ReportsPage() {
         return { title: 'Budget by Cost Centre', records: Array.from(map).map(([cc, v]) => ({ 'Cost Centre': cc, 'Approved (K)': v.rev, 'Committed (K)': v.com, 'Actual (K)': v.act, 'Available (K)': v.rev - v.com - v.act })) }
       }
       const isAvail = id === 'available-balance'
-      const mapped = vrows.map((r) => ({
-        'Expense Code': r.full_expense_code || '-', Department: r.department_name || '-', 'Cost Centre': r.cost_centre_code || '-',
-        'Approved (K)': r.revised_budget || 0, 'Committed (K)': r.committed_amount || 0, 'Actual (K)': r.actual_expenditure || 0,
-        'Available (K)': (r.revised_budget || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0),
-      }))
+      const mapped = vrows.map((r) => ({ 'Expense Code': r.full_expense_code || '-', Department: r.department_name || '-', 'Cost Centre': r.cost_centre_code || '-', 'Approved (K)': r.revised_budget || 0, 'Committed (K)': r.committed_amount || 0, 'Actual (K)': r.actual_expenditure || 0, 'Available (K)': (r.revised_budget || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0) }))
       if (isAvail) mapped.sort((a, b) => (a['Available (K)'] as number) - (b['Available (K)'] as number))
       return { title: isAvail ? 'Available Balance Report' : 'Budget by Expense Code', records: mapped }
     }
 
-    // ---------- Budget utilisation summary (fallback) ----------
     const [{ data: alloc }, { data: rel }, { data: com }] = await Promise.all([
       supabase.from('budget_allocations').select('original_budget, supplemental_budget').eq('financial_year', fy).eq('is_active', true),
       supabase.from('quarterly_releases').select('released_amount').eq('financial_year', fy),
@@ -684,11 +582,9 @@ export default function ReportsPage() {
     }
   }
 
-  // Single entry point: generate any report id in any format.
   const runReport = async (id: string, format: ExportFormat) => {
     if (!id || exporting) return
 
-    // Bulk multi-document PDFs
     if (format === 'pdf' && id === 'ff3-bulk-pdf') { setActiveAction(`${id}:${format}`); await exportBulkFF3(); setActiveAction(""); return }
     if (format === 'pdf' && id === 'ff4-bulk-pdf') { setActiveAction(`${id}:${format}`); await exportBulkFF4(); setActiveAction(""); return }
 
@@ -729,8 +625,6 @@ export default function ReportsPage() {
     }
   }
 
-  // Compact action buttons rendered on every report card and the top generator.
-  // Plain render helper (not a component) so it can read closure state safely.
   const renderActions = (id: string, size: "sm" | "lg" = "sm") => {
     const isBulk = id.includes('bulk')
     const busy = (fmt: ExportFormat) => exporting && activeAction === `${id}:${fmt}`
@@ -770,13 +664,11 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Reports</h1>
         <p className="text-slate-600 mt-1">Financial Year {fyOf()} - Generate and Export Reports</p>
       </div>
 
-      {/* Messages */}
       {exportError && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
           <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
@@ -791,7 +683,6 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* Export Progress */}
       {exporting && exportProgress.total > 0 && (
         <div className="bg-png-red/5 border border-png-gold/40 rounded-lg p-4">
           <div className="flex items-center gap-3 mb-2">
@@ -810,7 +701,6 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* Report Generator */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Report Generator</h2>
 
@@ -881,7 +771,6 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Export Buttons */}
         {selectedReport ? (
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-slate-500">Export the selected report:</span>
@@ -892,7 +781,6 @@ export default function ReportsPage() {
         )}
       </div>
 
-      {/* Report Categories */}
       {reportCategories.map((category) => (
         <div key={category.category} className="bg-white rounded-lg border border-slate-200">
           <div className="px-6 py-4 border-b border-slate-200">

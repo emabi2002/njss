@@ -10,6 +10,7 @@ import { exportToCSV, exportToPDF, rowsToPdfTable } from "@/lib/export"
 
 type CodeRow = {
   financial_year: number
+  budget_allocation_id?: string
   department_id: string | null
   department_name: string | null
   section_id: string | null
@@ -20,9 +21,16 @@ type CodeRow = {
   expense_code_registry_id: string | null
   full_expense_code: string | null
   revised_budget: number
+  approved_budget?: number
+  funded_amount?: number
   released_amount: number
+  pending_amount?: number
   committed_amount: number
+  outstanding_commitment?: number
   actual_expenditure: number
+  available_amount?: number
+  unfunded_amount?: number
+  unreleased_funding?: number
 }
 
 type Consolidation = {
@@ -52,7 +60,9 @@ type ReleaseRow = {
 type Allocation = {
   id: string
   revised_budget: number
+  funded?: number
   released: number
+  unreleased_funding?: number
   releasable: number
   department_name: string | null
   section_name: string | null
@@ -90,7 +100,7 @@ export default function BudgetControlPage() {
         getDepartments(),
         getReleases(year),
         getAllocationsForRelease(year),
-        supabase.from('budget_cycles').select('id, budget_year, name, status').order('budget_year', { ascending: false }),
+        supabase.from("budget_cycles").select("id, budget_year, name, status").order("budget_year", { ascending: false }),
       ])
       setRows((codeData || []) as unknown as CodeRow[])
       setConsolidations((consData || []) as unknown as Consolidation[])
@@ -101,7 +111,7 @@ export default function BudgetControlPage() {
       setCycles(cycleRows)
       const selectedCycle = cycleRows.find((cycle) => cycle.budget_year === year) || cycleRows[0]
       if (selectedCycle) {
-        const { data: periodRows } = await supabase.from('budget_periods').select('id, period_number, period_code, period_name').eq('budget_cycle_id', selectedCycle.id).eq('is_active', true).order('period_number')
+        const { data: periodRows } = await supabase.from("budget_periods").select("id, period_number, period_code, period_name").eq("budget_cycle_id", selectedCycle.id).eq("is_active", true).order("period_number")
         setPeriods((periodRows || []) as BudgetPeriodOption[])
         if (year !== selectedCycle.budget_year && (codeData || []).length === 0) setYear(selectedCycle.budget_year)
       }
@@ -113,32 +123,41 @@ export default function BudgetControlPage() {
   }, [year])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData()
   }, [fetchData])
 
   const totals = useMemo(() => {
-    const revised = rows.reduce((s, r) => s + (r.revised_budget || 0), 0)
+    const approved = rows.reduce((s, r) => s + (r.approved_budget ?? r.revised_budget ?? 0), 0)
+    const funded = rows.reduce((s, r) => s + (r.funded_amount || 0), 0)
     const released = rows.reduce((s, r) => s + (r.released_amount || 0), 0)
-    const committed = rows.reduce((s, r) => s + (r.committed_amount || 0), 0)
+    const pending = rows.reduce((s, r) => s + (r.pending_amount || 0), 0)
+    const committed = rows.reduce((s, r) => s + (r.outstanding_commitment ?? r.committed_amount ?? 0), 0)
     const actual = rows.reduce((s, r) => s + (r.actual_expenditure || 0), 0)
-    return { revised, released, committed, actual, available: released - committed - actual }
+    const available = rows.reduce((s, r) => s + (r.available_amount ?? ((r.released_amount || 0) - (r.outstanding_commitment ?? r.committed_amount ?? 0) - (r.actual_expenditure || 0))), 0)
+    const unfunded = rows.reduce((s, r) => s + (r.unfunded_amount ?? ((r.approved_budget ?? r.revised_budget ?? 0) - (r.funded_amount || 0))), 0)
+    const unreleased = rows.reduce((s, r) => s + (r.unreleased_funding ?? ((r.funded_amount || 0) - (r.released_amount || 0))), 0)
+    return { approved, funded, released, pending, committed, actual, available, unfunded, unreleased }
   }, [rows])
 
-  // Roll-up by cost centre
   const byCentre = useMemo(() => {
-    const map = new Map<string, { label: string; revised: number; released: number; committed: number; actual: number }>()
+    const map = new Map<string, { label: string; approved: number; funded: number; released: number; pending: number; committed: number; actual: number; unfunded: number; unreleased: number }>()
     for (const r of rows) {
       const key = r.cost_centre_code || r.section_name || "Unassigned"
       const label = r.cost_centre_code ? `${r.cost_centre_code} — ${r.cost_centre_name}` : r.section_name || "Unassigned"
-      const e = map.get(key) || { label, revised: 0, released: 0, committed: 0, actual: 0 }
-      e.revised += r.revised_budget || 0
+      const approved = r.approved_budget ?? r.revised_budget ?? 0
+      const committed = r.outstanding_commitment ?? r.committed_amount ?? 0
+      const e = map.get(key) || { label, approved: 0, funded: 0, released: 0, pending: 0, committed: 0, actual: 0, unfunded: 0, unreleased: 0 }
+      e.approved += approved
+      e.funded += r.funded_amount || 0
       e.released += r.released_amount || 0
-      e.committed += r.committed_amount || 0
+      e.pending += r.pending_amount || 0
+      e.committed += committed
       e.actual += r.actual_expenditure || 0
+      e.unfunded += r.unfunded_amount ?? (approved - (r.funded_amount || 0))
+      e.unreleased += r.unreleased_funding ?? ((r.funded_amount || 0) - (r.released_amount || 0))
       map.set(key, e)
     }
-    return Array.from(map.values()).sort((a, b) => b.revised - a.revised)
+    return Array.from(map.values()).sort((a, b) => b.approved - a.approved)
   }, [rows])
 
   const chartData = useMemo(
@@ -151,27 +170,51 @@ export default function BudgetControlPage() {
     const emit = (file: string, title: string, records: Record<string, string | number>[]) => {
       if (records.length === 0) return
       if (format === "csv") exportToCSV(`${file}_${stamp}`, records)
-      else { const { columns, rows: r } = rowsToPdfTable(records); exportToPDF({ title, subtitle: `FY${year}`, columns, rows: r, filename: `${file}_${stamp}` }) }
+      else {
+        const { columns, rows: r } = rowsToPdfTable(records)
+        exportToPDF({ title, subtitle: `FY${year}`, columns, rows: r, filename: `${file}_${stamp}` })
+      }
     }
     if (tab === "code") {
       emit("budget_by_code", "Budget by Expense Code", rows.map((r) => ({
-        "Expense Code": r.full_expense_code || "-", Department: r.department_name || "-", "Cost Centre": r.cost_centre_code || "-",
-        "Approved (K)": r.revised_budget || 0, "Released (K)": r.released_amount || 0, "Committed (K)": r.committed_amount || 0,
-        "Actual (K)": r.actual_expenditure || 0, "Available (K)": (r.released_amount || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0),
+        "Expense Code": r.full_expense_code || "-",
+        Department: r.department_name || "-",
+        "Cost Centre": r.cost_centre_code || "-",
+        "Approved (K)": r.revised_budget || 0,
+        "Released (K)": r.released_amount || 0,
+        "Committed (K)": r.committed_amount || 0,
+        "Actual (K)": r.actual_expenditure || 0,
+        "Available (K)": (r.released_amount || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0),
       })))
     } else if (tab === "centre") {
       emit("budget_by_cost_centre", "Budget by Cost Centre", byCentre.map((c) => ({
-        "Cost Centre": c.label, "Approved (K)": c.revised, "Released (K)": c.released, "Committed (K)": c.committed,
-        "Actual (K)": c.actual, "Available (K)": c.released - c.committed - c.actual,
+        "Cost Centre": c.label,
+        "Approved (K)": c.approved,
+        "Funded (K)": c.funded,
+        "Released (K)": c.released,
+        "Pending (K)": c.pending,
+        "Committed (K)": c.committed,
+        "Actual (K)": c.actual,
+        "Available (K)": c.released - c.committed - c.actual,
+        "Unfunded (K)": c.unfunded,
+        "Unreleased Funding (K)": c.unreleased,
       })))
     } else if (tab === "releases") {
       emit("quarterly_releases", "Quarterly Releases", releases.map((r) => ({
-        Release: r.release_number || "-", "Expense Code": r.full_expense_code || "-", "Cost Centre": r.cost_centre_code || "-",
-        Quarter: `Q${r.quarter}`, Date: r.release_date, "Amount (K)": r.released_amount || 0,
+        Release: r.release_number || "-",
+        "Expense Code": r.full_expense_code || "-",
+        "Cost Centre": r.cost_centre_code || "-",
+        Quarter: `Q${r.quarter}`,
+        Date: r.release_date,
+        "Amount (K)": r.released_amount || 0,
       })))
     } else {
       emit("consolidations", "Budget Consolidations", consolidations.map((c) => ({
-        Department: c.department?.name || "-", Status: c.status, Sections: c.section_count, Plans: c.plan_count, "Total (K)": c.total_amount,
+        Department: c.department?.name || "-",
+        Status: c.status,
+        Sections: c.section_count,
+        Plans: c.plan_count,
+        "Total (K)": c.total_amount,
       })))
     }
   }
@@ -185,7 +228,6 @@ export default function BudgetControlPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -194,8 +236,11 @@ export default function BudgetControlPage() {
           <p className="text-slate-600 mt-1">Approved budget, quarterly releases, commitments &amp; actual expenditure by code, cost centre and department</p>
         </div>
         <div className="flex items-center gap-2">
-          <select value={year} onChange={(e) => setYear(parseInt(e.target.value))}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
+          <select
+            value={year}
+            onChange={(e) => setYear(parseInt(e.target.value))}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red"
+          >
             {cycles.length === 0 ? <option value={year}>FY{year}</option> : cycles.map((cycle) => <option key={cycle.id} value={cycle.budget_year}>{cycle.name || `FY${cycle.budget_year}`}</option>)}
           </select>
           <button onClick={() => fetchData()} className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50" title="Refresh">
@@ -210,22 +255,27 @@ export default function BudgetControlPage() {
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <SummaryCard title="Approved" value={totals.revised} subtitle="Annual ceiling" icon={<Wallet className="h-6 w-6" />} tone="maroon" />
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-9 gap-4">
+        <SummaryCard title="Approved" value={totals.approved} subtitle="Annual ceiling" icon={<Wallet className="h-6 w-6" />} tone="maroon" />
+        <SummaryCard title="Funded" value={totals.funded} subtitle="Actual allocations" icon={<Banknote className="h-6 w-6" />} tone="gold" />
         <SummaryCard title="Released" value={totals.released} subtitle="Cash made available" icon={<Banknote className="h-6 w-6" />} tone="gold" />
+        <SummaryCard title="Pending" value={totals.pending} subtitle="Submitted FF3" icon={<AlertCircle className="h-6 w-6" />} tone="slate" />
         <SummaryCard title="Committed" value={totals.committed} subtitle="Outstanding" icon={<FileText className="h-6 w-6" />} tone="slate" />
         <SummaryCard title="Actual" value={totals.actual} subtitle="Paid to date" icon={<DollarSign className="h-6 w-6" />} tone="red" />
         <SummaryCard title="Available" value={totals.available} subtitle="Released − Com − Act" icon={<TrendingUp className="h-6 w-6" />} tone="green" />
+        <SummaryCard title="Unfunded" value={totals.unfunded} subtitle="Approved − Funded" icon={<Layers className="h-6 w-6" />} tone="red" />
+        <SummaryCard title="Unreleased Funding" value={totals.unreleased} subtitle="Funded − Released" icon={<Hash className="h-6 w-6" />} tone="maroon" />
       </div>
 
-      {/* Tabs */}
       <div className="flex flex-wrap gap-2">
         {TABS.map((t) => {
           const Icon = t.icon
           return (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${tab === t.key ? "bg-png-red/10 text-png-red border border-png-gold/40" : "text-slate-600 hover:bg-slate-100 border border-transparent"}`}>
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${tab === t.key ? "bg-png-red/10 text-png-red border border-png-gold/40" : "text-slate-600 hover:bg-slate-100 border border-transparent"}`}
+            >
               <Icon className="h-4 w-4" /> {t.label}
             </button>
           )
@@ -259,27 +309,40 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Department</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">CC</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Approved</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Funded</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Released</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Pending</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Committed</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Actual</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Available</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Unfunded</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Unreleased Funding</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Used %</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((r, i) => {
-              const avail = (r.released_amount || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0)
-              const used = r.released_amount ? ((r.committed_amount + r.actual_expenditure) / r.released_amount) * 100 : 0
+              const approved = r.approved_budget ?? r.revised_budget ?? 0
+              const funded = r.funded_amount || 0
+              const committed = r.outstanding_commitment ?? r.committed_amount ?? 0
+              const avail = r.available_amount ?? ((r.released_amount || 0) - committed - (r.actual_expenditure || 0))
+              const unfunded = r.unfunded_amount ?? (approved - funded)
+              const unreleased = r.unreleased_funding ?? (funded - (r.released_amount || 0))
+              const used = r.released_amount ? ((committed + (r.actual_expenditure || 0)) / r.released_amount) * 100 : 0
               return (
                 <tr key={i} className="hover:bg-slate-50">
                   <td className="px-4 py-3"><span className="font-mono text-sm text-png-red font-medium">{r.full_expense_code || "—"}</span></td>
                   <td className="px-4 py-3 text-sm text-slate-600">{r.department_name || "-"}</td>
                   <td className="px-4 py-3 text-sm text-slate-600 font-mono">{r.cost_centre_code || "-"}</td>
-                  <td className="px-4 py-3 text-sm text-slate-900 text-right font-medium">K {(r.revised_budget || 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-slate-900 text-right font-medium">K {approved.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-png-maroon text-right">K {funded.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-gold-strong text-right">K {(r.released_amount || 0).toLocaleString()}</td>
-                  <td className="px-4 py-3 text-sm text-png-maroon text-right">K {(r.committed_amount || 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600 text-right">K {(r.pending_amount || 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-png-maroon text-right">K {committed.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-red text-right">K {(r.actual_expenditure || 0).toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-right font-semibold"><span className={avail >= 0 ? "text-green-700" : "text-red-600"}>K {avail.toLocaleString()}</span></td>
+                  <td className="px-4 py-3 text-sm text-red-600 text-right">K {unfunded.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-png-maroon text-right">K {unreleased.toLocaleString()}</td>
                   <td className="px-4 py-3 text-right">
                     <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${used > 90 ? "bg-red-100 text-red-700" : used > 70 ? "bg-png-gold/25 text-png-maroon" : "bg-green-100 text-green-700"}`}>{used.toFixed(0)}%</span>
                   </td>
@@ -293,7 +356,7 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
   )
 }
 
-function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revised: number; released: number; committed: number; actual: number }[]; chartData: { name: string; available: number; used: number }[] }) {
+function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; approved: number; funded: number; released: number; pending: number; committed: number; actual: number; unfunded: number; unreleased: number }[]; chartData: { name: string; available: number; used: number }[] }) {
   if (byCentre.length === 0) return <EmptyState message="No cost-centre budgets yet." />
   return (
     <div className="space-y-6">
@@ -322,10 +385,13 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revi
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Cost Centre</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Approved</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Funded</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Released</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Pending</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Committed</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Actual</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Available</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Unfunded</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -334,11 +400,14 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revi
                 return (
                   <tr key={i} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-sm font-medium text-slate-900">{c.label}</td>
-                    <td className="px-4 py-3 text-sm text-slate-900 text-right">K {c.revised.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-slate-900 text-right">K {c.approved.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-png-maroon text-right">K {c.funded.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-gold-strong text-right">K {c.released.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600 text-right">K {c.pending.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-maroon text-right">K {c.committed.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-red text-right">K {c.actual.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-right font-semibold"><span className={avail >= 0 ? "text-green-700" : "text-red-600"}>K {avail.toLocaleString()}</span></td>
+                    <td className="px-4 py-3 text-sm text-red-600 text-right">K {c.unfunded.toLocaleString()}</td>
                   </tr>
                 )
               })}
@@ -366,11 +435,13 @@ function ReleasesView({ year, releases, allocations, periods, canRelease, onChan
   const submit = async () => {
     const amt = parseFloat(amount)
     if (!allocId || !amt || amt <= 0) return
-    setSaving(true); setMsg(null)
+    setSaving(true)
+    setMsg(null)
     try {
       const r = await createQuarterlyRelease({ budget_allocation_id: allocId, financial_year: year, quarter, released_amount: amt, release_date: date })
       setMsg({ type: "ok", text: `Released K ${amt.toLocaleString()} (${r?.release_number || "Q" + quarter}) for ${selected?.full_expense_code || "allocation"}.` })
-      setAmount(""); setAllocId("")
+      setAmount("")
+      setAllocId("")
       onChanged()
     } catch (err: unknown) {
       setMsg({ type: "err", text: err instanceof Error ? err.message : "Release failed." })
@@ -384,7 +455,7 @@ function ReleasesView({ year, releases, allocations, periods, canRelease, onChan
       {canRelease && (
         <div className="bg-white rounded-lg border border-png-gold/40 p-5">
           <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-1"><Banknote className="h-4 w-4 text-png-gold" /> Release Quarterly Funds</h3>
-          <p className="text-xs text-slate-500 mb-4">Make cash available against an approved budget code for a quarter. Releases cannot exceed the approved ceiling.</p>
+          <p className="text-xs text-slate-500 mb-4">Make cash available against an approved funded budget code. Release validation is limited by MIN(approved budget remaining, funded amount remaining).</p>
           {msg && (
             <div className={`mb-3 rounded-lg p-2.5 text-sm flex items-center gap-2 ${msg.type === "ok" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
               {msg.type === "ok" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />} {msg.text}
@@ -393,43 +464,61 @@ function ReleasesView({ year, releases, allocations, periods, canRelease, onChan
           <div className="grid md:grid-cols-12 gap-3 items-end">
             <div className="md:col-span-5">
               <label className="block text-xs font-medium text-slate-500 mb-1">Budget Code / Allocation</label>
-              <select value={allocId} onChange={(e) => setAllocId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
+              <select
+                value={allocId}
+                onChange={(e) => setAllocId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red"
+              >
                 <option value="">Select an approved budget code...</option>
                 {allocations.map((a) => (
                   <option key={a.id} value={a.id} disabled={a.releasable <= 0}>
-                    {(a.full_expense_code || a.cost_centre_code || "—")} · {a.department_name} · approved K{a.revised_budget.toLocaleString()} · releasable K{a.releasable.toLocaleString()}
+                    {(a.full_expense_code || a.cost_centre_code || "—")} · {a.department_name} · funded K{(a.funded || 0).toLocaleString()} · releasable K{a.releasable.toLocaleString()}
                   </option>
                 ))}
               </select>
             </div>
             <div className="md:col-span-2">
               <label className="block text-xs font-medium text-slate-500 mb-1">Quarter</label>
-              <select value={quarter} onChange={(e) => setQuarter(parseInt(e.target.value))}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
+              <select
+                value={quarter}
+                onChange={(e) => setQuarter(parseInt(e.target.value))}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red"
+              >
                 {(periods.length ? periods : Array.from({ length: 4 }, (_, index) => ({ id: String(index + 1), period_number: index + 1, period_code: `Q${index + 1}`, period_name: `Quarter ${index + 1}` }))).map((period) => <option key={period.id} value={period.period_number}>{period.period_code}</option>)}
               </select>
             </div>
             <div className="md:col-span-2">
               <label className="block text-xs font-medium text-slate-500 mb-1">Amount (K)</label>
-              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00"
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-right focus:outline-none focus:ring-2 focus:ring-png-red" />
+              <input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-right focus:outline-none focus:ring-2 focus:ring-png-red"
+              />
             </div>
             <div className="md:col-span-2">
               <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red" />
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red"
+              />
             </div>
             <div className="md:col-span-1">
-              <button onClick={submit} disabled={!allocId || !amount || saving}
-                className="w-full px-3 py-2 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon disabled:opacity-50 flex items-center justify-center gap-1">
+              <button
+                onClick={submit}
+                disabled={!allocId || !amount || saving}
+                className="w-full px-3 py-2 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon disabled:opacity-50 flex items-center justify-center gap-1"
+              >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
               </button>
             </div>
           </div>
           {selected && (
             <p className="mt-2 text-xs text-slate-500">
-              Approved <b>K {selected.revised_budget.toLocaleString()}</b> · already released <b>K {selected.released.toLocaleString()}</b> · remaining to release <b className="text-png-maroon">K {selected.releasable.toLocaleString()}</b>
+              Approved <b>K {selected.revised_budget.toLocaleString()}</b> · funded <b>K {(selected.funded || 0).toLocaleString()}</b> · already released <b>K {selected.released.toLocaleString()}</b> · remaining funded release <b className="text-png-maroon">K {selected.releasable.toLocaleString()}</b>
             </p>
           )}
         </div>
@@ -484,7 +573,8 @@ function ConsolidationView({ year, depts, consolidations, canRun, onChanged }: {
 
   const run = async () => {
     if (!deptId) return
-    setRunning(true); setMsg(null)
+    setRunning(true)
+    setMsg(null)
     try {
       const res = await consolidateDepartmentBudget(year, deptId)
       setMsg({ type: "ok", text: `Consolidated ${depts.find((d) => d.id === deptId)?.name}: K ${(res?.total_amount || 0).toLocaleString()} across ${res?.plan_count || 0} approved divisional budget(s).` })
@@ -512,14 +602,20 @@ function ConsolidationView({ year, depts, consolidations, canRun, onChanged }: {
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[240px]">
               <label className="block text-xs font-medium text-slate-500 mb-1">Department</label>
-              <select value={deptId} onChange={(e) => setDeptId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
+              <select
+                value={deptId}
+                onChange={(e) => setDeptId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red"
+              >
                 <option value="">Select department...</option>
                 {depts.map((d) => <option key={d.id} value={d.id}>{d.code} — {d.name}</option>)}
               </select>
             </div>
-            <button onClick={run} disabled={!deptId || running}
-              className="px-4 py-2 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon disabled:opacity-50 flex items-center gap-2">
+            <button
+              onClick={run}
+              disabled={!deptId || running}
+              className="px-4 py-2 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon disabled:opacity-50 flex items-center gap-2"
+            >
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run Consolidation
             </button>
           </div>
