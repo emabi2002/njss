@@ -922,31 +922,39 @@ GRANT EXECUTE ON FUNCTION njss_create_budget_release(UUID, INTEGER, INTEGER, NUM
 -- 6. REPORT CATALOGUE OPTIONAL REGISTRATION
 -- ---------------------------------------------------------------------
 
-DO $$
+DO $
+DECLARE
+  v_funding_category_id UUID;
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'report_categories')
      AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'report_definitions') THEN
     INSERT INTO report_categories (code, name, description, sort_order, is_active)
     VALUES ('funding', 'Funding Reports', 'Funding authority, receipt, allocation and budget-position reports', 25, true)
-    ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, sort_order = EXCLUDED.sort_order, is_active = true;
+    ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, sort_order = EXCLUDED.sort_order, is_active = true
+    RETURNING id INTO v_funding_category_id;
 
-    INSERT INTO report_definitions (category_code, report_code, report_name, description, data_source, sort_order, is_active)
+    IF v_funding_category_id IS NULL THEN
+      SELECT id INTO v_funding_category_id FROM report_categories WHERE code = 'funding';
+    END IF;
+
+    INSERT INTO report_definitions (category_id, report_code, report_name, description, handler_key, sort_order, is_active, required_permission)
     VALUES
-      ('funding','funding-authority-register','Funding Authority Register','All funding authorities with receipt and remaining authority balances','v_funding_authority_register',10,true),
-      ('funding','funding-receipt-register','Funding Receipt Register','Funding receipts with authority balance and unallocated balance','v_funding_receipt_register',20,true),
-      ('funding','funding-allocation-report','Funding Allocation Report','Approved and draft funding allocations against operational budget lines','v_funding_allocation_register',30,true),
-      ('funding','funding-source-report','Funding Source Report','Funding totals by source','v_funding_source_report',40,true),
-      ('funding','funding-vs-approved-budget','Funding vs Approved Budget','Approved budget compared with actual funded allocations','v_authoritative_budget_position',50,true),
-      ('funding','funding-vs-releases','Funding vs Releases','Funded amounts compared with budget releases','v_authoritative_budget_position',60,true),
-      ('funding','unfunded-budget-report','Unfunded Budget Report','Approved budget not yet funded','v_authoritative_budget_position',70,true),
-      ('funding','unreleased-funding-report','Unreleased Funding Report','Funded amounts not yet released','v_authoritative_budget_position',80,true),
-      ('funding','budget-position-report','Budget Position Report','Authoritative budget position by operational allocation','v_authoritative_budget_position',90,true)
+      (v_funding_category_id,'funding-authority-register','Funding Authority Register','All funding authorities with receipt and remaining authority balances','v_funding_authority_register',10,true,'budget.report.view'),
+      (v_funding_category_id,'funding-receipt-register','Funding Receipt Register','Funding receipts with authority balance and unallocated balance','v_funding_receipt_register',20,true,'budget.report.view'),
+      (v_funding_category_id,'funding-allocation-report','Funding Allocation Report','Approved and draft funding allocations against operational budget lines','v_funding_allocation_register',30,true,'budget.report.view'),
+      (v_funding_category_id,'funding-source-report','Funding Source Report','Funding totals by source','v_funding_source_report',40,true,'budget.report.view'),
+      (v_funding_category_id,'funding-vs-approved-budget','Funding vs Approved Budget','Approved budget compared with actual funded allocations','v_authoritative_budget_position',50,true,'budget.report.view'),
+      (v_funding_category_id,'funding-vs-releases','Funding vs Releases','Funded amounts compared with budget releases','v_authoritative_budget_position',60,true,'budget.report.view'),
+      (v_funding_category_id,'unfunded-budget-report','Unfunded Budget Report','Approved budget not yet funded','v_authoritative_budget_position',70,true,'budget.report.view'),
+      (v_funding_category_id,'unreleased-funding-report','Unreleased Funding Report','Funded amounts not yet released','v_authoritative_budget_position',80,true,'budget.report.view'),
+      (v_funding_category_id,'budget-position-report','Budget Position Report','Authoritative budget position by operational allocation','v_authoritative_budget_position',90,true,'budget.report.view')
     ON CONFLICT (report_code) DO UPDATE SET
-      category_code = EXCLUDED.category_code,
+      category_id = EXCLUDED.category_id,
       report_name = EXCLUDED.report_name,
       description = EXCLUDED.description,
-      data_source = EXCLUDED.data_source,
+      handler_key = EXCLUDED.handler_key,
       sort_order = EXCLUDED.sort_order,
+      required_permission = EXCLUDED.required_permission,
       is_active = true;
   END IF;
-END $$;
+END $;

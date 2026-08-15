@@ -539,7 +539,8 @@ GROUP BY ba.financial_year, ba.department_id, d.name, ba.section_id, s.name,
          ecr.full_expense_code, el.finance_code, el.standard_description,
          ba.budget_division_id, bd.code, bd.name;
 
-CREATE OR REPLACE VIEW v_releases_by_code AS
+DROP VIEW IF EXISTS v_releases_by_code CASCADE;
+CREATE VIEW v_releases_by_code AS
 SELECT
     qr.id,
     qr.financial_year,

@@ -123,6 +123,7 @@ export default function BudgetControlPage() {
   }, [year])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData()
   }, [fetchData])
 

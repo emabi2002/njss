@@ -254,6 +254,11 @@ INSERT INTO rbac_data_scope_types (code, label, description, sort_order) VALUES
 ON CONFLICT (code) DO UPDATE SET label=EXCLUDED.label, description=EXCLUDED.description, sort_order=EXCLUDED.sort_order, is_active=true;
 
 UPDATE budget_divisions bd SET cost_centre_id = cc.id FROM cost_centres cc WHERE bd.cost_centre_id IS NULL AND (cc.code = bd.cost_centre_code OR cc.name = bd.cost_centre_name);
+
+-- Live NJSS budget-hardening triggers prevent edits to locked approved submissions
+-- unless this session flag is set by an authorised workflow/migration path.
+SELECT set_config('njss.budget_workflow', 'on', true);
+
 UPDATE divisional_budget_lines l SET priority_level_id = p.id FROM priority_levels p WHERE l.priority_level_id IS NULL AND UPPER(l.priority) = p.code;
 UPDATE divisional_budget_lines l SET procurement_method_id = p.id FROM procurement_methods p WHERE l.procurement_method_id IS NULL AND UPPER(l.procurement_method) = p.code;
 UPDATE divisional_budget_lines l SET unit_of_measure_id = u.id FROM units_of_measure u WHERE l.unit_of_measure_id IS NULL AND UPPER(l.unit_of_measure) IN (u.code, UPPER(u.name));
