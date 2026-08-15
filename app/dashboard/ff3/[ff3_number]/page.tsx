@@ -1,11 +1,10 @@
 "use client"
 
-import { useState, useEffect, use } from "react"
-import { useRouter } from "next/navigation"
+import { useCallback, useEffect, use, useState } from "react"
 import Link from "next/link"
 import {
   ArrowLeft, FileText, CheckCircle2, XCircle, Clock, AlertCircle,
-  User, Calendar, DollarSign, Building2, MapPin, Loader2, Send,
+  Calendar, DollarSign, Building2, MapPin, Loader2, Send,
   ThumbsUp, ThumbsDown, MessageSquare, Download
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -66,7 +65,6 @@ type FF3Approval = {
 
 export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number: string }> }) {
   const resolvedParams = use(params)
-  const router = useRouter()
   const { can } = useAuth()
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
@@ -80,11 +78,7 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  useEffect(() => {
-    fetchFF3Detail()
-  }, [resolvedParams.ff3_number])
-
-  async function fetchFF3Detail() {
+  const fetchFF3Detail = useCallback(async () => {
     try {
       // Fetch header
       const { data: headerData, error: headerError } = await supabase
@@ -131,7 +125,12 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
     } finally {
       setLoading(false)
     }
-  }
+  }, [resolvedParams.ff3_number])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchFF3Detail()
+  }, [fetchFF3Detail])
 
   async function handleApproval(action: 'ENDORSE_SUPERVISOR' | 'ENDORSE_SECTION_HEAD' | 'APPROVE') {
     if (!header) return

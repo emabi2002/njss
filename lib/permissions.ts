@@ -8,17 +8,25 @@ export function permissionsForRoles(): Permission[] {
 }
 
 export function hasPermission(_role: string | undefined | null, _perm: Permission): boolean {
+  void _role
+  void _perm
   return false
 }
 
 export function hasAnyRolePermission(_roles: Array<string | undefined | null>, _perm: Permission): boolean {
+  void _roles
+  void _perm
   return false
 }
 
 export function hasAnyPermission(_role: string | undefined | null, _perms: Permission[]): boolean {
+  void _role
+  void _perms
   return false
 }
 
 export function hasAnyPermissionForRoles(_roles: Array<string | undefined | null>, _perms: Permission[]): boolean {
+  void _roles
+  void _perms
   return false
 }

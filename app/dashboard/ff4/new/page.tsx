@@ -6,6 +6,8 @@ import Link from "next/link"
 import { Save, Send, ArrowLeft, AlertCircle, CheckCircle2, Upload, Loader2, FileText, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
+import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
+import { loadActiveUsers, loadLookup } from "@/lib/lookups"
 
 type ApprovedFF3 = {
   id: string
@@ -28,6 +30,10 @@ export default function NewFF4Page() {
 
   const [availableFF3s, setAvailableFF3s] = useState<ApprovedFF3[]>([])
   const [selectedFF3, setSelectedFF3] = useState<ApprovedFF3 | null>(null)
+  const [payeeTypes, setPayeeTypes] = useState<LookupOption[]>([])
+  const [paymentMethods, setPaymentMethods] = useState<LookupOption[]>([])
+  const [suppliers, setSuppliers] = useState<LookupOption[]>([])
+  const [users, setUsers] = useState<LookupOption[]>([])
 
   // File upload state
   const [invoiceFile, setInvoiceFile] = useState<UploadedFile | null>(null)
@@ -39,7 +45,10 @@ export default function NewFF4Page() {
     ff3_header_id: "",
     commitment_id: "",
     payee_type: "SUPPLIER",
+    payee_type_id: "",
     payee_name: "",
+    supplier_id: "",
+    payee_user_id: "",
     supplier_code: "",
     invoice_number: "",
     invoice_date: "",
@@ -49,12 +58,29 @@ export default function NewFF4Page() {
     tax_amount: 0,
     deductions: 0,
     payment_method: "EFT",
+    payment_method_id: "",
     external_payment_reference: "",
     remarks: ""
   })
 
   const fetchApprovedFF3s = useCallback(async () => {
     try {
+      const [payeeTypeRows, paymentMethodRows, supplierRows, userRows] = await Promise.all([
+        loadLookup('payee_types'),
+        loadLookup('payment_methods'),
+        loadLookup('suppliers', { order: 'supplier_name' }),
+        loadActiveUsers(),
+      ])
+      setPayeeTypes(payeeTypeRows)
+      setPaymentMethods(paymentMethodRows)
+      setSuppliers(supplierRows)
+      setUsers(userRows)
+      setFormData((current) => ({
+        ...current,
+        payee_type_id: current.payee_type_id || payeeTypeRows.find((row) => row.code === current.payee_type)?.id || "",
+        payment_method_id: current.payment_method_id || paymentMethodRows.find((row) => row.code === current.payment_method)?.id || "",
+      }))
+
       // Fetch approved FF3s with their commitments
       const { data: ff3s, error: ff3Error } = await supabase
         .from('ff3_headers')
@@ -151,7 +177,8 @@ export default function NewFF4Page() {
 
   const netAmount = formData.gross_amount - formData.tax_amount - formData.deductions
 
-  const canSubmit = formData.ff3_header_id && formData.payee_name && formData.gross_amount > 0 &&
+  const hasControlledPayee = formData.payee_type === 'EMPLOYEE' ? Boolean(formData.payee_user_id) : Boolean(formData.supplier_id)
+  const canSubmit = formData.ff3_header_id && hasControlledPayee && formData.gross_amount > 0 &&
     (selectedFF3 ? netAmount <= selectedFF3.remaining_balance : true)
 
   const handleSaveDraft = async () => {
@@ -175,7 +202,10 @@ export default function NewFF4Page() {
           ff3_header_id: formData.ff3_header_id || null,
           commitment_id: formData.commitment_id || null,
           payee_type: formData.payee_type,
+          payee_type_id: formData.payee_type_id || null,
           payee_name: formData.payee_name,
+          supplier_id: formData.supplier_id || null,
+          payee_user_id: formData.payee_user_id || null,
           supplier_code: formData.supplier_code || null,
           invoice_number: formData.invoice_number || null,
           invoice_date: formData.invoice_date || null,
@@ -185,6 +215,7 @@ export default function NewFF4Page() {
           tax_amount: formData.tax_amount,
           deductions: formData.deductions,
           payment_method: formData.payment_method,
+          payment_method_id: formData.payment_method_id || null,
           external_payment_reference: formData.external_payment_reference || null,
           status: status,
           submitted_date: status === 'SUBMITTED' ? new Date().toISOString() : null
@@ -317,40 +348,15 @@ export default function NewFF4Page() {
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Section B: Payee Details</h2>
         <div className="grid md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Payee Type</label>
-            <select
-              value={formData.payee_type}
-              onChange={(e) => setFormData({ ...formData, payee_type: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="SUPPLIER">Supplier</option>
-              <option value="CONTRACTOR">Contractor</option>
-              <option value="EMPLOYEE">Employee</option>
-              <option value="OTHER">Other</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Payee Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={formData.payee_name}
-              onChange={(e) => setFormData({ ...formData, payee_name: e.target.value })}
-              placeholder="Enter payee/supplier name"
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          <LookupSelect label="Payee Type" value={formData.payee_type_id} options={payeeTypes} placeholder="Select payee type" onChange={(value, option) => setFormData({ ...formData, payee_type_id: value, payee_type: option?.code || "", payee_name: "", supplier_id: "", payee_user_id: "", supplier_code: "" })} />
+          {formData.payee_type === 'EMPLOYEE' ? (
+            <LookupSelect label="Employee Payee" required value={formData.payee_user_id} options={users} placeholder="Select employee" onChange={(value, option) => setFormData({ ...formData, payee_user_id: value, payee_name: option?.name || "" })} />
+          ) : (
+            <LookupSelect label="Payee / Supplier" required value={formData.supplier_id} options={suppliers} placeholder="Search supplier/payee" canAdd addTable="suppliers" addLabel="+ Add New Supplier" addFields={[{ name: 'supplier_code', label: 'Supplier Code', required: true }, { name: 'supplier_name', label: 'Supplier Name', required: true }, { name: 'trading_name', label: 'Trading Name' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }]} addPayload={(form) => ({ ...form, supplier_type: formData.payee_type || 'SUPPLIER', is_active: true })} onRefresh={async () => setSuppliers(await loadLookup('suppliers', { order: 'supplier_name' }))} onChange={(value, option) => setFormData({ ...formData, supplier_id: value, payee_name: option?.name || "", supplier_code: option?.code || "" })} />
+          )}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Supplier Code</label>
-            <input
-              type="text"
-              value={formData.supplier_code}
-              onChange={(e) => setFormData({ ...formData, supplier_code: e.target.value })}
-              placeholder="Optional supplier code"
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <input type="text" value={formData.supplier_code} readOnly placeholder="Auto-populated from supplier" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 focus:outline-none" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Invoice Number</label>
@@ -461,19 +467,7 @@ export default function NewFF4Page() {
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Section D: Payment Method</h2>
         <div className="grid md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
-            <select
-              value={formData.payment_method}
-              onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="EFT">Electronic Funds Transfer (EFT)</option>
-              <option value="CHEQUE">Cheque</option>
-              <option value="DIRECT_DEPOSIT">Direct Deposit</option>
-              <option value="CASH">Cash</option>
-            </select>
-          </div>
+          <LookupSelect label="Payment Method" value={formData.payment_method_id} options={paymentMethods} placeholder="Select payment method" canAdd addTable="payment_methods" addLabel="+ Add Payment Method" onRefresh={async () => setPaymentMethods(await loadLookup('payment_methods'))} onChange={(value, option) => setFormData({ ...formData, payment_method_id: value, payment_method: option?.code || "" })} />
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">External Payment Reference</label>
             <input

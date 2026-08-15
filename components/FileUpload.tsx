@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback } from "react"
-import { Upload, X, FileText, Image, File, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Upload, X, FileText, ImageIcon, File, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
 import { uploadFile, validateFile, ALLOWED_DOCUMENT_TYPES, type BucketName, type UploadedFile } from "@/lib/storage"
 
 type FileUploadProps = {
@@ -119,7 +119,7 @@ export function FileUpload({
   }
 
   const getFileIcon = (type: string) => {
-    if (type.startsWith('image/')) return <Image className="h-5 w-5 text-blue-500" />
+    if (type.startsWith('image/')) return <ImageIcon className="h-5 w-5 text-blue-500" />
     if (type === 'application/pdf') return <FileText className="h-5 w-5 text-red-500" />
     return <File className="h-5 w-5 text-slate-500" />
   }
@@ -224,7 +224,7 @@ type FileListProps = {
 
 export function FileList({ files, onDelete, showDelete = false }: FileListProps) {
   const getFileIcon = (type: string) => {
-    if (type.startsWith('image/')) return <Image className="h-5 w-5 text-blue-500" />
+    if (type.startsWith('image/')) return <ImageIcon className="h-5 w-5 text-blue-500" />
     if (type === 'application/pdf') return <FileText className="h-5 w-5 text-red-500" />
     return <File className="h-5 w-5 text-slate-500" />
   }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   Users,
   Search,
@@ -94,11 +94,7 @@ export default function UsersPage() {
     is_active: true,
   })
 
-  useEffect(() => {
-    fetchData()
-  }, [])
-
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
     try {
       const [usersRes, rolesRes, deptsRes, rbacRes] = await Promise.all([
         supabase
@@ -128,19 +124,20 @@ export default function UsersPage() {
         setRbacModules(rbacRes.modules || [])
         setRbacMenus(rbacRes.menus || [])
         setRoleScopes(rbacRes.roleScopes || [])
-      } else {
-        setPermissions([])
-      }
-
-      if (!selectedRoleId && (rolesRes.data || []).length > 0) {
-        setSelectedRoleId((rolesRes.data || [])[0].id)
+        if (!selectedRoleId && rbacRes.roles?.[0]?.id) setSelectedRoleId(rbacRes.roles[0].id)
       }
     } catch (err) {
-      console.error("Error fetching data:", err)
+      console.error("Error loading users:", err)
+      setError("Failed to load users")
     } finally {
       setLoading(false)
     }
-  }
+  }, [selectedRoleId])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchData()
+  }, [fetchData])
 
   const filteredUsers = users.filter((user) => {
     if (!searchQuery) return true

@@ -516,11 +516,15 @@ export async function getFinancialYears() {
 export type PlanAction = 'SUBMIT' | 'REVIEW' | 'APPROVE_DEPARTMENT' | 'AUTHORIZE_REGISTRAR' | 'CONFIRM_BUDGET' | 'REJECT' | 'RETURN'
 
 export async function transitionAnnualPlan(_planId: string, _action: PlanAction, _comments?: string) {
+  void _planId
+  void _action
+  void _comments
   throw new Error('Annual Activity Plan workflow is retired. Use Budget Preparation for submission, review and approval.')
 }
 
 // Historical Annual Plan data is preserved read-only; Confirm to Budget is retired.
 export async function confirmPlanToBudget(_planId: string) {
+  void _planId
   throw new Error('Confirm to Budget is retired. Approval of an Excel Budget Preparation submission now creates operational allocations automatically.')
 }
 

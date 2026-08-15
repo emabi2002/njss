@@ -38,6 +38,8 @@ import {
 } from "@/lib/budget-module"
 import { useAuth } from "@/contexts/AuthContext"
 import { exportToExcel, exportToPDF, rowsToPdfTable } from "@/lib/export"
+import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
+import { loadActiveUsers, loadLookup } from "@/lib/lookups"
 
 type FundingSource = { id: string; code: string; name: string }
 type LookupState = { cycles: BudgetCycle[]; divisions: BudgetDivision[]; ledgers: ExpenseLedger[]; fundingSources: FundingSource[] }
@@ -63,14 +65,18 @@ type GridRow = {
   end_date: string
   quantity: number
   unit_of_measure: string
+  unit_of_measure_id: string
   unit_cost: number
   frequency_periods: number
   other_costs: number
   months: number[]
   priority: string
+  priority_level_id: string
   funding_source_id: string
   procurement_method: string
+  procurement_method_id: string
   responsible_officer: string
+  responsible_officer_id: string
   supporting_reference: string
   comments: string
 }
@@ -105,14 +111,18 @@ function newRow(lineNumber: number): GridRow {
     end_date: "",
     quantity: 1,
     unit_of_measure: "",
+    unit_of_measure_id: "",
     unit_cost: 0,
     frequency_periods: 1,
     other_costs: 0,
     months: blankMonths(),
     priority: "MEDIUM",
+    priority_level_id: "",
     funding_source_id: "",
     procurement_method: "",
+    procurement_method_id: "",
     responsible_officer: "",
+    responsible_officer_id: "",
     supporting_reference: "",
     comments: "",
   }
@@ -142,14 +152,18 @@ function rowFromBudgetLine(line: BudgetLine): GridRow {
     end_date: line.end_date || "",
     quantity: Number(line.quantity || 0),
     unit_of_measure: line.unit_of_measure || "",
+    unit_of_measure_id: line.unit_of_measure_id || "",
     unit_cost: Number(line.unit_cost || 0),
     frequency_periods: Number(line.frequency_periods || 0),
     other_costs: Number(line.other_costs || 0),
     months,
     priority: line.priority || "MEDIUM",
+    priority_level_id: line.priority_level_id || "",
     funding_source_id: line.funding_source_id || "",
     procurement_method: line.procurement_method || "",
+    procurement_method_id: line.procurement_method_id || "",
     responsible_officer: line.responsible_officer || "",
+    responsible_officer_id: line.responsible_officer_id || "",
     supporting_reference: line.supporting_reference || "",
     comments: line.comments || "",
   }
@@ -165,6 +179,10 @@ export default function BudgetTemplatePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [lookups, setLookups] = useState<LookupState>(emptyLookups)
+  const [priorityLevels, setPriorityLevels] = useState<LookupOption[]>([])
+  const [procurementMethods, setProcurementMethods] = useState<LookupOption[]>([])
+  const [units, setUnits] = useState<LookupOption[]>([])
+  const [officers, setOfficers] = useState<LookupOption[]>([])
   const [submissions, setSubmissions] = useState<BudgetSubmission[]>([])
   const [cashflow, setCashflow] = useState<CashflowRow[]>([])
   const [selectedId, setSelectedId] = useState("")
@@ -215,8 +233,19 @@ export default function BudgetTemplatePage() {
   const loadDashboard = useCallback(async () => {
     setLoading(true)
     try {
-      const [lookupData, dashboard] = await Promise.all([getBudgetLookups(), getBudgetDashboard()])
+      const [lookupData, dashboard, priorities, methods, unitRows, officerRows] = await Promise.all([
+        getBudgetLookups(),
+        getBudgetDashboard(),
+        loadLookup('priority_levels'),
+        loadLookup('procurement_methods'),
+        loadLookup('units_of_measure'),
+        loadActiveUsers(),
+      ])
       setLookups(lookupData as LookupState)
+      setPriorityLevels(priorities)
+      setProcurementMethods(methods)
+      setUnits(unitRows)
+      setOfficers(officerRows)
       setSubmissions((dashboard.submissions || []) as BudgetSubmission[])
       setCashflow((dashboard.cashflow || []) as CashflowRow[])
       if (!draftHeader.cycle_id && lookupData.cycles?.[0]) {
@@ -485,9 +514,12 @@ export default function BudgetTemplatePage() {
           other_costs: Number(cols[17] || row.other_costs || 0),
           months,
           priority: cols[33] || row.priority,
+          priority_level_id: priorityLevels.find((priority) => priority.code === cols[33] || priority.name === cols[33])?.id || row.priority_level_id,
           funding_source_id: lookups.fundingSources.find((source) => source.code === cols[34] || source.name === cols[34])?.id || row.funding_source_id,
           procurement_method: cols[35] || row.procurement_method,
+          procurement_method_id: procurementMethods.find((method) => method.code === cols[35] || method.name === cols[35])?.id || row.procurement_method_id,
           responsible_officer: cols[36] || row.responsible_officer,
+          responsible_officer_id: officers.find((officer) => officer.code === cols[36] || officer.name === cols[36])?.id || row.responsible_officer_id,
           supporting_reference: cols[37] || row.supporting_reference,
           comments: cols[38] || row.comments,
         }
@@ -727,7 +759,7 @@ export default function BudgetTemplatePage() {
                           <SheetTd><SheetInput type="date" disabled={selectedLocked} value={row.start_date} onChange={(v) => updateRow(row.clientId, { start_date: v })} /></SheetTd>
                           <SheetTd><SheetInput type="date" disabled={selectedLocked} value={row.end_date} onChange={(v) => updateRow(row.clientId, { end_date: v })} /></SheetTd>
                           <SheetTd required invalid={!isEmptyRow(row) && Number(row.quantity) <= 0}><SheetNumber disabled={selectedLocked} value={row.quantity} onChange={(v) => updateRow(row.clientId, { quantity: v })} /></SheetTd>
-                          <SheetTd><SheetInput disabled={selectedLocked} value={row.unit_of_measure} onChange={(v) => updateRow(row.clientId, { unit_of_measure: v })} /></SheetTd>
+                          <SheetTd><LookupSelect disabled={selectedLocked} value={row.unit_of_measure_id} options={units} placeholder="Select unit" canAdd={canAdmin} addTable="units_of_measure" addLabel="+ Add Unit" onRefresh={loadDashboard} onChange={(value, option) => updateRow(row.clientId, { unit_of_measure_id: value, unit_of_measure: option?.name || "" })} /></SheetTd>
                           <SheetTd required invalid={!isEmptyRow(row) && Number(row.unit_cost) < 0}><SheetNumber disabled={selectedLocked} value={row.unit_cost} onChange={(v) => updateRow(row.clientId, { unit_cost: v })} /></SheetTd>
                           <SheetTd required invalid={!isEmptyRow(row) && Number(row.frequency_periods) <= 0}><SheetNumber disabled={selectedLocked} value={row.frequency_periods} onChange={(v) => updateRow(row.clientId, { frequency_periods: v })} /></SheetTd>
                           <SheetTd><SheetNumber disabled={selectedLocked} value={row.other_costs} onChange={(v) => updateRow(row.clientId, { other_costs: v })} /></SheetTd>
@@ -735,10 +767,10 @@ export default function BudgetTemplatePage() {
                           {MONTHS.map((month, index) => <SheetTd key={month}><SheetNumber disabled={selectedLocked} value={row.months[index]} onChange={(v) => updateMonth(row.clientId, index, v)} /></SheetTd>)}
                           <SheetTd readOnly align="right">{money(monthlyTotal(row))}</SheetTd>
                           <SheetTd readOnly align="right" invalid={lineHasVariance}>{money(rowVariance)}</SheetTd>
-                          <SheetTd><select disabled={selectedLocked} className="sheet-input" value={row.priority} onChange={(e) => updateRow(row.clientId, { priority: e.target.value })}>{["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((p) => <option key={p}>{p}</option>)}</select></SheetTd>
+                          <SheetTd><LookupSelect disabled={selectedLocked} value={row.priority_level_id} options={priorityLevels} placeholder="Select priority" canAdd={canAdmin} addTable="priority_levels" addLabel="+ Add Priority" onRefresh={loadDashboard} onChange={(value, option) => updateRow(row.clientId, { priority_level_id: value, priority: option?.code || "" })} /></SheetTd>
                           <SheetTd><select disabled={selectedLocked} className="sheet-input" value={row.funding_source_id} onChange={(e) => updateRow(row.clientId, { funding_source_id: e.target.value })}><option value="">Select</option>{lookups.fundingSources.map((source) => <option key={source.id} value={source.id}>{source.code} — {source.name}</option>)}</select></SheetTd>
-                          <SheetTd><SheetInput disabled={selectedLocked} value={row.procurement_method} onChange={(v) => updateRow(row.clientId, { procurement_method: v })} /></SheetTd>
-                          <SheetTd><SheetInput disabled={selectedLocked} value={row.responsible_officer} onChange={(v) => updateRow(row.clientId, { responsible_officer: v })} /></SheetTd>
+                          <SheetTd><LookupSelect disabled={selectedLocked} value={row.procurement_method_id} options={procurementMethods} placeholder="Select method" canAdd={canAdmin} addTable="procurement_methods" addLabel="+ Add Procurement Method" onRefresh={loadDashboard} onChange={(value, option) => updateRow(row.clientId, { procurement_method_id: value, procurement_method: option?.code || "" })} /></SheetTd>
+                          <SheetTd><LookupSelect disabled={selectedLocked} value={row.responsible_officer_id} options={officers} placeholder="Select officer" onChange={(value, option) => updateRow(row.clientId, { responsible_officer_id: value, responsible_officer: option?.name || "" })} /></SheetTd>
                           <SheetTd><SheetInput disabled={selectedLocked} value={row.supporting_reference} onChange={(v) => updateRow(row.clientId, { supporting_reference: v })} /></SheetTd>
                           <SheetTd><SheetInput disabled={selectedLocked} value={row.comments} onChange={(v) => updateRow(row.clientId, { comments: v })} /></SheetTd>
                         </tr>

@@ -74,6 +74,7 @@ export type BudgetLine = {
   end_date: string | null
   quantity: number
   unit_of_measure: string | null
+  unit_of_measure_id?: string | null
   unit_cost: number
   frequency_periods: number
   other_costs: number
@@ -81,9 +82,12 @@ export type BudgetLine = {
   monthly_allocation_total: number
   allocation_variance: number
   priority: string
+  priority_level_id?: string | null
   funding_source_id: string | null
   procurement_method: string | null
+  procurement_method_id?: string | null
   responsible_officer: string | null
+  responsible_officer_id?: string | null
   supporting_reference: string | null
   comments: string | null
   ledger?: ExpenseLedger | null
@@ -291,13 +295,17 @@ export async function saveBudgetLine(submissionId: string, line: Partial<BudgetL
     end_date: line.end_date || null,
     quantity: line.quantity || 1,
     unit_of_measure: line.unit_of_measure || null,
+    unit_of_measure_id: line.unit_of_measure_id || null,
     unit_cost: line.unit_cost || 0,
     frequency_periods: line.frequency_periods || 1,
     other_costs: line.other_costs || 0,
     priority: line.priority || 'MEDIUM',
+    priority_level_id: line.priority_level_id || null,
     funding_source_id: line.funding_source_id || null,
     procurement_method: line.procurement_method || null,
+    procurement_method_id: line.procurement_method_id || null,
     responsible_officer: line.responsible_officer || null,
+    responsible_officer_id: line.responsible_officer_id || null,
     supporting_reference: line.supporting_reference || null,
     comments: line.comments || null,
   }

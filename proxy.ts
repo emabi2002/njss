@@ -3,7 +3,7 @@ import { guardDashboardRoute } from './lib/rbac/server'
 
 const RBAC_ENFORCED = process.env.NEXT_PUBLIC_RBAC_ENFORCED === 'true'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   if (!RBAC_ENFORCED) return NextResponse.next()
 
   if (request.nextUrl.pathname.startsWith('/dashboard')) {

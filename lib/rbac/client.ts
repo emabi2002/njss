@@ -24,7 +24,7 @@ export function canPerformAllActions(permissions: PermissionCode[], required: Pe
 
 export function canAccessModule(permissions: PermissionCode[], module: RbacModule) {
   if (permissions.includes('all')) return true
-  return false
+  return permissions.some((permission) => permission.startsWith(`${module.code}:`))
 }
 
 export function canAccessMenu(permissions: PermissionCode[], menu: RbacMenuItem) {

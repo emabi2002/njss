@@ -8,6 +8,8 @@ import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
 import { checkBudgetAndNotify, notifyFF3Submitted } from "@/lib/notifications"
 import { checkBudgetAvailability } from "@/lib/api"
+import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
+import { loadLookup } from "@/lib/lookups"
 
 type Department = { id: string; code: string; name: string }
 type Section = { id: string; code: string; name: string; department_id: string }
@@ -37,6 +39,10 @@ export default function NewFF3Page() {
   const [expenseCodes, setExpenseCodes] = useState<ExpenseCode[]>([])
   const [budgetInfo, setBudgetInfo] = useState<BudgetInfo>({ available_balance: 0, quarterly_released: 0 })
   const [budgetCheck, setBudgetCheck] = useState<BudgetCheck>(null)
+  const [urgencyLevels, setUrgencyLevels] = useState<LookupOption[]>([])
+  const [procurementMethods, setProcurementMethods] = useState<LookupOption[]>([])
+  const [units, setUnits] = useState<LookupOption[]>([])
+  const [suppliers, setSuppliers] = useState<LookupOption[]>([])
 
   const [formData, setFormData] = useState({
     financial_year: activeFinancialYear,
@@ -51,17 +57,19 @@ export default function NewFF3Page() {
     justification: "",
     required_by_date: "",
     urgency_level: "MEDIUM",
+    urgency_level_id: "",
     procurement_method: "QUOTATION",
+    procurement_method_id: "",
   })
 
   const [items, setItems] = useState([
-    { line_number: 1, item_description: "", specifications: "", quantity: 0, unit_of_measure: "", estimated_unit_price: 0 }
+    { line_number: 1, item_description: "", specifications: "", quantity: 0, unit_of_measure: "", unit_of_measure_id: "", estimated_unit_price: 0 }
   ])
 
   const [quotations, setQuotations] = useState([
-    { supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" },
-    { supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" },
-    { supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" }
+    { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" },
+    { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" },
+    { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" }
   ])
 
   const [supportingDocs, setSupportingDocs] = useState<UploadedFile[]>([])
@@ -72,14 +80,18 @@ export default function NewFF3Page() {
   useEffect(() => {
     async function fetchMasterData() {
       try {
-        const [deptRes, secRes, projRes, provRes, fundRes, ccRes, codeRes] = await Promise.all([
+        const [deptRes, secRes, projRes, provRes, fundRes, ccRes, codeRes, urgencyRows, methodRows, unitRows, supplierRows] = await Promise.all([
           supabase.from('departments').select('id, code, name').eq('is_active', true).order('name'),
           supabase.from('sections').select('id, code, name, department_id').eq('is_active', true).order('name'),
           supabase.from('projects').select('id, code, name').eq('is_active', true).order('name'),
           supabase.from('provinces').select('id, code, name').eq('is_active', true).order('name'),
           supabase.from('funding_sources').select('id, code, name').eq('is_active', true).order('name'),
           supabase.from('cost_centres').select('id, code, name, section_id, department_id').eq('is_active', true).order('code'),
-          supabase.from('expense_code_registry').select('id, full_expense_code, section_id').eq('is_active', true).order('full_expense_code')
+          supabase.from('expense_code_registry').select('id, full_expense_code, section_id').eq('is_active', true).order('full_expense_code'),
+          loadLookup('urgency_levels'),
+          loadLookup('procurement_methods'),
+          loadLookup('units_of_measure'),
+          loadLookup('suppliers', { order: 'supplier_name' }),
         ])
 
         setDepartments(deptRes.data || [])
@@ -88,6 +100,10 @@ export default function NewFF3Page() {
         setProvinces(provRes.data || [])
         setFundingSources(fundRes.data || [])
         setCostCentres(ccRes.data || [])
+        setUrgencyLevels(urgencyRows)
+        setProcurementMethods(methodRows)
+        setUnits(unitRows)
+        setSuppliers(supplierRows)
 
         const { data: approvedBudgetCodes } = await supabase
           .from('v_budget_by_code')
@@ -103,6 +119,11 @@ export default function NewFF3Page() {
           }))
 
         setExpenseCodes(approvedCodes.length > 0 ? approvedCodes : (codeRes.data || []))
+        setFormData((current) => ({
+          ...current,
+          urgency_level_id: current.urgency_level_id || urgencyRows.find((row) => row.code === current.urgency_level)?.id || "",
+          procurement_method_id: current.procurement_method_id || methodRows.find((row) => row.code === current.procurement_method)?.id || "",
+        }))
 
         // Fetch budget info
         const { data: releases } = await supabase
@@ -178,6 +199,7 @@ export default function NewFF3Page() {
       specifications: "",
       quantity: 0,
       unit_of_measure: "",
+      unit_of_measure_id: "",
       estimated_unit_price: 0
     }])
   }
@@ -190,6 +212,7 @@ export default function NewFF3Page() {
 
   const addQuotation = () => {
     setQuotations([...quotations, {
+      supplier_id: "",
       supplier_name: "",
       quotation_number: "",
       quotation_date: "",
@@ -296,7 +319,9 @@ export default function NewFF3Page() {
           justification: formData.justification,
           required_by_date: formData.required_by_date || null,
           urgency_level: formData.urgency_level,
+          urgency_level_id: formData.urgency_level_id || null,
           procurement_method: formData.procurement_method,
+          procurement_method_id: formData.procurement_method_id || null,
           status: status,
           total_estimated_amount: totalEstimate,
           is_within_budget: totalEstimate <= (budgetCheck?.available ?? budgetInfo.available_balance),
@@ -317,6 +342,7 @@ export default function NewFF3Page() {
           specifications: item.specifications || null,
           quantity: item.quantity,
           unit_of_measure: item.unit_of_measure || null,
+          unit_of_measure_id: item.unit_of_measure_id || null,
           estimated_unit_price: item.estimated_unit_price
         }))
 
@@ -333,10 +359,13 @@ export default function NewFF3Page() {
         .filter(q => q.supplier_name && q.quotation_amount > 0)
         .map(q => ({
           ff3_header_id: header.id,
+          supplier_id: q.supplier_id || null,
           supplier_name: q.supplier_name,
           quotation_number: q.quotation_number || null,
           quotation_date: q.quotation_date || null,
           quotation_amount: q.quotation_amount,
+          attachment_url: q.attachment_url || null,
+          attachment_name: q.attachment_name || null,
           is_selected: q.is_selected
         }))
 
@@ -566,31 +595,8 @@ export default function NewFF3Page() {
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Urgency Level</label>
-              <select
-                value={formData.urgency_level}
-                onChange={(e) => setFormData({ ...formData, urgency_level: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-              >
-                <option value="LOW">Low</option>
-                <option value="MEDIUM">Medium</option>
-                <option value="HIGH">High</option>
-                <option value="URGENT">Urgent</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Procurement Method</label>
-              <select
-                value={formData.procurement_method}
-                onChange={(e) => setFormData({ ...formData, procurement_method: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-              >
-                <option value="QUOTATION">Quotation</option>
-                <option value="TENDER">Tender</option>
-                <option value="DIRECT">Direct Purchase</option>
-              </select>
-            </div>
+            <LookupSelect label="Urgency Level" value={formData.urgency_level_id} options={urgencyLevels} placeholder="Select urgency" onChange={(value, option) => setFormData({ ...formData, urgency_level_id: value, urgency_level: option?.code || "" })} />
+            <LookupSelect label="Procurement Method" value={formData.procurement_method_id} options={procurementMethods} placeholder="Select method" canAdd addTable="procurement_methods" addLabel="+ Add Procurement Method" onRefresh={async () => setProcurementMethods(await loadLookup('procurement_methods'))} onChange={(value, option) => setFormData({ ...formData, procurement_method_id: value, procurement_method: option?.code || "" })} />
           </div>
         </div>
       </div>
@@ -660,20 +666,12 @@ export default function NewFF3Page() {
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Unit of Measure</label>
-                  <input
-                    type="text"
-                    value={item.unit_of_measure}
-                    onChange={(e) => {
-                      const newItems = [...items]
-                      newItems[index].unit_of_measure = e.target.value
-                      setItems(newItems)
-                    }}
-                    placeholder="e.g., Units, Boxes"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-                  />
-                </div>
+                <LookupSelect label="Unit of Measure" value={item.unit_of_measure_id} options={units} placeholder="Select unit" canAdd addTable="units_of_measure" addLabel="+ Add Unit" onRefresh={async () => setUnits(await loadLookup('units_of_measure'))} onChange={(value, option) => {
+                  const newItems = [...items]
+                  newItems[index].unit_of_measure_id = value
+                  newItems[index].unit_of_measure = option?.name || ""
+                  setItems(newItems)
+                }} />
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Total (K)</label>
                   <input
@@ -731,20 +729,12 @@ export default function NewFF3Page() {
                 </label>
               </div>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Supplier Name <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={quot.supplier_name}
-                    onChange={(e) => {
-                      const newQuots = [...quotations]
-                      newQuots[index].supplier_name = e.target.value
-                      setQuotations(newQuots)
-                    }}
-                    placeholder="Enter supplier name"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-                  />
-                </div>
+                <LookupSelect label="Supplier Name" required value={quot.supplier_id} options={suppliers} placeholder="Search supplier" canAdd addTable="suppliers" addLabel="+ Add New Supplier" addFields={[{ name: 'supplier_code', label: 'Supplier Code', required: true }, { name: 'supplier_name', label: 'Supplier Name', required: true }, { name: 'trading_name', label: 'Trading Name' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }]} addPayload={(form) => ({ ...form, supplier_type: 'SUPPLIER', is_active: true })} onRefresh={async () => setSuppliers(await loadLookup('suppliers', { order: 'supplier_name' }))} onChange={(value, option) => {
+                  const newQuots = [...quotations]
+                  newQuots[index].supplier_id = value
+                  newQuots[index].supplier_name = option?.name || ""
+                  setQuotations(newQuots)
+                }} />
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Quotation Number</label>
                   <input

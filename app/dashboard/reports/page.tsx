@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { FileText, BarChart3, PieChart, TrendingUp, Loader2, CheckCircle2, AlertCircle, Files, Printer, FileSpreadsheet, FileDown } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { generateFF3PDF, generateFF4PDF, downloadPDF, type FF3PDFData, type FF4PDFData } from "@/lib/pdf"
@@ -50,6 +50,7 @@ type FF4Record = {
 }
 
 type ExportFormat = "pdf" | "excel" | "csv" | "print"
+type ReportCategoryConfig = { category: string; reports: { id: string; name: string; description: string; icon: typeof FileText }[] }
 
 const round1 = (n: number) => Math.round(n * 10) / 10
 const quarterOf = (d: string | null) => (d ? Math.floor(new Date(d).getMonth() / 3) + 1 : 1)
@@ -64,6 +65,7 @@ export default function ReportsPage() {
     section: "",
     status: ""
   })
+  const [dbReportCategories, setDbReportCategories] = useState<ReportCategoryConfig[] | null>(null)
   const [exporting, setExporting] = useState(false)
   const [activeAction, setActiveAction] = useState<string>("")
   const [exportProgress, setExportProgress] = useState({ current: 0, total: 0 })
@@ -138,6 +140,25 @@ export default function ReportsPage() {
       ]
     }
   ]
+
+  useEffect(() => {
+    async function loadReportLookups() {
+      const { data } = await supabase.from('v_report_catalogue').select('*').order('category_sort_order').order('sort_order')
+      const rows = (data || []) as Array<{ category_name: string; report_code: string; report_name: string; description: string }>
+      if (rows.length > 0) {
+        const map = new Map<string, ReportCategoryConfig['reports']>()
+        rows.forEach((row) => {
+          const list = map.get(row.category_name) || []
+          list.push({ id: row.report_code, name: row.report_name, description: row.description, icon: FileText })
+          map.set(row.category_name, list)
+        })
+        setDbReportCategories(Array.from(map.entries()).map(([category, reports]) => ({ category, reports })))
+      }
+    }
+    loadReportLookups()
+  }, [])
+
+  const visibleReportCategories = dbReportCategories || reportCategories
 
   // Bulk export FF3s into a single combined PDF
   const exportBulkFF3 = async () => {
@@ -802,7 +823,7 @@ export default function ReportsPage() {
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">Select a report...</option>
-              {reportCategories.map((cat) => (
+              {visibleReportCategories.map((cat) => (
                 <optgroup key={cat.category} label={cat.category}>
                   {cat.reports.map((report) => (
                     <option key={report.id} value={report.id}>{report.name}</option>

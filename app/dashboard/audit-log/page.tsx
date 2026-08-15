@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
-  ClipboardList, Search, Filter, Calendar, User, FileText,
+  ClipboardList, Search, User, FileText,
   DollarSign, Clock, ChevronLeft, ChevronRight, Loader2,
   Download, RefreshCw, CheckCircle2, XCircle, Edit, Trash2,
-  Eye, Send, CreditCard, AlertCircle, ChevronDown, FileSpreadsheet
+  Eye, Send, CreditCard, ChevronDown, FileSpreadsheet
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/contexts/AuthContext"
@@ -49,11 +49,7 @@ export default function AuditLogPage() {
     userId: ""
   })
 
-  useEffect(() => {
-    fetchAuditLogs()
-  }, [page, filters.entityType, filters.action, filters.dateFrom, filters.dateTo])
-
-  async function fetchAuditLogs() {
+  const fetchAuditLogs = useCallback(async () => {
     setLoading(true)
     try {
       let query = supabase
@@ -86,7 +82,12 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filters.action, filters.dateFrom, filters.dateTo, filters.entityType, page])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchAuditLogs()
+  }, [fetchAuditLogs])
 
   const handleSearch = () => {
     setPage(1)

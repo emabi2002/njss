@@ -121,7 +121,7 @@ ON budget_allocations(budget_division_id);
 
 -- Ensure ledger-backed operational codes retain the Excel finance code instead of being
 -- overwritten by the older hierarchy-only generator.
-CREATE OR REPLACE FUNCTION generate_full_expense_code() RETURNS TRIGGER AS $
+CREATE OR REPLACE FUNCTION generate_full_expense_code() RETURNS TRIGGER AS $$
 DECLARE
     v_dept TEXT; v_cc TEXT; v_cat TEXT; v_item TEXT;
 BEGIN
@@ -143,7 +143,7 @@ BEGIN
     NEW.updated_at := NOW();
     RETURN NEW;
 END;
-$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 
 -- Ensure every active posting ledger has one operational code record.
 INSERT INTO expense_code_registry (

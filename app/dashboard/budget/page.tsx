@@ -5,6 +5,7 @@ import { Wallet, TrendingUp, DollarSign, FileText, Loader2, Layers, Hash, Buildi
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
 import { getBudgetByCode, getConsolidations, consolidateDepartmentBudget, getDepartments, getReleases, getAllocationsForRelease, createQuarterlyRelease } from "@/lib/api"
 import { useAuth } from "@/contexts/AuthContext"
+import { supabase } from "@/lib/supabase"
 import { exportToCSV, exportToPDF, rowsToPdfTable } from "@/lib/export"
 
 type CodeRow = {
@@ -61,6 +62,8 @@ type Allocation = {
 }
 
 type Dept = { id: string; code: string; name: string }
+type BudgetCycleOption = { id: string; budget_year: number; name: string; status: string }
+type BudgetPeriodOption = { id: string; period_number: number; period_code: string; period_name: string }
 type Tab = "code" | "centre" | "releases" | "consolidation"
 
 const CHART_COLORS = ["#8a1420", "#4c0f16", "#d4af37", "#a8324a", "#b8860b", "#6b1420"]
@@ -68,8 +71,9 @@ const CHART_COLORS = ["#8a1420", "#4c0f16", "#d4af37", "#a8324a", "#b8860b", "#6
 export default function BudgetControlPage() {
   const { can } = useAuth()
   const [tab, setTab] = useState<Tab>("code")
-  const currentYear = new Date().getFullYear()
-  const [year, setYear] = useState(currentYear)
+  const [cycles, setCycles] = useState<BudgetCycleOption[]>([])
+  const [periods, setPeriods] = useState<BudgetPeriodOption[]>([])
+  const [year, setYear] = useState(new Date().getFullYear())
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<CodeRow[]>([])
   const [consolidations, setConsolidations] = useState<Consolidation[]>([])
@@ -80,18 +84,27 @@ export default function BudgetControlPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [codeData, consData, deptData, relData, allocData] = await Promise.all([
+      const [codeData, consData, deptData, relData, allocData, cycleRes] = await Promise.all([
         getBudgetByCode(year),
         getConsolidations(year),
         getDepartments(),
         getReleases(year),
         getAllocationsForRelease(year),
+        supabase.from('budget_cycles').select('id, budget_year, name, status').order('budget_year', { ascending: false }),
       ])
       setRows((codeData || []) as unknown as CodeRow[])
       setConsolidations((consData || []) as unknown as Consolidation[])
       setDepts((deptData || []) as unknown as Dept[])
       setReleases((relData || []) as unknown as ReleaseRow[])
       setAllocations((allocData || []) as unknown as Allocation[])
+      const cycleRows = (cycleRes.data || []) as BudgetCycleOption[]
+      setCycles(cycleRows)
+      const selectedCycle = cycleRows.find((cycle) => cycle.budget_year === year) || cycleRows[0]
+      if (selectedCycle) {
+        const { data: periodRows } = await supabase.from('budget_periods').select('id, period_number, period_code, period_name').eq('budget_cycle_id', selectedCycle.id).eq('is_active', true).order('period_number')
+        setPeriods((periodRows || []) as BudgetPeriodOption[])
+        if (year !== selectedCycle.budget_year && (codeData || []).length === 0) setYear(selectedCycle.budget_year)
+      }
     } catch (err) {
       console.error("Error loading budget data:", err)
     } finally {
@@ -183,7 +196,7 @@ export default function BudgetControlPage() {
         <div className="flex items-center gap-2">
           <select value={year} onChange={(e) => setYear(parseInt(e.target.value))}
             className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
-            {[currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map((y) => <option key={y} value={y}>FY{y}</option>)}
+            {cycles.length === 0 ? <option value={year}>FY{year}</option> : cycles.map((cycle) => <option key={cycle.id} value={cycle.budget_year}>{cycle.name || `FY${cycle.budget_year}`}</option>)}
           </select>
           <button onClick={() => fetchData()} className="p-2 border border-slate-200 rounded-lg hover:bg-slate-50" title="Refresh">
             <RefreshCw className="h-4 w-4 text-slate-600" />
@@ -226,7 +239,7 @@ export default function BudgetControlPage() {
       ) : tab === "centre" ? (
         <ByCentreView byCentre={byCentre} chartData={chartData} />
       ) : tab === "releases" ? (
-        <ReleasesView year={year} releases={releases} allocations={allocations} canRelease={can("budget.release")} onChanged={fetchData} />
+        <ReleasesView year={year} releases={releases} allocations={allocations} periods={periods} canRelease={can("budget.release")} onChanged={fetchData} />
       ) : (
         <ConsolidationView year={year} depts={depts} consolidations={consolidations} canRun={can("budget.consolidate") || can("consolidation.run")} onChanged={fetchData} />
       )}
@@ -337,8 +350,8 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; revi
   )
 }
 
-function ReleasesView({ year, releases, allocations, canRelease, onChanged }: {
-  year: number; releases: ReleaseRow[]; allocations: Allocation[]; canRelease: boolean; onChanged: () => void
+function ReleasesView({ year, releases, allocations, periods, canRelease, onChanged }: {
+  year: number; releases: ReleaseRow[]; allocations: Allocation[]; periods: BudgetPeriodOption[]; canRelease: boolean; onChanged: () => void
 }) {
   const [allocId, setAllocId] = useState("")
   const [quarter, setQuarter] = useState(1)
@@ -394,7 +407,7 @@ function ReleasesView({ year, releases, allocations, canRelease, onChanged }: {
               <label className="block text-xs font-medium text-slate-500 mb-1">Quarter</label>
               <select value={quarter} onChange={(e) => setQuarter(parseInt(e.target.value))}
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
-                {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
+                {(periods.length ? periods : Array.from({ length: 4 }, (_, index) => ({ id: String(index + 1), period_number: index + 1, period_code: `Q${index + 1}`, period_name: `Quarter ${index + 1}` }))).map((period) => <option key={period.id} value={period.period_number}>{period.period_code}</option>)}
               </select>
             </div>
             <div className="md:col-span-2">

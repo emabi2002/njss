@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect, use } from "react"
+import { useCallback, useEffect, use, useState } from "react"
 import Link from "next/link"
 import {
   ArrowLeft, FileText, CheckCircle2, XCircle, Clock, AlertCircle,
   Calendar, DollarSign, Building2, Loader2, CreditCard, Receipt,
-  ThumbsUp, ThumbsDown, MessageSquare, Banknote, Download
+  ThumbsUp, Banknote, Download
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { approveFF4 } from "@/lib/api"
@@ -53,11 +53,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  useEffect(() => {
-    fetchFF4Detail()
-  }, [resolvedParams.ff4_number])
-
-  async function fetchFF4Detail() {
+  const fetchFF4Detail = useCallback(async () => {
     try {
       const { data, error: fetchError } = await supabase
         .from('ff4_headers')
@@ -77,7 +73,12 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
     } finally {
       setLoading(false)
     }
-  }
+  }, [resolvedParams.ff4_number])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchFF4Detail()
+  }, [fetchFF4Detail])
 
   async function handleAction(action: 'VERIFY' | 'APPROVE' | 'PROCESS' | 'RECONCILE') {
     if (!header) return

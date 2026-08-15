@@ -3,7 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import {
-  Bell, Check, CheckCheck, FileText, DollarSign, AlertCircle,
+  Bell, CheckCheck, FileText, DollarSign,
   Clock, X, ChevronRight
 } from "lucide-react"
 import { useRealtimeNotifications, type RealtimeNotification } from "@/hooks/useRealtimeNotifications"

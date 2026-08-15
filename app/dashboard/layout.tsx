@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
@@ -14,7 +14,6 @@ import {
   PanelLeftOpen,
   Search,
   Settings,
-  User,
   X,
 } from "lucide-react"
 import { NJSSLogo } from "../components/NJSSLogo"
@@ -74,7 +73,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     window.localStorage.setItem("njss-sidebar-groups", JSON.stringify(expandedGroups))
   }, [expandedGroups])
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/")
+  const isActive = useCallback((href: string) => pathname === href || pathname.startsWith(href + "/"), [pathname])
 
   const visibleNavigation: NavItem[] = useMemo(
     () => menus.filter((item) => !item.parent_code).sort((a, b) => a.sort_order - b.sort_order),
@@ -119,7 +118,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
 
     return groups
-  }, [modules, visibleNavigation, pathname])
+  }, [modules, visibleNavigation, isActive])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

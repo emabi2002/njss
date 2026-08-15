@@ -8,6 +8,8 @@ import { useAuth } from "@/contexts/AuthContext"
 
 type FF4Status = "DRAFT" | "SUBMITTED" | "VERIFIED" | "APPROVED" | "PROCESSED" | "PAID" | "RECONCILED" | "CANCELLED"
 
+type WorkflowStatus = { status_code: string; display_name: string }
+
 type FF4Record = {
   id: string
   ff4_number: string
@@ -28,6 +30,7 @@ export default function FF4ListPage() {
   const [statusFilter, setStatusFilter] = useState<string>("ALL")
   const [searchQuery, setSearchQuery] = useState("")
   const [ff4Records, setFf4Records] = useState<FF4Record[]>([])
+  const [statuses, setStatuses] = useState<WorkflowStatus[]>([])
   const [stats, setStats] = useState({
     total: 0, draft: 0, pending: 0, verified: 0, paid: 0, reconciled: 0
   })
@@ -37,6 +40,9 @@ export default function FF4ListPage() {
   const fetchFF4Records = useCallback(async () => {
     setLoading(true)
     try {
+      const { data: statusRows } = await supabase.from('workflow_statuses').select('status_code, display_name').eq('module_code', 'FF4').eq('is_active', true).eq('is_filterable', true).order('sort_order')
+      setStatuses((statusRows || []) as WorkflowStatus[])
+
       let query = supabase
         .from('ff4_headers')
         .select(`
@@ -168,11 +174,7 @@ export default function FF4ListPage() {
             className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="ALL">All Status</option>
-            <option value="DRAFT">Draft</option>
-            <option value="SUBMITTED">Submitted</option>
-            <option value="VERIFIED">Verified</option>
-            <option value="PAID">Paid</option>
-            <option value="RECONCILED">Reconciled</option>
+            {statuses.map((status) => <option key={status.status_code} value={status.status_code}>{status.display_name}</option>)}
           </select>
           <button className="px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 flex items-center gap-2">
             <Download className="h-4 w-4" />
