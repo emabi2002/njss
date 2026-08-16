@@ -180,7 +180,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
   const canProcess = header.status === 'APPROVED' && can('ff4.process')
   const canMarkPaid = header.status === 'PROCESSED' && can('ff4.process')
   const canReconcile = header.status === 'PAID' && can('ff4.process')
-  const canCancel = ['DRAFT', 'SUBMITTED', 'VERIFIED'].includes(header.status) && (can('ff4.create') || can('ff4.process'))
+  const canCancel = ['DRAFT', 'SUBMITTED', 'VERIFIED'].includes(header.status) && can('ff4.reject')
   const isTerminal = ['RECONCILED', 'CANCELLED'].includes(header.status)
   const hasAnyAction = canVerify || canApprove || canProcess || canMarkPaid || canReconcile || canCancel
 

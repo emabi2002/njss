@@ -23,7 +23,7 @@ const ACTION_PERMISSION: Record<FF4WorkflowAction, string[]> = {
   PROCESS: ['ff4.process'],
   MARK_PAID: ['ff4.process'],
   RECONCILE: ['ff4.process'],
-  CANCEL: ['ff4.reject', 'ff4.process'],
+  CANCEL: ['ff4.reject'],
 }
 
 export async function POST(request: NextRequest) {
