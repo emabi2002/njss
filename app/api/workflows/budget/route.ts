@@ -68,11 +68,16 @@ async function createRelease(request: NextRequest, body: Record<string, unknown>
     quarter: number
     released_amount: number
     release_date?: string
-    funding_allocation_id?: string | null
+    funding_lines?: Array<{ funding_allocation_id: string; amount: number }>
     notes?: string | null
   }
-  if (!input?.budget_allocation_id || !input.financial_year || !input.quarter || !input.released_amount) {
-    return NextResponse.json({ error: 'Invalid quarterly release request' }, { status: 400 })
+  const fundingLines = input?.funding_lines || []
+  const fundingLineTotal = fundingLines.reduce((sum, line) => sum + Number(line.amount || 0), 0)
+  if (!input?.budget_allocation_id || !input.financial_year || !input.quarter || !input.released_amount || fundingLines.length === 0) {
+    return NextResponse.json({ error: 'Invalid quarterly release request. Funding attribution is required.' }, { status: 400 })
+  }
+  if (Math.abs(fundingLineTotal - Number(input.released_amount)) > 0.001) {
+    return NextResponse.json({ error: 'Release amount must equal the sum of funding lines.' }, { status: 400 })
   }
 
   const response = NextResponse.next()
@@ -83,7 +88,7 @@ async function createRelease(request: NextRequest, body: Record<string, unknown>
     p_quarter: input.quarter,
     p_released_amount: input.released_amount,
     p_release_date: input.release_date || new Date().toISOString().split('T')[0],
-    p_funding_allocation_id: input.funding_allocation_id || null,
+    p_funding_lines: fundingLines,
     p_notes: input.notes || null,
     p_user_email: guard.context?.email || '',
   })
@@ -207,7 +212,6 @@ async function allocateFunding(request: NextRequest, body: Record<string, unknow
     p_allocated_amount: input.allocated_amount,
     p_allocation_date: input.allocation_date || new Date().toISOString().split('T')[0],
     p_notes: input.notes || null,
-    p_approve_immediately: input.approve_immediately || false,
     p_user_email: guard.context?.email || '',
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
