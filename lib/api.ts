@@ -67,8 +67,7 @@ export type CommitmentAdjustmentInput = {
   reference?: string | null
 }
 
-export type SupplierStatus = 'DRAFT' | 'PENDING_VERIFICATION' | 'VERIFIED' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'INACTIVE'
-export type SupplierComplianceStatus = 'COMPLIANT' | 'INCOMPLETE' | 'EXPIRING' | 'EXPIRED'
+export type SupplierStatus = 'ACTIVE' | 'INACTIVE'
 
 export type SupplierRegisterRow = {
   id: string
@@ -77,19 +76,20 @@ export type SupplierRegisterRow = {
   legal_name: string | null
   trading_name: string | null
   supplier_type: string | null
-  category_codes?: string | null
-  category_names?: string | null
   ipa_registration_number: string | null
   tin: string | null
   primary_contact_name: string | null
   phone: string | null
   email: string | null
+  address?: string | null
+  physical_address?: string | null
   province: string | null
   country: string | null
-  status: SupplierStatus
-  compliance_status: SupplierComplianceStatus
+  status: SupplierStatus | string
   active_commitments?: number
   outstanding_commitment_value?: number
+  total_spend?: number
+  actual_expenditure?: number
   created_at?: string
   updated_at?: string
 }
@@ -98,23 +98,18 @@ export type SupplierPayload = {
   legal_name: string
   trading_name?: string
   supplier_type?: string
-  category_codes?: string
-  registration_type?: string
   ipa_registration_number?: string
   tin?: string
-  gst_registration_number?: string
   primary_contact_name?: string
   phone?: string
-  alternate_phone?: string
   email?: string
   physical_address?: string
-  postal_address?: string
+  address?: string
   province?: string
   country?: string
   notes?: string
+  is_active?: boolean
 }
-
-export type SupplierWorkflowAction = 'SUBMIT' | 'VERIFY' | 'APPROVE' | 'REJECT' | 'SUSPEND' | 'REACTIVATE'
 
 export type FundingAuthorityRow = {
   id: string
@@ -1128,20 +1123,4 @@ export async function createSupplier(payload: SupplierPayload, allowPossibleDupl
 
 export async function updateSupplier(supplierId: string, payload: SupplierPayload) {
   return postSupplierWorkflow<SupplierRegisterRow>({ action: 'UPDATE', supplierId, payload })
-}
-
-export async function transitionSupplier(supplierId: string, action: SupplierWorkflowAction, reason?: string) {
-  return postSupplierWorkflow<SupplierRegisterRow>({ action, supplierId, reason })
-}
-
-export async function addSupplierDocument(supplierId: string, payload: Record<string, unknown>) {
-  return postSupplierWorkflow<Record<string, unknown>>({ action: 'ADD_DOCUMENT', supplierId, payload })
-}
-
-export async function verifySupplierDocument(documentId: string, status: 'VERIFIED' | 'REJECTED', notes?: string) {
-  return postSupplierWorkflow<Record<string, unknown>>({ action: 'VERIFY_DOCUMENT', documentId, status, notes })
-}
-
-export async function createSupplierFollowup(supplierId: string, payload: Record<string, unknown>) {
-  return postSupplierWorkflow<Record<string, unknown>>({ action: 'CREATE_FOLLOWUP', supplierId, payload })
 }

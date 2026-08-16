@@ -354,7 +354,7 @@ export default function NewFF3Page() {
 
       const selectedQuotation = quotations.find(q => q.is_selected)
       if (!formData.supplier_not_required && !selectedQuotation?.supplier_id) {
-        setError('Select an approved supplier quotation before submitting an FF3 for supplier-based expenditure.')
+        setError('Select or quick add a supplier for the selected quotation before submitting the FF3.')
         setSubmitting(false)
         return
       }
@@ -801,7 +801,7 @@ export default function NewFF3Page() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Section E: Quotations <span className="text-red-500">*</span></h2>
-            <p className="text-sm text-slate-600 mt-1">Minimum 3 quotations required for supplier-based expenditure. Select the quotation whose approved supplier will be committed.</p>
+            <p className="text-sm text-slate-600 mt-1">Minimum 3 quotations required for supplier-based expenditure. Select the quotation supplier to link this FF3 and later expenditure reporting.</p>
           </div>
           <button
             onClick={addQuotation}
@@ -834,18 +834,18 @@ export default function NewFF3Page() {
                 </label>
               </div>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-                <LookupSelect label="Supplier Name" required value={quot.supplier_id} options={suppliers} placeholder="Search approved supplier" canAdd addTable="suppliers" addLabel="+ Register Supplier" emptyLabel="No approved suppliers found. Register a supplier, then submit/verify/approve it in Supplier Management before final FF3 approval." addFields={[{ name: 'legal_name', label: 'Legal Name', required: true }, { name: 'trading_name', label: 'Trading Name' }, { name: 'supplier_type', label: 'Supplier Type', placeholder: 'GOODS_SUPPLIER or SERVICE_PROVIDER' }, { name: 'ipa_registration_number', label: 'IPA Registration Number' }, { name: 'tin', label: 'TIN' }, { name: 'primary_contact_name', label: 'Primary Contact' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }]} createVia={async (form) => {
+                <LookupSelect label="Supplier Name" required value={quot.supplier_id} options={suppliers} placeholder="Search supplier" canAdd addTable="suppliers" addLabel="+ Quick Add Supplier" emptyLabel="No active suppliers found. Quick add a supplier to continue." addFields={[{ name: 'legal_name', label: 'Supplier / Business Name', required: true }, { name: 'primary_contact_name', label: 'Contact Person' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }, { name: 'physical_address', label: 'Address' }, { name: 'ipa_registration_number', label: 'IPA Registration' }, { name: 'tin', label: 'TIN' }]} createVia={async (form) => {
                   const result = await createSupplier({
                     legal_name: form.legal_name,
-                    trading_name: form.trading_name,
-                    supplier_type: form.supplier_type || 'GOODS_SUPPLIER',
                     ipa_registration_number: form.ipa_registration_number,
                     tin: form.tin,
                     primary_contact_name: form.primary_contact_name,
                     phone: form.phone,
                     email: form.email,
+                    physical_address: form.physical_address,
+                    is_active: true,
                   })
-                  if (result.requires_review) throw new Error('POSSIBLE DUPLICATE SUPPLIER. Review Supplier Management before continuing.')
+                  if (result.requires_review) throw new Error('Possible duplicate supplier found. Select the existing supplier or add it from the Supplier Register with duplicate override if genuinely different.')
                   if (!result.supplier) throw new Error('Supplier registration did not return a supplier record.')
                   return { ...result.supplier, id: result.supplier.id, code: result.supplier.supplier_code, name: result.supplier.supplier_name }
                 }} onRefresh={async () => setSuppliers(await loadLookup('suppliers', { order: 'supplier_name' }))} onChange={(value, option) => {
@@ -919,7 +919,7 @@ export default function NewFF3Page() {
                     </button>
                   </div>
                 ) : (
-                  <label className="flex items-center gap-2 p-2 border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50">
+                  <label className="flex items-center gap-2 p-2 border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-png-gold transition-colors">
                     {uploadingQuotation === index ? (
                       <Loader2 className="h-4 w-4 text-png-red animate-spin" />
                     ) : (

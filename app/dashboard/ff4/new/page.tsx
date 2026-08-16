@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
 import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadActiveUsers, loadLookup } from "@/lib/lookups"
+import { createSupplier } from "@/lib/api"
 
 type ApprovedFF3 = {
   id: string
@@ -352,7 +353,21 @@ export default function NewFF4Page() {
           {formData.payee_type === 'EMPLOYEE' ? (
             <LookupSelect label="Employee Payee" required value={formData.payee_user_id} options={users} placeholder="Select employee" onChange={(value, option) => setFormData({ ...formData, payee_user_id: value, payee_name: option?.name || "" })} />
           ) : (
-            <LookupSelect label="Payee / Supplier" required value={formData.supplier_id} options={suppliers} placeholder="Search supplier/payee" canAdd addTable="suppliers" addLabel="+ Add New Supplier" addFields={[{ name: 'supplier_code', label: 'Supplier Code', required: true }, { name: 'supplier_name', label: 'Supplier Name', required: true }, { name: 'trading_name', label: 'Trading Name' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }]} addPayload={(form) => ({ ...form, supplier_type: formData.payee_type || 'SUPPLIER', is_active: true })} onRefresh={async () => setSuppliers(await loadLookup('suppliers', { order: 'supplier_name' }))} onChange={(value, option) => setFormData({ ...formData, supplier_id: value, payee_name: option?.name || "", supplier_code: option?.code || "" })} />
+            <LookupSelect label="Payee / Supplier" required value={formData.supplier_id} options={suppliers} placeholder="Search supplier/payee" canAdd addTable="suppliers" addLabel="+ Quick Add Supplier" emptyLabel="No active suppliers found. Quick add a supplier to continue." addFields={[{ name: 'legal_name', label: 'Supplier / Business Name', required: true }, { name: 'primary_contact_name', label: 'Contact Person' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }, { name: 'physical_address', label: 'Address' }, { name: 'ipa_registration_number', label: 'IPA Registration' }, { name: 'tin', label: 'TIN' }]} createVia={async (form) => {
+              const result = await createSupplier({
+                legal_name: form.legal_name,
+                ipa_registration_number: form.ipa_registration_number,
+                tin: form.tin,
+                primary_contact_name: form.primary_contact_name,
+                phone: form.phone,
+                email: form.email,
+                physical_address: form.physical_address,
+                is_active: true,
+              })
+              if (result.requires_review) throw new Error('Possible duplicate supplier found. Select the existing supplier or add it from the Supplier Register with duplicate override if genuinely different.')
+              if (!result.supplier) throw new Error('Supplier registration did not return a supplier record.')
+              return { ...result.supplier, id: result.supplier.id, code: result.supplier.supplier_code, name: result.supplier.supplier_name }
+            }} onRefresh={async () => setSuppliers(await loadLookup('suppliers', { order: 'supplier_name' }))} onChange={(value, option) => setFormData({ ...formData, supplier_id: value, payee_name: option?.name || "", supplier_code: option?.code || "" })} />
           )}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Supplier Code</label>

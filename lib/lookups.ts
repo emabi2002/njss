@@ -25,9 +25,9 @@ export async function loadLookup(table: LookupTable, options?: { moduleCode?: st
   if (table === 'suppliers') {
     const { data, error } = await supabase
       .from('v_suppliers_directory')
-      .select('id, supplier_code, supplier_name, legal_name, trading_name, supplier_type, ipa_registration_number, tin, primary_contact_name, phone, email, province, status, compliance_status, is_active')
+      .select('id, supplier_code, supplier_name, legal_name, trading_name, supplier_type, ipa_registration_number, tin, primary_contact_name, phone, email, province, status, is_active')
       .eq('is_active', true)
-      .eq('status', 'APPROVED')
+      .neq('status', 'INACTIVE')
       .order(options?.order || 'supplier_name')
     if (error) throw error
     return (data || []).map((row) => {

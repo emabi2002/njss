@@ -4,15 +4,6 @@ import { createRequestSupabaseClient, requirePermission } from '@/lib/rbac/serve
 const ACTION_PERMISSION: Record<string, string[]> = {
   CREATE: ['supplier.create'],
   UPDATE: ['supplier.edit'],
-  SUBMIT: ['supplier.submit'],
-  VERIFY: ['supplier.verify'],
-  APPROVE: ['supplier.approve'],
-  REJECT: ['supplier.reject'],
-  SUSPEND: ['supplier.suspend'],
-  REACTIVATE: ['supplier.reactivate'],
-  ADD_DOCUMENT: ['supplier.compliance.manage'],
-  VERIFY_DOCUMENT: ['supplier.compliance.manage'],
-  CREATE_FOLLOWUP: ['supplier.followup.manage'],
 }
 
 export async function POST(request: NextRequest) {
@@ -43,32 +34,8 @@ export async function POST(request: NextRequest) {
       p_payload: body.payload || {},
       p_user_email: userEmail,
     })
-  } else if (['SUBMIT', 'VERIFY', 'APPROVE', 'REJECT', 'SUSPEND', 'REACTIVATE'].includes(action)) {
-    result = await supabase.rpc('njss_transition_supplier', {
-      p_supplier_id: body.supplierId,
-      p_action: action,
-      p_reason: body.reason || null,
-      p_user_email: userEmail,
-    })
-  } else if (action === 'ADD_DOCUMENT') {
-    result = await supabase.rpc('njss_add_supplier_document', {
-      p_supplier_id: body.supplierId,
-      p_payload: body.payload || {},
-      p_user_email: userEmail,
-    })
-  } else if (action === 'VERIFY_DOCUMENT') {
-    result = await supabase.rpc('njss_verify_supplier_document', {
-      p_document_id: body.documentId,
-      p_status: body.status || 'VERIFIED',
-      p_notes: body.notes || null,
-      p_user_email: userEmail,
-    })
   } else {
-    result = await supabase.rpc('njss_create_supplier_followup', {
-      p_supplier_id: body.supplierId,
-      p_payload: body.payload || {},
-      p_user_email: userEmail,
-    })
+    return NextResponse.json({ error: 'Unsupported supplier request' }, { status: 400 })
   }
 
   if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 })
