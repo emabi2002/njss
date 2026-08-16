@@ -28,7 +28,7 @@ type NavGroup = { module: RbacModule; items: NavItem[]; active: boolean; collaps
 
 const SIDEBAR_EXPANDED_WIDTH = "w-64"
 const SIDEBAR_COLLAPSED_WIDTH = "w-[72px]"
-const COLLAPSIBLE_MODULES = new Set(["budget", "transactions", "systems_administration"])
+const COLLAPSIBLE_MODULES = new Set(["budget", "finance", "reports", "administration", "system", "transactions", "systems_administration"])
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
