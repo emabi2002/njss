@@ -7,7 +7,7 @@ import { Save, Send, Plus, Trash2, AlertCircle, CheckCircle2, ArrowLeft, Loader2
 import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
 import { checkBudgetAndNotify, notifyFF3Submitted } from "@/lib/notifications"
-import { checkBudgetAvailability } from "@/lib/api"
+import { approveFF3, checkBudgetAvailability } from "@/lib/api"
 import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadLookup } from "@/lib/lookups"
 
@@ -19,7 +19,7 @@ type FundingSource = { id: string; code: string; name: string }
 type CostCentre = { id: string; code: string; name: string; section_id: string | null; department_id: string | null }
 type ExpenseCode = { id: string; full_expense_code: string; section_id: string | null }
 type BudgetInfo = { available_balance: number; quarterly_released: number }
-type BudgetCheck = { revised: number; released: number; committed: number; spent: number; available: number; hasAllocation: boolean } | null
+type BudgetCheck = { budgetAllocationId: string | null; mappingStatus: string; allocationCount: number; revised: number; released: number; pending: number; committed: number; spent: number; available: number; projectedAvailableAfterPending: number; hasAllocation: boolean } | null
 
 export default function NewFF3Page() {
   const router = useRouter()
@@ -181,16 +181,32 @@ export default function NewFF3Page() {
           financialYear: formData.financial_year,
           expenseCodeId: formData.expense_code_registry_id || null,
           sectionId: formData.section_id || null,
+          departmentId: formData.department_id || null,
+          costCentreId: formData.cost_centre_id || null,
+          fundingSourceId: formData.funding_source_id || null,
+          projectId: formData.project_id || null,
           amount: 0,
         })
-        if (!cancelled) setBudgetCheck({ revised: res.revised, released: res.released, committed: res.committed, spent: res.spent, available: res.available, hasAllocation: res.hasAllocation })
+        if (!cancelled) setBudgetCheck({
+          budgetAllocationId: res.budgetAllocationId,
+          mappingStatus: res.mappingStatus,
+          allocationCount: res.allocationCount,
+          revised: res.revised,
+          released: res.released,
+          pending: res.pending,
+          committed: res.committed,
+          spent: res.spent,
+          available: res.available,
+          projectedAvailableAfterPending: res.projectedAvailableAfterPending,
+          hasAllocation: res.hasAllocation,
+        })
       } catch {
         if (!cancelled) setBudgetCheck(null)
       }
     }
     loadPosition()
     return () => { cancelled = true }
-  }, [formData.expense_code_registry_id, formData.section_id, formData.financial_year])
+  }, [formData.expense_code_registry_id, formData.section_id, formData.department_id, formData.cost_centre_id, formData.funding_source_id, formData.project_id, formData.financial_year])
 
   const addItem = () => {
     setItems([...items, {
@@ -287,17 +303,43 @@ export default function NewFF3Page() {
     setSubmitting(true)
 
     try {
-      // Check budget before submitting against the approved Excel budget allocation.
+      let latestBudget = budgetCheck
+      // Check budget before submitting against the exact approved Excel budget allocation.
       if (status === 'SUBMITTED') {
-        const latestBudget = await checkBudgetAvailability({
+        const checkedBudget = await checkBudgetAvailability({
           financialYear: formData.financial_year,
           expenseCodeId: formData.expense_code_registry_id || null,
           sectionId: formData.section_id || null,
+          departmentId: formData.department_id || null,
+          costCentreId: formData.cost_centre_id || null,
+          fundingSourceId: formData.funding_source_id || null,
+          projectId: formData.project_id || null,
           amount: totalEstimate,
         })
-        if (!latestBudget.hasAllocation || !latestBudget.withinBudget) {
+        latestBudget = {
+          budgetAllocationId: checkedBudget.budgetAllocationId,
+          mappingStatus: checkedBudget.mappingStatus,
+          allocationCount: checkedBudget.allocationCount,
+          revised: checkedBudget.revised,
+          released: checkedBudget.released,
+          pending: checkedBudget.pending,
+          committed: checkedBudget.committed,
+          spent: checkedBudget.spent,
+          available: checkedBudget.available,
+          projectedAvailableAfterPending: checkedBudget.projectedAvailableAfterPending,
+          hasAllocation: checkedBudget.hasAllocation,
+        }
+        if (!checkedBudget.hasAllocation) {
+          setError(checkedBudget.mappingStatus === 'BUDGET_MAPPING_REQUIRED_AMBIGUOUS'
+            ? 'More than one budget allocation matches this FF3. Select a more specific department, section, cost centre, funding source, project and finance code.'
+            : 'No exact approved budget allocation was found for this FF3.')
+          setSubmitting(false)
+          return
+        }
+        if (!checkedBudget.withinBudget) {
           await checkBudgetAndNotify(totalEstimate, undefined, formData.financial_year)
-          setError("This request exceeds the available approved Excel budget allocation.")
+          const shortfall = totalEstimate - checkedBudget.available
+          setError(`Insufficient Available Budget. Available: K${checkedBudget.available.toLocaleString()}. Requested: K${totalEstimate.toLocaleString()}. Shortfall: K${shortfall.toLocaleString()}.`)
           setSubmitting(false)
           return
         }
@@ -315,6 +357,8 @@ export default function NewFF3Page() {
           project_id: formData.project_id || null,
           province_id: formData.province_id || null,
           funding_source_id: formData.funding_source_id || null,
+          budget_allocation_id: latestBudget?.budgetAllocationId || null,
+          budget_mapping_status: latestBudget?.mappingStatus || null,
           purpose: formData.purpose,
           justification: formData.justification,
           required_by_date: formData.required_by_date || null,
@@ -322,9 +366,9 @@ export default function NewFF3Page() {
           urgency_level_id: formData.urgency_level_id || null,
           procurement_method: formData.procurement_method,
           procurement_method_id: formData.procurement_method_id || null,
-          status: status,
+          status: 'DRAFT',
           total_estimated_amount: totalEstimate,
-          is_within_budget: totalEstimate <= (budgetCheck?.available ?? budgetInfo.available_balance),
+          is_within_budget: status === 'SUBMITTED' ? true : totalEstimate <= (latestBudget?.available ?? budgetInfo.available_balance),
           submitted_date: status === 'SUBMITTED' ? new Date().toISOString() : null
         })
         .select()
@@ -379,8 +423,9 @@ export default function NewFF3Page() {
 
       setSuccess(`FF3 ${header.ff3_number} ${status === 'DRAFT' ? 'saved as draft' : 'submitted for approval'}!`)
 
-      // Send notification when submitted
+      // Use the controlled database workflow for submission so pending state is budget-checked atomically.
       if (status === 'SUBMITTED') {
+        await approveFF3(header.id, 'SUBMIT', 'Submitted from FF3 creation screen')
         await notifyFF3Submitted(header.ff3_number, header.id, totalEstimate)
       }
 
@@ -888,18 +933,21 @@ export default function NewFF3Page() {
             <p className="text-xs text-slate-500 mb-1">{selectedCode ? "Position for the selected expense code" : "Position for the selected section"}</p>
             <BudgetLine label="Approved Budget (Revised)" amount={budgetCheck.revised} />
             <BudgetLine label="Released (cash available)" amount={budgetCheck.released} />
+            <BudgetLine label="Pending Requests" amount={budgetCheck.pending} />
             <BudgetLine label="Committed" amount={budgetCheck.committed} />
-            <BudgetLine label="Spent" amount={budgetCheck.spent} />
+            <BudgetLine label="Actual Expenditure" amount={budgetCheck.spent} />
             <BudgetLine label="Available Balance" amount={budgetCheck.available} isTotal />
             <div className="border-t border-slate-200 pt-2 mt-2">
               <BudgetLine label="This Request" amount={totalEstimate} highlight />
+              <BudgetLine label="Available After This Request" amount={budgetCheck.available - totalEstimate} />
+              <BudgetLine label="Projected Available After Pending" amount={budgetCheck.projectedAvailableAfterPending - totalEstimate} />
             </div>
           </div>
         ) : (
           <div className="space-y-2">
             {(formData.expense_code_registry_id || formData.section_id) && (
               <div className="mb-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" /> No confirmed budget allocation found yet — showing the overall available balance.
+                <AlertCircle className="h-4 w-4" /> Exact budget allocation is required. {budgetCheck?.mappingStatus === 'BUDGET_MAPPING_REQUIRED_AMBIGUOUS' ? 'Multiple allocations match this request.' : 'No confirmed budget allocation found yet.'}
               </div>
             )}
             <BudgetLine label="Quarterly Released" amount={budgetInfo.quarterly_released} />

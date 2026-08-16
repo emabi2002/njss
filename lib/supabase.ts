@@ -133,13 +133,17 @@ export type FF3Header = {
   project_id: string | null
   province_id: string | null
   funding_source_id: string | null
+  cost_centre_id?: string | null
+  expense_code_registry_id?: string | null
+  budget_allocation_id?: string | null
+  budget_mapping_status?: string | null
   purpose: string
   justification: string | null
   required_by_date: string | null
   urgency_level: string | null
   procurement_method: string | null
   selected_supplier_name: string | null
-  status: 'DRAFT' | 'SUBMITTED' | 'ENDORSED_SUPERVISOR' | 'ENDORSED_SECTION_HEAD' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
+  status: 'DRAFT' | 'SUBMITTED' | 'ENDORSED_SUPERVISOR' | 'ENDORSED_SECTION_HEAD' | 'APPROVED' | 'COMMITTED' | 'REJECTED' | 'CANCELLED' | 'RETURNED' | 'EXPIRED'
   total_estimated_amount: number | null
   is_within_budget: boolean | null
   created_at: string
@@ -179,10 +183,14 @@ export type FF3Commitment = {
   financial_year: number
   commitment_date: string
   committed_amount: number
+  original_committed_amount?: number | null
+  current_committed_amount?: number | null
   paid_amount: number
   remaining_balance: number
-  status: 'ACTIVE' | 'PARTIALLY_PAID' | 'FULLY_PAID' | 'CANCELLED'
+  outstanding_amount?: number | null
+  status: 'ACTIVE' | 'PARTIALLY_PAID' | 'FULLY_PAID' | 'CANCELLED' | 'RELEASED' | 'CLOSED' | 'REVERSED'
   created_at: string
+  updated_at?: string | null
 }
 
 export type FF4Header = {

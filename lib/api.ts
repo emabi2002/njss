@@ -20,6 +20,7 @@ export type AuthoritativeBudgetPosition = {
   cost_centre_code: string | null
   cost_centre_name: string | null
   project_id?: string | null
+  project_name?: string | null
   funding_source_id: string | null
   funding_source_code?: string | null
   funding_source_name?: string | null
@@ -32,10 +33,38 @@ export type AuthoritativeBudgetPosition = {
   outstanding_commitment: number
   actual_expenditure: number
   available_amount: number
+  projected_available_after_pending?: number
   unfunded_amount: number
   unreleased_funding: number
   revised_budget?: number
   committed_amount?: number
+}
+
+export type CommitmentTransaction = {
+  id: string
+  commitment_id: string
+  ff3_header_id: string | null
+  budget_allocation_id: string
+  transaction_number: string | null
+  transaction_type: string
+  amount: number
+  transaction_date: string
+  reason_code: string | null
+  reason: string | null
+  reference: string | null
+  previous_balance: number
+  new_balance: number
+  approved_by: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export type CommitmentAdjustmentInput = {
+  commitment_id: string
+  action: 'INCREASE' | 'DECREASE' | 'CANCEL' | 'RELEASE_UNUSED_BALANCE'
+  amount?: number | null
+  reason: string
+  reference?: string | null
 }
 
 export type FundingAuthorityRow = {
@@ -523,7 +552,7 @@ export async function getPendingApprovals() {
 // FF3 APPROVAL WORKFLOW
 // ==========================================
 
-export type FF3ApprovalAction = 'ENDORSE_SUPERVISOR' | 'ENDORSE_SECTION_HEAD' | 'APPROVE' | 'REJECT'
+export type FF3ApprovalAction = 'SUBMIT' | 'ENDORSE_SUPERVISOR' | 'ENDORSE_SECTION_HEAD' | 'APPROVE' | 'REJECT' | 'CANCEL' | 'RETURN'
 
 export async function approveFF3(ff3Id: string, action: FF3ApprovalAction, comments?: string) {
   const response = await fetch('/api/workflows/ff3', {
@@ -533,7 +562,28 @@ export async function approveFF3(ff3Id: string, action: FF3ApprovalAction, comme
   })
   const json = await response.json()
   if (!response.ok) throw new Error(json.error || 'FF3 workflow action failed')
-  return json.header
+  return json
+}
+
+export async function getCommitmentTransactions(commitmentId: string) {
+  const { data, error } = await supabase
+    .from('commitment_transactions')
+    .select('*')
+    .eq('commitment_id', commitmentId)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return data as CommitmentTransaction[]
+}
+
+export async function adjustCommitment(input: CommitmentAdjustmentInput) {
+  const response = await fetch('/api/workflows/commitments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const json = await response.json()
+  if (!response.ok) throw new Error(json.error || 'Commitment adjustment failed')
+  return json
 }
 
 export async function getFF3Approvals(ff3Id: string) {
@@ -928,34 +978,53 @@ export async function checkBudgetAvailability(params: {
   financialYear: number
   expenseCodeId?: string | null
   sectionId?: string | null
+  departmentId?: string | null
+  costCentreId?: string | null
+  fundingSourceId?: string | null
+  projectId?: string | null
+  budgetAllocationId?: string | null
   amount: number
 }) {
   let q = supabase.from('v_authoritative_budget_position').select('*').eq('financial_year', params.financialYear)
-  if (params.expenseCodeId) q = q.eq('expense_code_registry_id', params.expenseCodeId)
-  else if (params.sectionId) q = q.eq('section_id', params.sectionId)
+  if (params.budgetAllocationId) q = q.eq('budget_allocation_id', params.budgetAllocationId)
+  else {
+    if (params.expenseCodeId) q = q.eq('expense_code_registry_id', params.expenseCodeId)
+    if (params.sectionId) q = q.eq('section_id', params.sectionId)
+    if (params.departmentId) q = q.eq('department_id', params.departmentId)
+    if (params.costCentreId) q = q.eq('cost_centre_id', params.costCentreId)
+    if (params.fundingSourceId) q = q.eq('funding_source_id', params.fundingSourceId)
+    if (params.projectId) q = q.eq('project_id', params.projectId)
+  }
   const { data: rows, error } = await q
   if (error) throw error
 
   const scopedRows = (await filterRowsToCurrentScope(rows)) as AuthoritativeBudgetPosition[]
+  const exactAllocation = scopedRows.length === 1 ? scopedRows[0] : null
   const revised = scopedRows.reduce((s, a) => s + (a.approved_budget || 0), 0)
   const funded = scopedRows.reduce((s, a) => s + (a.funded_amount || 0), 0)
   const released = scopedRows.reduce((s, a) => s + (a.released_amount || 0), 0)
+  const pending = scopedRows.reduce((s, a) => s + (a.pending_amount || 0), 0)
   const committed = scopedRows.reduce((s, a) => s + (a.outstanding_commitment || 0), 0)
   const spent = scopedRows.reduce((s, a) => s + (a.actual_expenditure || 0), 0)
   const available = released - committed - spent
   const approvedAvailable = revised - committed - spent
   return {
+    budgetAllocationId: exactAllocation?.budget_allocation_id || null,
+    mappingStatus: scopedRows.length === 1 ? 'RESOLVED' : scopedRows.length === 0 ? 'BUDGET_MAPPING_REQUIRED' : 'BUDGET_MAPPING_REQUIRED_AMBIGUOUS',
+    allocationCount: scopedRows.length,
     revised,
     funded,
     released,
+    pending,
     committed,
     spent,
     available,
     approvedAvailable,
+    projectedAvailableAfterPending: available - pending,
     unreleased: funded - released,
     unfunded: revised - funded,
     requested: params.amount,
-    withinBudget: params.amount <= available,
-    hasAllocation: scopedRows.length > 0,
+    withinBudget: scopedRows.length === 1 && params.amount <= available,
+    hasAllocation: scopedRows.length === 1,
   }
 }

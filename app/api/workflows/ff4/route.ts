@@ -59,19 +59,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (action === 'MARK_PAID' && current.commitment_id) {
-    const { data: commitment, error: commitmentError } = await supabase
-      .from('ff3_commitments')
-      .select('paid_amount, committed_amount')
-      .eq('id', current.commitment_id)
-      .single()
-    if (commitmentError) return NextResponse.json({ error: commitmentError.message }, { status: 500 })
-    const remaining = (commitment.committed_amount || 0) - (commitment.paid_amount || 0)
-    if ((current.net_amount || 0) > remaining + 0.001) {
-      return NextResponse.json({ error: `Payment exceeds the remaining commitment balance of K ${remaining.toLocaleString()}.` }, { status: 400 })
-    }
-  }
-
   const updateData: Record<string, unknown> = { status: STATUS_MAP[action], updated_at: now }
   if (action === 'VERIFY') {
     updateData.verified_date = now
@@ -98,30 +85,12 @@ export async function POST(request: NextRequest) {
   if (headerError) return NextResponse.json({ error: headerError.message }, { status: 500 })
 
   if (action === 'MARK_PAID' && header.commitment_id) {
-    const { data: commitment, error: commitmentError } = await supabase
-      .from('ff3_commitments')
-      .select('commitment_number, paid_amount, committed_amount')
-      .eq('id', header.commitment_id)
-      .single()
-    if (commitmentError) return NextResponse.json({ error: commitmentError.message }, { status: 500 })
-
-    const newPaidAmount = (commitment.paid_amount || 0) + (header.net_amount || 0)
-    const commitmentStatus = newPaidAmount >= (commitment.committed_amount || 0) ? 'FULLY_PAID' : 'PARTIALLY_PAID'
-    const { error: updateCommitmentError } = await supabase
-      .from('ff3_commitments')
-      .update({ paid_amount: newPaidAmount, status: commitmentStatus })
-      .eq('id', header.commitment_id)
-    if (updateCommitmentError) return NextResponse.json({ error: updateCommitmentError.message }, { status: 500 })
-
-    await supabase.from('payment_transactions').insert({
-      ff4_header_id: ff4Id,
-      commitment_id: header.commitment_id,
-      transaction_date: today,
-      transaction_type: 'PAYMENT',
-      amount: header.net_amount || 0,
-      payment_reference: paymentReference || header.external_payment_reference || null,
-      reconciled: false,
+    const { error: liquidationError } = await supabase.rpc('njss_liquidate_commitment_payment', {
+      p_ff4_id: ff4Id,
+      p_payment_reference: paymentReference || header.external_payment_reference || null,
+      p_user_email: guard.context?.email || '',
     })
+    if (liquidationError) return NextResponse.json({ error: liquidationError.message }, { status: 400 })
   }
 
   if (action === 'RECONCILE') {

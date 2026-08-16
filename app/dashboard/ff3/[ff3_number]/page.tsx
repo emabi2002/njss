@@ -8,11 +8,11 @@ import {
   ThumbsUp, ThumbsDown, MessageSquare, Download
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { approveFF3, getFF3Approvals } from "@/lib/api"
+import { approveFF3, getFF3Approvals, type AuthoritativeBudgetPosition } from "@/lib/api"
 import { generateFF3PDF, downloadPDF, type FF3PDFData } from "@/lib/pdf"
 import { useAuth } from "@/contexts/AuthContext"
 
-type FF3Status = "DRAFT" | "SUBMITTED" | "ENDORSED_SUPERVISOR" | "ENDORSED_SECTION_HEAD" | "APPROVED" | "REJECTED" | "EXPIRED"
+type FF3Status = "DRAFT" | "SUBMITTED" | "ENDORSED_SUPERVISOR" | "ENDORSED_SECTION_HEAD" | "APPROVED" | "COMMITTED" | "REJECTED" | "CANCELLED" | "RETURNED" | "EXPIRED"
 
 type FF3Header = {
   id: string
@@ -27,6 +27,10 @@ type FF3Header = {
   status: FF3Status
   total_estimated_amount: number | null
   is_within_budget: boolean | null
+  budget_allocation_id: string | null
+  budget_mapping_status: string | null
+  cost_centre_id: string | null
+  expense_code_registry_id: string | null
   created_at: string
   submitted_date: string | null
   approved_date: string | null
@@ -63,6 +67,17 @@ type FF3Approval = {
   action_date: string
 }
 
+type CommitmentSummary = {
+  id: string
+  commitment_number: string
+  original_committed_amount: number | null
+  current_committed_amount: number | null
+  committed_amount: number
+  paid_amount: number
+  outstanding_amount: number | null
+  status: string
+}
+
 export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number: string }> }) {
   const resolvedParams = use(params)
   const { can } = useAuth()
@@ -72,6 +87,8 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
   const [items, setItems] = useState<FF3Item[]>([])
   const [quotations, setQuotations] = useState<FF3Quotation[]>([])
   const [approvals, setApprovals] = useState<FF3Approval[]>([])
+  const [financialPosition, setFinancialPosition] = useState<AuthoritativeBudgetPosition | null>(null)
+  const [commitment, setCommitment] = useState<CommitmentSummary | null>(null)
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectComments, setRejectComments] = useState("")
   const [approvalComments, setApprovalComments] = useState("")
@@ -115,9 +132,29 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
       if (quotsError) throw quotsError
       setQuotations(quotsData || [])
 
-      // Fetch approvals
+      // Fetch approvals, exact budget position and commitment summary
       const approvalsData = await getFF3Approvals(headerData.id)
       setApprovals(approvalsData || [])
+
+      if (headerData.budget_allocation_id) {
+        const { data: positionData } = await supabase
+          .from('v_authoritative_budget_position')
+          .select('*')
+          .eq('budget_allocation_id', headerData.budget_allocation_id)
+          .maybeSingle()
+        setFinancialPosition(positionData as AuthoritativeBudgetPosition | null)
+      } else {
+        setFinancialPosition(null)
+      }
+
+      const { data: commitmentData } = await supabase
+        .from('ff3_commitments')
+        .select('id, commitment_number, original_committed_amount, current_committed_amount, committed_amount, paid_amount, outstanding_amount, status')
+        .eq('ff3_header_id', headerData.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      setCommitment(commitmentData as CommitmentSummary | null)
 
     } catch (err) {
       console.error('Error fetching FF3:', err)
@@ -145,7 +182,7 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
       fetchFF3Detail()
     } catch (err) {
       console.error('Error approving FF3:', err)
-      setError('Failed to process approval. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to process approval. Please try again.')
     } finally {
       setActionLoading(false)
     }
@@ -165,7 +202,7 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
       fetchFF3Detail()
     } catch (err) {
       console.error('Error rejecting FF3:', err)
-      setError('Failed to reject. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to reject. Please try again.')
     } finally {
       setActionLoading(false)
     }
@@ -196,7 +233,7 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
   const canEndorseSectionHead = header.status === 'ENDORSED_SUPERVISOR' && can('ff3.endorse')
   const canApprove = header.status === 'ENDORSED_SECTION_HEAD' && can('ff3.approve')
   const canReject = ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'].includes(header.status) && (can('ff3.reject') || can('ff3.approve'))
-  const isTerminal = ['APPROVED', 'REJECTED', 'EXPIRED'].includes(header.status)
+  const isTerminal = ['APPROVED', 'COMMITTED', 'REJECTED', 'CANCELLED', 'RETURNED', 'EXPIRED'].includes(header.status)
   const hasAnyAction = canEndorseSupervisor || canEndorseSectionHead || canApprove || canReject
 
   // Handle PDF export
@@ -301,6 +338,44 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
           <InfoField icon={<Calendar className="h-4 w-4" />} label="Required By" value={header.required_by_date ? new Date(header.required_by_date).toLocaleDateString('en-GB') : '-'} />
           <InfoField icon={<FileText className="h-4 w-4" />} label="Procurement Method" value={header.procurement_method || '-'} />
         </div>
+      </div>
+
+      {/* Financial Position */}
+      <div className="bg-white rounded-lg border border-slate-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-900">Financial Position</h2>
+          {commitment && (
+            <Link href="/dashboard/commitments" className="text-sm font-medium text-png-red hover:text-png-maroon">
+              View Commitment {commitment.commitment_number}
+            </Link>
+          )}
+        </div>
+        {financialPosition ? (
+          <div className="grid md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <FinancialTile label="Approved Budget" amount={financialPosition.approved_budget} />
+            <FinancialTile label="Funded" amount={financialPosition.funded_amount} />
+            <FinancialTile label="Released" amount={financialPosition.released_amount} />
+            <FinancialTile label="Pending" amount={financialPosition.pending_amount} />
+            <FinancialTile label="Committed" amount={financialPosition.outstanding_commitment} />
+            <FinancialTile label="Actual" amount={financialPosition.actual_expenditure} />
+            <FinancialTile label="Available" amount={financialPosition.available_amount} strong />
+            <FinancialTile label="This FF3" amount={header.total_estimated_amount || 0} />
+            <FinancialTile label="Available After Approval" amount={financialPosition.available_amount - (header.total_estimated_amount || 0)} warning={financialPosition.available_amount < (header.total_estimated_amount || 0)} />
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-medium uppercase text-slate-500">Budget Allocation</p>
+              <p className="mt-2 text-xs font-mono text-slate-700 break-all">{header.budget_allocation_id}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            Exact budget allocation is not resolved for this FF3. Status: {header.budget_mapping_status || 'BUDGET_MAPPING_REQUIRED'}.
+          </div>
+        )}
+        {financialPosition && financialPosition.available_amount < (header.total_estimated_amount || 0) && canApprove && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+            Approval Blocked — Insufficient Budget. The database will recheck this atomically at final approval.
+          </div>
+        )}
       </div>
 
       {/* Purpose & Justification */}
@@ -563,6 +638,15 @@ function InfoField({ icon, label, value }: { icon: React.ReactNode; label: strin
   )
 }
 
+function FinancialTile({ label, amount, strong, warning }: { label: string; amount: number; strong?: boolean; warning?: boolean }) {
+  return (
+    <div className={`rounded-lg border p-3 ${warning ? 'border-red-200 bg-red-50' : strong ? 'border-green-200 bg-green-50' : 'border-slate-200 bg-slate-50'}`}>
+      <p className="text-xs font-medium uppercase text-slate-500">{label}</p>
+      <p className={`mt-2 text-lg font-bold ${warning ? 'text-red-700' : strong ? 'text-green-700' : 'text-slate-900'}`}>K {(amount || 0).toLocaleString()}</p>
+    </div>
+  )
+}
+
 function StatusBadge({ status }: { status: FF3Status }) {
   const statusConfig: Record<FF3Status, { label: string; classes: string }> = {
     DRAFT: { label: "Draft", classes: "bg-slate-100 text-slate-700" },
@@ -570,7 +654,10 @@ function StatusBadge({ status }: { status: FF3Status }) {
     ENDORSED_SUPERVISOR: { label: "Supervisor Endorsed", classes: "bg-blue-100 text-blue-700" },
     ENDORSED_SECTION_HEAD: { label: "Pending Approval", classes: "bg-amber-100 text-amber-700" },
     APPROVED: { label: "Approved", classes: "bg-green-100 text-green-700" },
+    COMMITTED: { label: "Committed", classes: "bg-green-100 text-green-700" },
     REJECTED: { label: "Rejected", classes: "bg-red-100 text-red-700" },
+    CANCELLED: { label: "Cancelled", classes: "bg-red-100 text-red-700" },
+    RETURNED: { label: "Returned", classes: "bg-amber-100 text-amber-700" },
     EXPIRED: { label: "Expired", classes: "bg-slate-100 text-slate-700" },
   }
 
@@ -578,9 +665,9 @@ function StatusBadge({ status }: { status: FF3Status }) {
 
   return (
     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${config.classes}`}>
-      {status === 'APPROVED' && <CheckCircle2 className="h-4 w-4" />}
-      {status === 'REJECTED' && <XCircle className="h-4 w-4" />}
-      {['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'].includes(status) && <Clock className="h-4 w-4" />}
+      {['APPROVED', 'COMMITTED'].includes(status) && <CheckCircle2 className="h-4 w-4" />}
+      {['REJECTED', 'CANCELLED'].includes(status) && <XCircle className="h-4 w-4" />}
+      {['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD', 'RETURNED'].includes(status) && <Clock className="h-4 w-4" />}
       {config.label}
     </span>
   )

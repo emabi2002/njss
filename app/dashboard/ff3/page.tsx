@@ -6,7 +6,7 @@ import { Plus, Download, Search, Eye, Edit, CheckCircle2, Clock, XCircle, FileTe
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/contexts/AuthContext"
 
-type FF3Status = "DRAFT" | "SUBMITTED" | "ENDORSED_SUPERVISOR" | "ENDORSED_SECTION_HEAD" | "APPROVED" | "REJECTED" | "EXPIRED"
+type FF3Status = "DRAFT" | "SUBMITTED" | "ENDORSED_SUPERVISOR" | "ENDORSED_SECTION_HEAD" | "APPROVED" | "COMMITTED" | "REJECTED" | "CANCELLED" | "RETURNED" | "EXPIRED"
 
 type WorkflowStatus = { status_code: string; display_name: string }
 
@@ -285,7 +285,10 @@ function StatusBadge({ status }: { status: FF3Status }) {
     ENDORSED_SUPERVISOR: { label: "Supervisor Endorsed", icon: Clock, classes: "bg-blue-100 text-blue-700" },
     ENDORSED_SECTION_HEAD: { label: "Pending Approval", icon: Clock, classes: "bg-amber-100 text-amber-700" },
     APPROVED: { label: "Approved", icon: CheckCircle2, classes: "bg-green-100 text-green-700" },
+    COMMITTED: { label: "Committed", icon: CheckCircle2, classes: "bg-green-100 text-green-700" },
     REJECTED: { label: "Rejected", icon: XCircle, classes: "bg-red-100 text-red-700" },
+    CANCELLED: { label: "Cancelled", icon: XCircle, classes: "bg-red-100 text-red-700" },
+    RETURNED: { label: "Returned", icon: Clock, classes: "bg-amber-100 text-amber-700" },
     EXPIRED: { label: "Expired", icon: XCircle, classes: "bg-slate-100 text-slate-700" },
   }
 
