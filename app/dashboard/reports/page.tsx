@@ -51,6 +51,8 @@ type FF4Record = {
 
 type ExportFormat = "pdf" | "excel" | "csv" | "print"
 type ReportCategoryConfig = { category: string; reports: { id: string; name: string; description: string; icon: typeof FileText }[] }
+type DepartmentLookup = { id: string; name: string }
+type SectionLookup = { id: string; department_id: string | null; name: string }
 
 const round1 = (n: number) => Math.round(n * 10) / 10
 const quarterOf = (d: string | null) => (d ? Math.floor(new Date(d).getMonth() / 3) + 1 : 1)
@@ -65,6 +67,8 @@ export default function ReportsPage() {
     section: "",
     status: ""
   })
+  const [departments, setDepartments] = useState<DepartmentLookup[]>([])
+  const [sections, setSections] = useState<SectionLookup[]>([])
   const [dbReportCategories, setDbReportCategories] = useState<ReportCategoryConfig[] | null>(null)
   const [exporting, setExporting] = useState(false)
   const [activeAction, setActiveAction] = useState<string>("")
@@ -205,6 +209,28 @@ export default function ReportsPage() {
   }, [])
 
   const visibleReportCategories = dbReportCategories || reportCategories
+
+  useEffect(() => {
+    async function loadFilterLookups() {
+      const [departmentRes, sectionRes] = await Promise.all([
+        supabase.from('departments').select('id, name').eq('is_active', true).order('name'),
+        supabase.from('sections').select('id, department_id, name').eq('is_active', true).order('name'),
+      ])
+      setDepartments((departmentRes.data || []) as DepartmentLookup[])
+      setSections((sectionRes.data || []) as SectionLookup[])
+    }
+    loadFilterLookups().catch((error) => console.warn('Report filter lookup failed:', error))
+  }, [])
+
+  const filteredSections = filters.department
+    ? sections.filter((section) => section.department_id === filters.department)
+    : sections
+
+  const applyOrgFilters = <T extends { department_id?: string | null; section_id?: string | null }>(rows: T[]) => rows.filter((row) => {
+    if (filters.department && row.department_id !== filters.department) return false
+    if (filters.section && row.section_id !== filters.section) return false
+    return true
+  })
 
   const MANAGEMENT_IDS = ['management-financial-summary', 'department-financial-position', 'section-financial-position', 'cost-centre-financial-position', 'expense-code-financial-position', 'funding-source-financial-position', 'ff3-ff4-transaction-trace']
   const COMMITMENT_IDS = ['commitment-register', 'outstanding-commitments', 'partially-paid-commitments', 'fully-paid-commitments']
@@ -408,7 +434,7 @@ export default function ReportsPage() {
 
       if (id === 'ff3-ff4-transaction-trace') {
         const { data } = await supabase.from('v_ff3_ff4_transaction_trace').select('*').eq('financial_year', fy).order('ff3_number')
-        const traceRows = (data || []) as Array<{ ff3_number: string | null; ff3_purpose: string | null; commitment_number: string | null; ff4_number: string | null; supplier_or_payee: string | null; ff4_status: string | null; payment_date: string | null; payment_amount: number | null; ff4_net_amount: number | null; payment_reference: string | null; reconciled: boolean | null }>
+        const traceRows = applyOrgFilters((data || []) as Array<{ department_id?: string | null; section_id?: string | null; ff3_number: string | null; ff3_purpose: string | null; commitment_number: string | null; ff4_number: string | null; supplier_or_payee: string | null; ff4_status: string | null; payment_date: string | null; payment_amount: number | null; ff4_net_amount: number | null; payment_reference: string | null; reconciled: boolean | null }>)
         return {
           title: 'FF3 to FF4 Transaction Trace',
           records: traceRows.map((r) => ({
@@ -435,7 +461,8 @@ export default function ReportsPage() {
       }
       const cfg = config[id]
       const { data } = await supabase.from(cfg.view).select('*').eq('financial_year', fy).order(cfg.order)
-      const rows = (data || []) as Array<{ department_name?: string | null; section_name?: string | null; cost_centre_code?: string | null; cost_centre_name?: string | null; full_expense_code?: string | null; funding_source_name?: string | null; approved_budget: number; funded_amount: number; released_amount: number; pending_ff3: number; outstanding_commitments: number; actual_expenditure: number; available_balance: number; unfunded_budget: number; unreleased_funding: number; utilisation_pct: number }>
+      const rawRows = (data || []) as Array<{ department_id?: string | null; section_id?: string | null; department_name?: string | null; section_name?: string | null; cost_centre_code?: string | null; cost_centre_name?: string | null; full_expense_code?: string | null; funding_source_name?: string | null; approved_budget: number; funded_amount: number; released_amount: number; pending_ff3: number; outstanding_commitments: number; actual_expenditure: number; available_balance: number; unfunded_budget: number; unreleased_funding: number; utilisation_pct: number }>
+      const rows = id === 'funding-source-financial-position' ? rawRows : applyOrgFilters(rawRows)
       const labelOf = (row: typeof rows[number]) => row.department_name || row.section_name || (row.cost_centre_code ? `${row.cost_centre_code} — ${row.cost_centre_name || ''}` : null) || row.full_expense_code || row.funding_source_name || '-'
       return { title: cfg.title, records: rows.map((row) => ({ [cfg.label]: labelOf(row), 'Approved (K)': row.approved_budget || 0, 'Funded (K)': row.funded_amount || 0, 'Released (K)': row.released_amount || 0, 'Pending FF3 (K)': row.pending_ff3 || 0, 'Outstanding Commitments (K)': row.outstanding_commitments || 0, 'Actual (K)': row.actual_expenditure || 0, 'Available (K)': row.available_balance || 0, 'Unfunded (K)': row.unfunded_budget || 0, 'Unreleased Funding (K)': row.unreleased_funding || 0, 'Utilisation %': row.utilisation_pct || 0 })) }
     }
@@ -462,7 +489,7 @@ export default function ReportsPage() {
         return { title: 'Funding Source Report', records: rows.map((r) => ({ Source: r.funding_source_code ? `${r.funding_source_code} — ${r.funding_source_name}` : r.funding_source_name || '-', 'Authority Amount (K)': r.authority_amount || 0, 'Received (K)': r.received_amount || 0, 'Allocated (K)': r.allocated_amount || 0, 'Unallocated Receipts (K)': (r.received_amount || 0) - (r.allocated_amount || 0) })) }
       }
       const { data } = await supabase.from('v_authoritative_budget_position').select('*').eq('financial_year', fy).order('department_name')
-      let rows = (data || []) as Array<{ full_expense_code: string | null; department_name: string | null; section_name: string | null; cost_centre_code: string | null; funding_source_name: string | null; approved_budget: number; funded_amount: number; released_amount: number; pending_amount: number; outstanding_commitment: number; actual_expenditure: number; available_amount: number; unfunded_amount: number; unreleased_funding: number }>
+      let rows = applyOrgFilters((data || []) as Array<{ department_id?: string | null; section_id?: string | null; full_expense_code: string | null; department_name: string | null; section_name: string | null; cost_centre_code: string | null; funding_source_name: string | null; approved_budget: number; funded_amount: number; released_amount: number; pending_amount: number; outstanding_commitment: number; actual_expenditure: number; available_amount: number; unfunded_amount: number; unreleased_funding: number }>)
       if (id === 'unfunded-budget-report') rows = rows.filter((r) => (r.unfunded_amount || 0) > 0)
       if (id === 'unreleased-funding-report') rows = rows.filter((r) => (r.unreleased_funding || 0) > 0)
       const title = id === 'funding-vs-approved-budget' ? 'Funding vs Approved Budget' : id === 'funding-vs-releases' ? 'Funding vs Releases' : id === 'unfunded-budget-report' ? 'Unfunded Budget Report' : id === 'unreleased-funding-report' ? 'Unreleased Funding Report' : 'Budget Position Report'
@@ -528,7 +555,7 @@ export default function ReportsPage() {
 
     if (COMMITMENT_IDS.includes(id)) {
       const { data } = await supabase.from('v_commitment_ledger').select('*').eq('financial_year', fy).order('commitment_number')
-      const rows = (data || []) as Array<{ commitment_id: string; commitment_number: string | null; ff3_number: string | null; status: string | null; original_committed_amount: number | null; current_committed_amount: number | null; paid_amount: number | null; outstanding_amount: number | null; transaction_date: string | null; transaction_type: string | null; reference: string | null }>
+      const rows = applyOrgFilters((data || []) as Array<{ department_id?: string | null; section_id?: string | null; commitment_id: string; commitment_number: string | null; ff3_number: string | null; status: string | null; original_committed_amount: number | null; current_committed_amount: number | null; paid_amount: number | null; outstanding_amount: number | null; transaction_date: string | null; transaction_type: string | null; reference: string | null }>)
       const map = new Map<string, typeof rows[number]>()
       rows.forEach((row) => {
         const existing = map.get(row.commitment_id)
@@ -869,7 +896,7 @@ export default function ReportsPage() {
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Report Generator</h2>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+        <div className="grid md:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Report Type</label>
             <select
@@ -922,6 +949,19 @@ export default function ReportsPage() {
             </select>
           </div>
           <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Department</label>
+            <select
+              value={filters.department}
+              onChange={(e) => setFilters({ ...filters, department: e.target.value, section: "" })}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
+            >
+              <option value="">All Departments</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>{department.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Section</label>
             <select
               value={filters.section}
@@ -929,9 +969,9 @@ export default function ReportsPage() {
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
             >
               <option value="">All Sections</option>
-              <option value="accounts">Accounts Section</option>
-              <option value="procurement">Procurement Section</option>
-              <option value="payroll">Payroll Section</option>
+              {filteredSections.map((section) => (
+                <option key={section.id} value={section.id}>{section.name}</option>
+              ))}
             </select>
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createRequestSupabaseClient, requirePermission } from '@/lib/rbac/server'
 import type { FF3ApprovalAction } from '@/lib/api'
+import { toUserMessage } from '@/lib/errors'
 
 const ACTION_PERMISSION: Record<FF3ApprovalAction, string[]> = {
   SUBMIT: ['ff3.submit'],
@@ -34,7 +35,10 @@ export async function POST(request: NextRequest) {
     p_user_email: guard.context?.email || '',
   })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (error) {
+    console.error('FF3 workflow failed:', error)
+    return NextResponse.json({ error: toUserMessage(error) }, { status: 400 })
+  }
 
   return NextResponse.json({
     header: data?.header ?? data,

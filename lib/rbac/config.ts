@@ -41,6 +41,7 @@ export const MENU_ITEMS: RbacMenuItem[] = [
   { code: 'reports.library', module_code: 'reports', label: 'Relevant Reports', href: '/dashboard/reports', icon: 'BarChart3', sort_order: 80, required_permissions: ['reports.view', 'reports.export'], is_active: true },
   { code: 'administration.users', module_code: 'administration', label: 'Users', href: '/dashboard/users', icon: 'Users', sort_order: 90, required_permissions: ['users.manage'], is_active: true },
   { code: 'administration.audit', module_code: 'administration', label: 'Access Audit', href: '/dashboard/audit-log', icon: 'ClipboardList', sort_order: 95, required_permissions: ['audit.view'], is_active: true },
+  { code: 'administration.uat', module_code: 'administration', label: 'UAT Checklist', href: '/dashboard/uat-checklist', icon: 'ClipboardList', sort_order: 96, required_permissions: ['users.manage'], is_active: true },
   { code: 'system.master', module_code: 'system', label: 'Master Data', href: '/dashboard/master', icon: 'FolderOpen', sort_order: 100, required_permissions: ['masterdata.manage', 'registry.manage'], is_active: true },
   { code: 'system.settings', module_code: 'system', label: 'System Settings', href: '/dashboard/settings', icon: 'Settings', sort_order: 110, required_permissions: ['settings.manage'], is_active: true },
   { code: 'system.help', module_code: 'system', label: 'User Guide', href: '/dashboard/help', icon: 'BookOpen', sort_order: 120, required_permissions: ['dashboard.view'], is_active: true },
@@ -168,6 +169,7 @@ export const ROUTE_PERMISSIONS: Array<{ pattern: RegExp; permissions: Permission
   { pattern: /^\/dashboard\/master($|\/)/, permissions: ['masterdata.manage', 'registry.manage'] },
   { pattern: /^\/dashboard\/settings($|\/)/, permissions: ['settings.manage'] },
   { pattern: /^\/dashboard\/help($|\/)/, permissions: ['dashboard.view'] },
+  { pattern: /^\/dashboard\/uat-checklist($|\/)/, permissions: ['users.manage'] },
 ]
 
 function actionFromCode(code: string): RbacPermission['action'] {

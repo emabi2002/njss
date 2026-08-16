@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createRequestSupabaseClient, requirePermission } from '@/lib/rbac/server'
+import { toUserMessage } from '@/lib/errors'
 
 type FF4WorkflowAction =
   | 'CREATE'
@@ -47,7 +48,10 @@ export async function POST(request: NextRequest) {
       p_submit: action === 'CREATE_AND_SUBMIT' || Boolean(body.submit),
       p_user_email: userEmail,
     })
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    if (error) {
+      console.error('FF4 create workflow failed:', error)
+      return NextResponse.json({ error: toUserMessage(error) }, { status: 400 })
+    }
     return NextResponse.json({ data })
   }
 
@@ -67,6 +71,9 @@ export async function POST(request: NextRequest) {
     p_user_email: userEmail,
   })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (error) {
+    console.error('FF4 transition workflow failed:', error)
+    return NextResponse.json({ error: toUserMessage(error) }, { status: 400 })
+  }
   return NextResponse.json({ data })
 }
