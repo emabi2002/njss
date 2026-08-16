@@ -233,6 +233,59 @@ export type BudgetReleaseFundingLineInput = {
   amount: number
 }
 
+export type FF4WorkflowResult = {
+  header?: Record<string, unknown>
+  commitment?: Record<string, unknown> | null
+  payment_transaction?: Record<string, unknown> | null
+  financial_position_before?: Record<string, unknown> | null
+  financial_position_after?: Record<string, unknown> | null
+}
+
+export type FF4CreatePayload = {
+  ff3_header_id: string
+  commitment_id: string
+  payee_type?: string | null
+  payee_type_id?: string | null
+  payee_name: string
+  supplier_id?: string | null
+  payee_user_id?: string | null
+  supplier_code?: string | null
+  invoice_number?: string | null
+  invoice_date?: string | null
+  claim_reference?: string | null
+  payment_description?: string | null
+  gross_amount: number
+  tax_amount?: number
+  deductions?: number
+  payment_method?: string | null
+  payment_method_id?: string | null
+  external_payment_reference?: string | null
+  cheque_number?: string | null
+  remarks?: string | null
+  is_partial_payment?: boolean
+  attachments?: Array<{ file_name?: string; name?: string; file_type?: string; type?: string; file_url?: string; url?: string; attachment_type?: string }>
+  comments?: string | null
+}
+
+export type PayableCommitmentRow = {
+  commitment_id: string
+  commitment_number: string | null
+  ff3_header_id: string
+  ff3_number: string | null
+  purpose: string | null
+  financial_year: number
+  supplier_id: string | null
+  supplier_name: string | null
+  supplier_code: string | null
+  original_commitment: number
+  current_commitment: number
+  paid_amount: number
+  outstanding_commitment: number
+  pending_ff4_amount: number
+  available_for_ff4: number
+  commitment_status: string
+}
+
 async function postBudgetWorkflow<T>(body: Record<string, unknown>): Promise<T> {
   const response = await fetch('/api/workflows/budget', {
     method: 'POST',
@@ -253,6 +306,17 @@ async function postSupplierWorkflow<T>(body: Record<string, unknown>): Promise<T
   const json = await response.json()
   if (!response.ok) throw new Error(json.error || 'Supplier workflow operation failed')
   return json.data as T
+}
+
+async function postFF4Workflow<T>(body: Record<string, unknown>): Promise<T> {
+  const response = await fetch('/api/workflows/ff4', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const json = await response.json()
+  if (!response.ok) throw new Error(json.error || 'FF4 workflow operation failed')
+  return (json.data || json) as T
 }
 
 // ==========================================
@@ -632,6 +696,20 @@ export async function getPendingApprovals() {
   return { ff3Pending: scopedFF3Pending, ff4Pending: scopedFF4Pending }
 }
 
+export async function getPayableCommitments(financialYear: number) {
+  const { data, error } = await supabase
+    .from('v_ff4_payable_commitments')
+    .select('*')
+    .eq('financial_year', financialYear)
+    .order('ff3_number', { ascending: false })
+  if (error) throw error
+  return data as PayableCommitmentRow[]
+}
+
+export async function createFF4Controlled(payload: FF4CreatePayload, submit = false) {
+  return postFF4Workflow<FF4WorkflowResult>({ action: submit ? 'CREATE_AND_SUBMIT' : 'CREATE_DRAFT', payload })
+}
+
 // ==========================================
 // FF3 APPROVAL WORKFLOW
 // ==========================================
@@ -685,22 +763,44 @@ export async function getFF3Approvals(ff3Id: string) {
 // FF4 APPROVAL WORKFLOW
 // ==========================================
 
-export type FF4ApprovalAction = 'VERIFY' | 'APPROVE' | 'PROCESS' | 'MARK_PAID' | 'RECONCILE' | 'CANCEL'
+export type FF4ApprovalAction = 'SUBMIT' | 'VERIFY' | 'APPROVE' | 'PROCESS' | 'MARK_PAID' | 'RECONCILE' | 'CANCEL'
 
 export async function approveFF4(
   ff4Id: string,
   action: FF4ApprovalAction,
   paymentReference?: string,
-  comments?: string
+  comments?: string,
+  paymentDetails?: { paymentDate?: string; paymentMethod?: string; chequeNumber?: string }
 ) {
-  const response = await fetch('/api/workflows/ff4', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ff4Id, action, paymentReference, comments }),
+  return postFF4Workflow<FF4WorkflowResult>({
+    ff4Id,
+    action,
+    paymentReference,
+    comments,
+    paymentDate: paymentDetails?.paymentDate,
+    paymentMethod: paymentDetails?.paymentMethod,
+    chequeNumber: paymentDetails?.chequeNumber,
   })
-  const json = await response.json()
-  if (!response.ok) throw new Error(json.error || 'FF4 workflow action failed')
-  return json.header
+}
+
+export async function getFF4PaymentTransactions(ff4Id: string) {
+  const { data, error } = await supabase
+    .from('payment_transactions')
+    .select('*')
+    .eq('ff4_header_id', ff4Id)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+export async function getFF4Approvals(ff4Id: string) {
+  const { data, error } = await supabase
+    .from('ff4_approvals')
+    .select('*, approver:users(full_name, email)')
+    .eq('ff4_header_id', ff4Id)
+    .order('action_date', { ascending: true })
+  if (error) throw error
+  return data || []
 }
 
 export async function getFF4Detail(ff4Number: string) {

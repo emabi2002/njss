@@ -21,8 +21,11 @@ type FF4Record = {
   status: FF4Status
   payment_date: string | null
   external_payment_reference: string | null
-  ff3: { ff3_number: string } | null
-  commitment: { commitment_number: string } | null
+  ff3_number: string | null
+  commitment_number: string | null
+  department_name: string | null
+  section_name: string | null
+  supplier_name: string | null
 }
 
 export default function FF4ListPage() {
@@ -32,10 +35,14 @@ export default function FF4ListPage() {
   const [ff4Records, setFf4Records] = useState<FF4Record[]>([])
   const [statuses, setStatuses] = useState<WorkflowStatus[]>([])
   const [stats, setStats] = useState({
-    total: 0, draft: 0, pending: 0, verified: 0, paid: 0, reconciled: 0
+    total: 0, draft: 0, submitted: 0, verified: 0, approved: 0, processed: 0, paid: 0, reconciled: 0, cancelled: 0, totalValue: 0, actualExpenditure: 0
   })
   const { can } = useAuth()
   const activeFinancialYear = new Date().getFullYear()
+  const [financialYear, setFinancialYear] = useState(activeFinancialYear)
+  const [departmentFilter, setDepartmentFilter] = useState("ALL")
+  const [sectionFilter, setSectionFilter] = useState("ALL")
+  const [supplierFilter, setSupplierFilter] = useState("ALL")
 
   const fetchFF4Records = useCallback(async () => {
     setLoading(true)
@@ -44,57 +51,45 @@ export default function FF4ListPage() {
       setStatuses((statusRows || []) as WorkflowStatus[])
 
       let query = supabase
-        .from('ff4_headers')
-        .select(`
-          id,
-          ff4_number,
-          payment_request_date,
-          payee_name,
-          payment_description,
-          gross_amount,
-          net_amount,
-          status,
-          payment_date,
-          external_payment_reference,
-          ff3:ff3_headers(ff3_number),
-          commitment:ff3_commitments(commitment_number)
-        `)
-        .eq('financial_year', activeFinancialYear)
+        .from('v_ff4_payment_register')
+        .select('*')
+        .eq('financial_year', financialYear)
         .order('created_at', { ascending: false })
 
       if (statusFilter !== 'ALL') {
         query = query.eq('status', statusFilter)
       }
+      if (departmentFilter !== 'ALL') query = query.eq('department_id', departmentFilter)
+      if (sectionFilter !== 'ALL') query = query.eq('section_id', sectionFilter)
+      if (supplierFilter !== 'ALL') query = query.eq('supplier_id', supplierFilter)
 
       const { data, error } = await query
 
       if (error) throw error
 
-      setFf4Records((data || []) as unknown as FF4Record[])
+      const all = (data || []) as unknown as FF4Record[]
+      setFf4Records(all)
 
-      // Calculate stats
-      const { data: allRecords } = await supabase
-        .from('ff4_headers')
-        .select('status')
-        .eq('financial_year', activeFinancialYear)
-
-      if (allRecords) {
-        setStats({
-          total: allRecords.length,
-          draft: allRecords.filter(r => r.status === 'DRAFT').length,
-          pending: allRecords.filter(r => r.status === 'SUBMITTED').length,
-          verified: allRecords.filter(r => r.status === 'VERIFIED').length,
-          paid: allRecords.filter(r => r.status === 'PAID').length,
-          reconciled: allRecords.filter(r => r.status === 'RECONCILED').length
-        })
-      }
+      setStats({
+        total: all.length,
+        draft: all.filter(r => r.status === 'DRAFT').length,
+        submitted: all.filter(r => r.status === 'SUBMITTED').length,
+        verified: all.filter(r => r.status === 'VERIFIED').length,
+        approved: all.filter(r => r.status === 'APPROVED').length,
+        processed: all.filter(r => r.status === 'PROCESSED').length,
+        paid: all.filter(r => r.status === 'PAID').length,
+        reconciled: all.filter(r => r.status === 'RECONCILED').length,
+        cancelled: all.filter(r => r.status === 'CANCELLED').length,
+        totalValue: all.reduce((sum, r) => sum + Number(r.net_amount || 0), 0),
+        actualExpenditure: all.filter(r => r.status === 'PAID' || r.status === 'RECONCILED').reduce((sum, r) => sum + Number(r.net_amount || 0), 0),
+      })
 
     } catch (err) {
       console.error('Error fetching FF4 records:', err)
     } finally {
       setLoading(false)
     }
-  }, [activeFinancialYear, statusFilter])
+  }, [financialYear, statusFilter, departmentFilter, sectionFilter, supplierFilter])
 
   useEffect(() => {
     // Data fetch on mount / filter change is the intended effect here.
@@ -132,13 +127,17 @@ export default function FF4ListPage() {
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 xl:grid-cols-10 gap-4">
         <StatCard label="Total" value={stats.total} />
         <StatCard label="Draft" value={stats.draft} />
-        <StatCard label="Pending" value={stats.pending} />
-        <StatCard label="Verified" value={stats.verified} />
+        <StatCard label="Submitted" value={stats.submitted} />
+        <StatCard label="Verification" value={stats.verified} />
+        <StatCard label="Approval" value={stats.approved} />
+        <StatCard label="Processed" value={stats.processed} />
         <StatCard label="Paid" value={stats.paid} />
         <StatCard label="Reconciled" value={stats.reconciled} />
+        <StatCard label="Cancelled" value={stats.cancelled} />
+        <StatCard label="Actual Exp." value={`K ${stats.actualExpenditure.toLocaleString()}`} />
       </div>
 
       {/* Info Banner */}
@@ -176,6 +175,10 @@ export default function FF4ListPage() {
             <option value="ALL">All Status</option>
             {statuses.map((status) => <option key={status.status_code} value={status.status_code}>{status.display_name}</option>)}
           </select>
+          <input type="number" value={financialYear} onChange={(e) => setFinancialYear(parseInt(e.target.value) || activeFinancialYear)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input value={departmentFilter === 'ALL' ? '' : departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value || 'ALL')} placeholder="Department ID filter" className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input value={sectionFilter === 'ALL' ? '' : sectionFilter} onChange={(e) => setSectionFilter(e.target.value || 'ALL')} placeholder="Section ID filter" className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input value={supplierFilter === 'ALL' ? '' : supplierFilter} onChange={(e) => setSupplierFilter(e.target.value || 'ALL')} placeholder="Supplier ID filter" className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <button className="px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 flex items-center gap-2">
             <Download className="h-4 w-4" />
             Export
@@ -243,12 +246,12 @@ export default function FF4ListPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3">
-                      {record.ff3?.ff3_number ? (
+                      {record.ff3_number ? (
                         <Link
-                          href={`/dashboard/ff3/${record.ff3.ff3_number}`}
+                          href={`/dashboard/ff3/${record.ff3_number}`}
                           className="text-sm text-blue-600 hover:text-blue-700"
                         >
-                          {record.ff3.ff3_number}
+                          {record.ff3_number}
                         </Link>
                       ) : (
                         <span className="text-sm text-slate-400">-</span>
@@ -292,7 +295,7 @@ export default function FF4ListPage() {
   )
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-4">
       <p className="text-xs font-medium text-slate-600 uppercase mb-1">{label}</p>

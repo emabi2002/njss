@@ -52,6 +52,10 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
   const [paymentReference, setPaymentReference] = useState("")
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0])
+  const [paymentMethodConfirm, setPaymentMethodConfirm] = useState("")
+  const [chequeNumber, setChequeNumber] = useState("")
+  const [paymentComments, setPaymentComments] = useState("")
 
   const fetchFF4Detail = useCallback(async () => {
     try {
@@ -98,7 +102,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
       fetchFF4Detail()
     } catch (err) {
       console.error('Error processing FF4:', err)
-      setError('Failed to process action. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to process action. Please try again.')
     } finally {
       setActionLoading(false)
     }
@@ -111,14 +115,20 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
     setSuccess("")
 
     try {
-      await approveFF4(header.id, 'MARK_PAID', paymentReference)
-      setSuccess(`FF4 ${header.ff4_number} has been marked as paid!`)
+      await approveFF4(header.id, 'MARK_PAID', paymentReference, paymentComments, {
+        paymentDate,
+        paymentMethod: paymentMethodConfirm || header.payment_method || undefined,
+        chequeNumber: chequeNumber || undefined,
+      })
+      setSuccess(`FF4 ${header.ff4_number} has been marked as paid and liquidated against the commitment.`)
       setShowPaymentModal(false)
       setPaymentReference("")
+      setChequeNumber("")
+      setPaymentComments("")
       fetchFF4Detail()
     } catch (err) {
       console.error('Error marking as paid:', err)
-      setError('Failed to mark as paid. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to mark as paid. Please try again.')
     } finally {
       setActionLoading(false)
     }
@@ -138,7 +148,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
       fetchFF4Detail()
     } catch (err) {
       console.error('Error cancelling FF4:', err)
-      setError('Failed to cancel. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to cancel. Please try again.')
     } finally {
       setActionLoading(false)
     }
@@ -166,7 +176,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
   }
 
   const canVerify = header.status === 'SUBMITTED' && can('ff4.verify')
-  const canApprove = header.status === 'VERIFIED' && can('ff4.process')
+  const canApprove = header.status === 'VERIFIED' && can('ff4.approve')
   const canProcess = header.status === 'APPROVED' && can('ff4.process')
   const canMarkPaid = header.status === 'PROCESSED' && can('ff4.process')
   const canReconcile = header.status === 'PAID' && can('ff4.process')
@@ -470,6 +480,22 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
                 placeholder="e.g., EFT-FY-001234"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
               />
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Payment Date *</label>
+              <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
+              <input type="text" value={paymentMethodConfirm} onChange={(e) => setPaymentMethodConfirm(e.target.value)} placeholder={header.payment_method || "e.g., EFT, Cheque"} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Cheque / Reference Number</label>
+              <input type="text" value={chequeNumber} onChange={(e) => setChequeNumber(e.target.value)} placeholder="Optional cheque or secondary reference" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Comments</label>
+              <textarea value={paymentComments} onChange={(e) => setPaymentComments(e.target.value)} rows={2} placeholder="Optional payment confirmation notes" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
             </div>
             <div className="flex items-center justify-end gap-3">
               <button

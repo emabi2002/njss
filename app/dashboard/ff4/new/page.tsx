@@ -4,20 +4,14 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Save, Send, ArrowLeft, AlertCircle, CheckCircle2, Upload, Loader2, FileText, X } from "lucide-react"
-import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
 import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadActiveUsers, loadLookup } from "@/lib/lookups"
-import { createSupplier } from "@/lib/api"
+import { createFF4Controlled, createSupplier, getPayableCommitments, type PayableCommitmentRow } from "@/lib/api"
 
-type ApprovedFF3 = {
+type PayableFF3 = PayableCommitmentRow & {
   id: string
-  ff3_number: string
-  purpose: string
-  commitment_id: string | null
-  commitment_number: string | null
   committed_amount: number
-  paid_amount: number
   remaining_balance: number
 }
 
@@ -29,8 +23,8 @@ export default function NewFF4Page() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  const [availableFF3s, setAvailableFF3s] = useState<ApprovedFF3[]>([])
-  const [selectedFF3, setSelectedFF3] = useState<ApprovedFF3 | null>(null)
+  const [availableFF3s, setAvailableFF3s] = useState<PayableFF3[]>([])
+  const [selectedFF3, setSelectedFF3] = useState<PayableFF3 | null>(null)
   const [payeeTypes, setPayeeTypes] = useState<LookupOption[]>([])
   const [paymentMethods, setPaymentMethods] = useState<LookupOption[]>([])
   const [suppliers, setSuppliers] = useState<LookupOption[]>([])
@@ -66,11 +60,12 @@ export default function NewFF4Page() {
 
   const fetchApprovedFF3s = useCallback(async () => {
     try {
-      const [payeeTypeRows, paymentMethodRows, supplierRows, userRows] = await Promise.all([
+      const [payeeTypeRows, paymentMethodRows, supplierRows, userRows, commitmentRows] = await Promise.all([
         loadLookup('payee_types'),
         loadLookup('payment_methods'),
         loadLookup('suppliers', { order: 'supplier_name' }),
         loadActiveUsers(),
+        getPayableCommitments(activeFinancialYear),
       ])
       setPayeeTypes(payeeTypeRows)
       setPaymentMethods(paymentMethodRows)
@@ -81,46 +76,12 @@ export default function NewFF4Page() {
         payee_type_id: current.payee_type_id || payeeTypeRows.find((row) => row.code === current.payee_type)?.id || "",
         payment_method_id: current.payment_method_id || paymentMethodRows.find((row) => row.code === current.payment_method)?.id || "",
       }))
-
-      // Fetch approved FF3s with their commitments
-      const { data: ff3s, error: ff3Error } = await supabase
-        .from('ff3_headers')
-        .select('id, ff3_number, purpose')
-        .eq('status', 'APPROVED')
-        .eq('financial_year', activeFinancialYear)
-
-      if (ff3Error) throw ff3Error
-
-      // Fetch commitments for these FF3s
-      const ff3Ids = ff3s?.map(f => f.id) || []
-
-      if (ff3Ids.length > 0) {
-        const { data: commitments, error: comError } = await supabase
-          .from('ff3_commitments')
-          .select('id, commitment_number, ff3_header_id, committed_amount, paid_amount')
-          .in('ff3_header_id', ff3Ids)
-          .in('status', ['ACTIVE', 'PARTIALLY_PAID'])
-
-        if (comError) throw comError
-
-        // Combine FF3s with their commitments
-        const ff3WithCommitments = ff3s?.map(ff3 => {
-          const commitment = commitments?.find(c => c.ff3_header_id === ff3.id)
-          return {
-            id: ff3.id,
-            ff3_number: ff3.ff3_number,
-            purpose: ff3.purpose,
-            commitment_id: commitment?.id || null,
-            commitment_number: commitment?.commitment_number || null,
-            committed_amount: commitment?.committed_amount || 0,
-            paid_amount: commitment?.paid_amount || 0,
-            remaining_balance: (commitment?.committed_amount || 0) - (commitment?.paid_amount || 0)
-          }
-        }).filter(f => f.remaining_balance > 0) || []
-
-        setAvailableFF3s(ff3WithCommitments)
-      }
-
+      setAvailableFF3s(commitmentRows.map((row) => ({
+        ...row,
+        id: row.ff3_header_id,
+        committed_amount: row.current_commitment,
+        remaining_balance: row.available_for_ff4,
+      })))
     } catch (err) {
       console.error('Error fetching approved FF3s:', err)
     } finally {
@@ -140,7 +101,10 @@ export default function NewFF4Page() {
     setFormData(prev => ({
       ...prev,
       ff3_header_id: ff3Id,
-      commitment_id: ff3?.commitment_id || ""
+      commitment_id: ff3?.commitment_id || "",
+      supplier_id: ff3?.supplier_id || prev.supplier_id,
+      supplier_code: ff3?.supplier_code || prev.supplier_code,
+      payee_name: ff3?.supplier_name || prev.payee_name,
     }))
   }
 
@@ -179,8 +143,8 @@ export default function NewFF4Page() {
   const netAmount = formData.gross_amount - formData.tax_amount - formData.deductions
 
   const hasControlledPayee = formData.payee_type === 'EMPLOYEE' ? Boolean(formData.payee_user_id) : Boolean(formData.supplier_id)
-  const canSubmit = formData.ff3_header_id && hasControlledPayee && formData.gross_amount > 0 &&
-    (selectedFF3 ? netAmount <= selectedFF3.remaining_balance : true)
+  const canSubmit = Boolean(formData.ff3_header_id && formData.commitment_id && hasControlledPayee && netAmount > 0 &&
+    (selectedFF3 ? netAmount <= selectedFF3.remaining_balance : true))
 
   const handleSaveDraft = async () => {
     await saveFF4('DRAFT')
@@ -196,37 +160,38 @@ export default function NewFF4Page() {
     setSubmitting(true)
 
     try {
-      const { data: header, error: headerError } = await supabase
-        .from('ff4_headers')
-        .insert({
-          financial_year: activeFinancialYear,
-          ff3_header_id: formData.ff3_header_id || null,
-          commitment_id: formData.commitment_id || null,
-          payee_type: formData.payee_type,
-          payee_type_id: formData.payee_type_id || null,
-          payee_name: formData.payee_name,
-          supplier_id: formData.supplier_id || null,
-          payee_user_id: formData.payee_user_id || null,
-          supplier_code: formData.supplier_code || null,
-          invoice_number: formData.invoice_number || null,
-          invoice_date: formData.invoice_date || null,
-          claim_reference: formData.claim_reference || null,
-          payment_description: formData.payment_description || null,
-          gross_amount: formData.gross_amount,
-          tax_amount: formData.tax_amount,
-          deductions: formData.deductions,
-          payment_method: formData.payment_method,
-          payment_method_id: formData.payment_method_id || null,
-          external_payment_reference: formData.external_payment_reference || null,
-          status: status,
-          submitted_date: status === 'SUBMITTED' ? new Date().toISOString() : null
-        })
-        .select()
-        .single()
+      const attachments = [
+        invoiceFile && { file_name: invoiceFile.name, file_type: invoiceFile.type, file_url: invoiceFile.url, attachment_type: 'INVOICE' },
+        receiptFile && { file_name: receiptFile.name, file_type: receiptFile.type, file_url: receiptFile.url, attachment_type: 'SUPPORTING_DOCUMENT' },
+      ].filter(Boolean) as Array<{ file_name: string; file_type: string; file_url: string; attachment_type: string }>
 
-      if (headerError) throw headerError
+      const result = await createFF4Controlled({
+        ff3_header_id: formData.ff3_header_id,
+        commitment_id: formData.commitment_id,
+        payee_type: formData.payee_type,
+        payee_type_id: formData.payee_type_id || null,
+        payee_name: formData.payee_name,
+        supplier_id: formData.supplier_id || null,
+        payee_user_id: formData.payee_user_id || null,
+        supplier_code: formData.supplier_code || null,
+        invoice_number: formData.invoice_number || null,
+        invoice_date: formData.invoice_date || null,
+        claim_reference: formData.claim_reference || null,
+        payment_description: formData.payment_description || null,
+        gross_amount: formData.gross_amount,
+        tax_amount: formData.tax_amount,
+        deductions: formData.deductions,
+        payment_method: formData.payment_method,
+        payment_method_id: formData.payment_method_id || null,
+        external_payment_reference: formData.external_payment_reference || null,
+        remarks: formData.remarks || null,
+        is_partial_payment: selectedFF3 ? netAmount < selectedFF3.outstanding_commitment : false,
+        attachments,
+      }, status === 'SUBMITTED')
 
-      setSuccess(`FF4 ${header.ff4_number} ${status === 'DRAFT' ? 'saved as draft' : 'submitted for verification'}!`)
+      const header = result.header as { ff4_number?: string } | undefined
+
+      setSuccess(`FF4 ${header?.ff4_number || ''} ${status === 'DRAFT' ? 'saved as draft' : 'submitted for verification'}!`)
 
       setTimeout(() => {
         router.push('/dashboard/ff4')
@@ -287,11 +252,11 @@ export default function NewFF4Page() {
         <div className="flex items-start gap-3">
           <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5" />
           <div>
-            <p className="font-medium text-green-900">FF4 Must Link to Approved FF3</p>
+            <p className="font-medium text-green-900">FF4 Must Link to an Existing Commitment</p>
             <p className="text-sm text-green-700 mt-1">
               {availableFF3s.length > 0
-                ? `${availableFF3s.length} approved FF3(s) with available balance found.`
-                : 'No approved FF3s with available balance. Please approve an FF3 first.'}
+                ? `${availableFF3s.length} commitment(s) with available balances found.`
+                : 'No active commitments with available balance. Approve an FF3 commitment first.'}
             </p>
           </div>
         </div>
@@ -303,17 +268,17 @@ export default function NewFF4Page() {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">
-              Select Approved FF3 <span className="text-red-500">*</span>
+              Select FF3 Commitment <span className="text-red-500">*</span>
             </label>
             <select
               value={formData.ff3_header_id}
               onChange={(e) => handleFF3Select(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">Select an approved FF3...</option>
+              <option value="">Select an approved FF3 commitment...</option>
               {availableFF3s.map((ff3) => (
                 <option key={ff3.id} value={ff3.id}>
-                  {ff3.ff3_number} - {ff3.purpose} (Balance: K {ff3.remaining_balance.toLocaleString()})
+                  {ff3.ff3_number} - {ff3.purpose} ({ff3.commitment_number}, Balance: K {ff3.remaining_balance.toLocaleString()})
                 </option>
               ))}
             </select>
@@ -322,22 +287,26 @@ export default function NewFF4Page() {
           {selectedFF3 && (
             <div className="bg-slate-50 rounded-lg p-4">
               <h3 className="font-medium text-slate-900 mb-3">Commitment Details</h3>
-              <div className="grid md:grid-cols-4 gap-4">
+              <div className="grid md:grid-cols-5 gap-4">
                 <div>
                   <p className="text-xs text-slate-600">Commitment Number</p>
                   <p className="font-medium text-slate-900">{selectedFF3.commitment_number || 'Pending'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-600">Committed Amount</p>
-                  <p className="font-medium text-slate-900">K {selectedFF3.committed_amount.toLocaleString()}</p>
+                  <p className="font-medium text-slate-900">K {selectedFF3.current_commitment.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600">Already Paid</p>
-                  <p className="font-medium text-green-600">K {selectedFF3.paid_amount.toLocaleString()}</p>
+                  <p className="text-xs text-slate-600">Outstanding Commitment</p>
+                  <p className="font-medium text-amber-600">K {selectedFF3.outstanding_commitment.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600">Available Balance</p>
-                  <p className="font-medium text-amber-600">K {selectedFF3.remaining_balance.toLocaleString()}</p>
+                  <p className="text-xs text-slate-600">Pending FF4s</p>
+                  <p className="font-medium text-slate-900">K {selectedFF3.pending_ff4_amount.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-600">Balance After This FF4</p>
+                  <p className="font-medium text-png-red">K {Math.max(selectedFF3.remaining_balance - netAmount, 0).toLocaleString()}</p>
                 </div>
               </div>
             </div>
@@ -492,6 +461,10 @@ export default function NewFF4Page() {
               placeholder="To be filled after payment is processed"
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Remarks</label>
+            <textarea value={formData.remarks} onChange={(e) => setFormData({ ...formData, remarks: e.target.value })} rows={2} placeholder="Optional processing notes" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
       </div>
