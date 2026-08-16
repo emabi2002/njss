@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
+import { requirePermission } from '@/lib/rbac/server'
 
 function supabaseProjectRef() {
   try {
@@ -10,12 +11,15 @@ function supabaseProjectRef() {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const guard = await requirePermission(request, ['operations.view', 'operations.manage', 'settings.manage', 'all'])
+  if (guard.response) return guard.response
+
   return NextResponse.json({
-    commitSha: process.env.NEXT_PUBLIC_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || 'local',
+    commitSha: process.env.NEXT_PUBLIC_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || 'Not Available',
     buildTime: process.env.NEXT_PUBLIC_BUILD_TIME || process.env.BUILD_TIME || null,
     environment: process.env.NEXT_PUBLIC_APP_ENV || process.env.NODE_ENV || 'unknown',
     supabaseProjectRef: supabaseProjectRef(),
-    phase: 'Phase 1 funding remediation',
+    phase: 'Phase 6 production-support readiness',
   })
 }
