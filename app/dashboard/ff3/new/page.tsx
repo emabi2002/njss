@@ -7,7 +7,7 @@ import { Save, Send, Plus, Trash2, AlertCircle, CheckCircle2, ArrowLeft, Loader2
 import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
 import { checkBudgetAndNotify, notifyFF3Submitted } from "@/lib/notifications"
-import { approveFF3, checkBudgetAvailability } from "@/lib/api"
+import { approveFF3, checkBudgetAvailability, createSupplier } from "@/lib/api"
 import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadLookup } from "@/lib/lookups"
 
@@ -60,6 +60,10 @@ export default function NewFF3Page() {
     urgency_level_id: "",
     procurement_method: "QUOTATION",
     procurement_method_id: "",
+    supplier_not_required: false,
+    supplier_not_required_reason: "",
+    supplier_not_required_expenditure_type: "",
+    supplier_not_required_comments: "",
   })
 
   const [items, setItems] = useState([
@@ -286,8 +290,11 @@ export default function NewFF3Page() {
   const totalEstimate = items.reduce((sum, item) => sum + (item.quantity * item.estimated_unit_price), 0)
   const effectiveAvailable = budgetCheck?.hasAllocation ? budgetCheck.available : budgetInfo.available_balance
   const selectedCode = expenseCodes.find(c => c.id === formData.expense_code_registry_id)
+  const selectedQuotation = quotations.find(q => q.is_selected)
   const quotationCount = quotations.filter(q => q.supplier_name && q.quotation_amount > 0).length
-  const canSubmit = quotationCount >= 3 && totalEstimate > 0 && formData.purpose && formData.justification && formData.department_id && formData.section_id
+  const supplierExceptionComplete = formData.supplier_not_required && formData.supplier_not_required_reason.trim() && formData.supplier_not_required_expenditure_type.trim()
+  const supplierRequirementMet = formData.supplier_not_required ? supplierExceptionComplete : Boolean(selectedQuotation?.supplier_id)
+  const canSubmit = (formData.supplier_not_required || quotationCount >= 3) && supplierRequirementMet && totalEstimate > 0 && formData.purpose && formData.justification && formData.department_id && formData.section_id
 
   const handleSaveDraft = async () => {
     await saveFF3('DRAFT')
@@ -345,6 +352,18 @@ export default function NewFF3Page() {
         }
       }
 
+      const selectedQuotation = quotations.find(q => q.is_selected)
+      if (!formData.supplier_not_required && !selectedQuotation?.supplier_id) {
+        setError('Select an approved supplier quotation before submitting an FF3 for supplier-based expenditure.')
+        setSubmitting(false)
+        return
+      }
+      if (formData.supplier_not_required && (!formData.supplier_not_required_reason.trim() || !formData.supplier_not_required_expenditure_type.trim())) {
+        setError('Supplier-not-required FF3s need an expenditure type and authorized reason.')
+        setSubmitting(false)
+        return
+      }
+
       // Insert FF3 header
       const { data: header, error: headerError } = await supabase
         .from('ff3_headers')
@@ -367,6 +386,12 @@ export default function NewFF3Page() {
           procurement_method: formData.procurement_method,
           procurement_method_id: formData.procurement_method_id || null,
           status: 'DRAFT',
+          selected_supplier_id: formData.supplier_not_required ? null : selectedQuotation?.supplier_id || null,
+          selected_supplier_name: formData.supplier_not_required ? 'SUPPLIER_NOT_REQUIRED' : selectedQuotation?.supplier_name || null,
+          supplier_not_required: formData.supplier_not_required,
+          supplier_not_required_reason: formData.supplier_not_required ? formData.supplier_not_required_reason : null,
+          supplier_not_required_expenditure_type: formData.supplier_not_required ? formData.supplier_not_required_expenditure_type : null,
+          supplier_not_required_comments: formData.supplier_not_required ? formData.supplier_not_required_comments || null : null,
           total_estimated_amount: totalEstimate,
           is_within_budget: status === 'SUBMITTED' ? true : totalEstimate <= (latestBudget?.available ?? budgetInfo.available_balance),
           submitted_date: status === 'SUBMITTED' ? new Date().toISOString() : null
@@ -736,12 +761,47 @@ export default function NewFF3Page() {
         </div>
       </div>
 
-      {/* Section D: Quotations (Minimum 3 Required) */}
+      {/* Section D: Supplier / Service Provider Control */}
+      <div className="bg-white rounded-lg border border-slate-200 p-6">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Section D: Supplier / Service Provider Control</h2>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={formData.supplier_not_required}
+              onChange={(event) => setFormData({ ...formData, supplier_not_required: event.target.checked })}
+              className="mt-1 h-4 w-4 rounded border-slate-300 text-png-red"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-slate-900">Supplier not required for this expenditure</span>
+              <span className="block text-sm text-slate-600">Use only for legitimate non-supplier expenditure. Do not create fake GENERAL, N/A, or placeholder suppliers.</span>
+            </span>
+          </label>
+          {formData.supplier_not_required && (
+            <div className="mt-4 grid md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Expenditure Type <span className="text-red-500">*</span></label>
+                <input value={formData.supplier_not_required_expenditure_type} onChange={(event) => setFormData({ ...formData, supplier_not_required_expenditure_type: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="e.g. Internal statutory charge" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Authorized Reason <span className="text-red-500">*</span></label>
+                <input value={formData.supplier_not_required_reason} onChange={(event) => setFormData({ ...formData, supplier_not_required_reason: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Why no supplier is required" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Comments</label>
+                <input value={formData.supplier_not_required_comments} onChange={(event) => setFormData({ ...formData, supplier_not_required_comments: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Optional approval notes" />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Section E: Quotations (Minimum 3 Required) */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Section D: Quotations <span className="text-red-500">*</span></h2>
-            <p className="text-sm text-slate-600 mt-1">Minimum 3 quotations required</p>
+            <h2 className="text-lg font-semibold text-slate-900">Section E: Quotations <span className="text-red-500">*</span></h2>
+            <p className="text-sm text-slate-600 mt-1">Minimum 3 quotations required for supplier-based expenditure. Select the quotation whose approved supplier will be committed.</p>
           </div>
           <button
             onClick={addQuotation}
@@ -774,7 +834,21 @@ export default function NewFF3Page() {
                 </label>
               </div>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-                <LookupSelect label="Supplier Name" required value={quot.supplier_id} options={suppliers} placeholder="Search supplier" canAdd addTable="suppliers" addLabel="+ Add New Supplier" addFields={[{ name: 'supplier_code', label: 'Supplier Code', required: true }, { name: 'supplier_name', label: 'Supplier Name', required: true }, { name: 'trading_name', label: 'Trading Name' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }]} addPayload={(form) => ({ ...form, supplier_type: 'SUPPLIER', is_active: true })} onRefresh={async () => setSuppliers(await loadLookup('suppliers', { order: 'supplier_name' }))} onChange={(value, option) => {
+                <LookupSelect label="Supplier Name" required value={quot.supplier_id} options={suppliers} placeholder="Search approved supplier" canAdd addTable="suppliers" addLabel="+ Register Supplier" emptyLabel="No approved suppliers found. Register a supplier, then submit/verify/approve it in Supplier Management before final FF3 approval." addFields={[{ name: 'legal_name', label: 'Legal Name', required: true }, { name: 'trading_name', label: 'Trading Name' }, { name: 'supplier_type', label: 'Supplier Type', placeholder: 'GOODS_SUPPLIER or SERVICE_PROVIDER' }, { name: 'ipa_registration_number', label: 'IPA Registration Number' }, { name: 'tin', label: 'TIN' }, { name: 'primary_contact_name', label: 'Primary Contact' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }]} createVia={async (form) => {
+                  const result = await createSupplier({
+                    legal_name: form.legal_name,
+                    trading_name: form.trading_name,
+                    supplier_type: form.supplier_type || 'GOODS_SUPPLIER',
+                    ipa_registration_number: form.ipa_registration_number,
+                    tin: form.tin,
+                    primary_contact_name: form.primary_contact_name,
+                    phone: form.phone,
+                    email: form.email,
+                  })
+                  if (result.requires_review) throw new Error('POSSIBLE DUPLICATE SUPPLIER. Review Supplier Management before continuing.')
+                  if (!result.supplier) throw new Error('Supplier registration did not return a supplier record.')
+                  return { ...result.supplier, id: result.supplier.id, code: result.supplier.supplier_code, name: result.supplier.supplier_name }
+                }} onRefresh={async () => setSuppliers(await loadLookup('suppliers', { order: 'supplier_name' }))} onChange={(value, option) => {
                   const newQuots = [...quotations]
                   newQuots[index].supplier_id = value
                   newQuots[index].supplier_name = option?.name || ""

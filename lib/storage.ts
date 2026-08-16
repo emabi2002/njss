@@ -5,6 +5,7 @@ export const BUCKETS = {
   FF3_ATTACHMENTS: 'ff3-attachments',
   FF4_ATTACHMENTS: 'ff4-attachments',
   QUOTATIONS: 'quotations',
+  SUPPLIER_DOCUMENTS: 'supplier-documents',
 } as const
 
 export type BucketName = typeof BUCKETS[keyof typeof BUCKETS]

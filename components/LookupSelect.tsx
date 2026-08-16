@@ -34,6 +34,7 @@ type LookupSelectProps = {
   addTable?: string
   addFields?: AddField[]
   addPayload?: (form: Record<string, string>) => Record<string, unknown>
+  createVia?: (form: Record<string, string>) => Promise<LookupOption>
   onCreated?: (option: LookupOption) => void
   onRefresh?: () => Promise<void> | void
   className?: string
@@ -61,6 +62,7 @@ export function LookupSelect({
     { name: "name", label: "Name", required: true },
   ],
   addPayload,
+  createVia,
   onCreated,
   onRefresh,
   className = "",
@@ -105,14 +107,19 @@ export function LookupSelect({
     }
     setSaving(true)
     try {
-      const payload = addPayload ? addPayload(form) : { ...form, is_active: true }
-      const { data, error: insertError } = await supabase.from(addTable).insert(payload).select("*").single()
-      if (insertError) throw insertError
-      const created: LookupOption = {
-        id: data.id,
-        code: data.code || data.supplier_code || null,
-        name: data.name || data.supplier_name || data.full_name || data.email || "New record",
-        ...data,
+      let created: LookupOption
+      if (createVia) {
+        created = await createVia(form)
+      } else {
+        const payload = addPayload ? addPayload(form) : { ...form, is_active: true }
+        const { data, error: insertError } = await supabase.from(addTable).insert(payload).select("*").single()
+        if (insertError) throw insertError
+        created = {
+          id: data.id,
+          code: data.code || data.supplier_code || null,
+          name: data.name || data.supplier_name || data.full_name || data.email || "New record",
+          ...data,
+        }
       }
       await onRefresh?.()
       onCreated?.(created)
