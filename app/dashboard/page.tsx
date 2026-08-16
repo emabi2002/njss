@@ -10,11 +10,16 @@ import {
 } from "recharts"
 
 type BudgetSummary = {
-  totalBudget: number
-  quarterlyReleased: number
-  committedAmount: number
+  approvedBudget: number
+  fundedAmount: number
+  releasedAmount: number
+  pendingFF3: number
+  outstandingCommitments: number
   actualExpenditure: number
   availableBalance: number
+  unfundedBudget: number
+  unreleasedFunding: number
+  projectedAvailableAfterPending: number
 }
 
 type PendingFF3 = {
@@ -49,17 +54,37 @@ type BudgetPreparationStats = {
   approvedValue: number
 }
 
-type AllocationRow = { original_budget?: number; supplemental_budget?: number }
-type ReleaseRow = { quarter?: number; released_amount?: number }
-type CommitmentRow = { committed_amount?: number; paid_amount?: number; status?: string }
-type BudgetCodeRow = {
+type ManagementSummaryRow = {
+  financial_year: number
+  approved_budget?: number
+  funded_amount?: number
+  released_amount?: number
+  pending_ff3?: number
+  outstanding_commitments?: number
+  actual_expenditure?: number
+  available_balance?: number
+  unfunded_budget?: number
+  unreleased_funding?: number
+  projected_available_after_pending?: number
+  ff3_awaiting_action?: number
+  ff4_awaiting_verification?: number
+  ff4_awaiting_approval?: number
+  ff4_processed_awaiting_payment?: number
+  paid_awaiting_reconciliation?: number
+}
+
+type CostCentrePositionRow = {
   cost_centre_code?: string | null
   cost_centre_name?: string | null
   section_name?: string | null
-  revised_budget?: number
-  committed_amount?: number
-  actual_expenditure?: number
+  approved_budget?: number
+  available_balance?: number
 }
+
+type QuarterlyExpenditureRow = { quarter?: number; actual_expenditure?: number }
+type FinancialYearRow = { year?: number }
+
+type ReleaseRow = { quarter?: number; released_amount?: number }
 type BudgetSubmissionRow = { status?: string; total_proposed_budget?: number }
 type StatusRow = { status?: string }
 
@@ -104,15 +129,22 @@ async function withDashboardTimeout<T extends DashboardQueryResult>(
 }
 
 export default function DashboardPage() {
-  const activeFinancialYear = new Date().getFullYear()
+  const currentYear = new Date().getFullYear()
   const offlineQuarterlyData = ['Q1', 'Q2', 'Q3', 'Q4'].map((quarter) => ({ quarter, released: 0, spent: 0 }))
+  const [selectedFinancialYear, setSelectedFinancialYear] = useState(currentYear)
+  const [availableFinancialYears, setAvailableFinancialYears] = useState<number[]>([currentYear])
   const [loading, setLoading] = useState(isSupabaseNetworkEnabled)
   const [budgetSummary, setBudgetSummary] = useState<BudgetSummary>({
-    totalBudget: 0,
-    quarterlyReleased: 0,
-    committedAmount: 0,
+    approvedBudget: 0,
+    fundedAmount: 0,
+    releasedAmount: 0,
+    pendingFF3: 0,
+    outstandingCommitments: 0,
     actualExpenditure: 0,
-    availableBalance: 0
+    availableBalance: 0,
+    unfundedBudget: 0,
+    unreleasedFunding: 0,
+    projectedAvailableAfterPending: 0,
   })
   const [pendingFF3s, setPendingFF3s] = useState<PendingFF3[]>([])
   const [ff3Stats, setFf3Stats] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 })
@@ -137,29 +169,34 @@ export default function DashboardPage() {
 
     async function fetchDashboardData() {
       try {
-        const [allocationsRes, releasesRes, commitmentsRes, codeRowsRes, budgetSubmissionsRes, pendingRes, allFF3sRes, allFF4sRes] = await Promise.all([
+        const [yearsRes, summaryRes, releasesRes, quarterlyExpenditureRes, costCentreRes, budgetSubmissionsRes, pendingRes, allFF3sRes, allFF4sRes] = await Promise.all([
           withDashboardTimeout(
-            supabase.from('budget_allocations').select('original_budget, supplemental_budget').eq('financial_year', activeFinancialYear).eq('is_active', true),
+            supabase.from('financial_years').select('year').order('year', { ascending: false }),
             { data: [] },
-            'budget_allocations',
+            'financial_years',
           ),
           withDashboardTimeout(
-            supabase.from('quarterly_releases').select('quarter, released_amount').eq('financial_year', activeFinancialYear).order('quarter'),
+            supabase.from('v_management_financial_summary').select('*').eq('financial_year', selectedFinancialYear),
+            { data: [] },
+            'v_management_financial_summary',
+          ),
+          withDashboardTimeout(
+            supabase.from('quarterly_releases').select('quarter, released_amount').eq('financial_year', selectedFinancialYear).order('quarter'),
             { data: [] },
             'quarterly_releases',
           ),
           withDashboardTimeout(
-            supabase.from('ff3_commitments').select('committed_amount, paid_amount, status').eq('financial_year', activeFinancialYear),
+            supabase.from('v_quarterly_expenditure_summary').select('quarter, actual_expenditure').eq('financial_year', selectedFinancialYear),
             { data: [] },
-            'ff3_commitments',
+            'v_quarterly_expenditure_summary',
           ),
           withDashboardTimeout(
-            supabase.from('v_budget_by_code').select('cost_centre_code, cost_centre_name, section_name, revised_budget, committed_amount, actual_expenditure').eq('financial_year', activeFinancialYear),
+            supabase.from('v_cost_centre_financial_position').select('cost_centre_code, cost_centre_name, section_name, approved_budget, available_balance').eq('financial_year', selectedFinancialYear),
             { data: [] },
-            'v_budget_by_code',
+            'v_cost_centre_financial_position',
           ),
           withDashboardTimeout(
-            supabase.from('divisional_budget_submissions').select('status, total_proposed_budget').eq('budget_year', activeFinancialYear),
+            supabase.from('divisional_budget_submissions').select('status, total_proposed_budget').eq('budget_year', selectedFinancialYear),
             { data: [] },
             'divisional_budget_submissions',
           ),
@@ -167,6 +204,7 @@ export default function DashboardPage() {
             supabase
               .from('ff3_headers')
               .select('ff3_number, purpose, total_estimated_amount, status, urgency_level, created_at, section:sections(name)')
+              .eq('financial_year', selectedFinancialYear)
               .in('status', ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'])
               .order('created_at', { ascending: false })
               .limit(5),
@@ -174,64 +212,63 @@ export default function DashboardPage() {
             'pending_ff3_headers',
           ),
           withDashboardTimeout(
-            supabase.from('ff3_headers').select('status').eq('financial_year', activeFinancialYear),
+            supabase.from('ff3_headers').select('status').eq('financial_year', selectedFinancialYear),
             { data: [] },
             'ff3_stats',
           ),
           withDashboardTimeout(
-            supabase.from('ff4_headers').select('status').eq('financial_year', activeFinancialYear),
+            supabase.from('ff4_headers').select('status').eq('financial_year', selectedFinancialYear),
             { data: [] },
             'ff4_stats',
           ),
         ])
 
-        const allocations = (allocationsRes.data || []) as AllocationRow[]
+        const financialYears = (yearsRes.data || []) as FinancialYearRow[]
+        const managementSummary = ((summaryRes.data || []) as ManagementSummaryRow[])[0]
         const releases = (releasesRes.data || []) as ReleaseRow[]
-        const commitments = (commitmentsRes.data || []) as CommitmentRow[]
-        const codeRows = (codeRowsRes.data || []) as BudgetCodeRow[]
+        const quarterlyExpenditureRows = (quarterlyExpenditureRes.data || []) as QuarterlyExpenditureRow[]
+        const costCentreRows = (costCentreRes.data || []) as CostCentrePositionRow[]
         const budgetSubmissions = (budgetSubmissionsRes.data || []) as BudgetSubmissionRow[]
         const pending = (pendingRes.data || []) as PendingFF3[]
         const allFF3s = (allFF3sRes.data || []) as StatusRow[]
         const allFF4s = (allFF4sRes.data || []) as StatusRow[]
 
-        const totalBudget = allocations.reduce((sum, a) => sum + (a.original_budget || 0) + (a.supplemental_budget || 0), 0)
-        const quarterlyReleased = releases.reduce((sum, r) => sum + (r.released_amount || 0), 0)
-        const committedAmount = commitments.reduce((sum, c) => sum + ((c.committed_amount || 0) - (c.paid_amount || 0)), 0)
-        const actualExpenditure = commitments.reduce((sum, c) => sum + (c.paid_amount || 0), 0)
-        const availableBalance = quarterlyReleased - committedAmount - actualExpenditure
+        const yearValues = Array.from(new Set([currentYear, selectedFinancialYear, ...financialYears.map((row) => row.year).filter((year): year is number => typeof year === 'number')])).sort((a, b) => b - a)
+        setAvailableFinancialYears(yearValues)
 
         setBudgetSummary({
-          totalBudget,
-          quarterlyReleased,
-          committedAmount,
-          actualExpenditure,
-          availableBalance
+          approvedBudget: managementSummary?.approved_budget || 0,
+          fundedAmount: managementSummary?.funded_amount || 0,
+          releasedAmount: managementSummary?.released_amount || 0,
+          pendingFF3: managementSummary?.pending_ff3 || 0,
+          outstandingCommitments: managementSummary?.outstanding_commitments || 0,
+          actualExpenditure: managementSummary?.actual_expenditure || 0,
+          availableBalance: managementSummary?.available_balance || 0,
+          unfundedBudget: managementSummary?.unfunded_budget || 0,
+          unreleasedFunding: managementSummary?.unreleased_funding || 0,
+          projectedAvailableAfterPending: managementSummary?.projected_available_after_pending || 0,
         })
 
         const quarterNames = ['Q1', 'Q2', 'Q3', 'Q4']
         const qData = quarterNames.map((q, i) => {
-          const release = releases.find((r) => r.quarter === i + 1)
-          return {
-            quarter: q,
-            released: release?.released_amount || 0,
-            spent: commitments
-              .filter((commitment) => commitment.status !== 'CANCELLED')
-              .reduce((sum, commitment) => sum + (commitment.paid_amount || 0), 0)
-          }
+          const quarterNumber = i + 1
+          const released = releases
+            .filter((release) => release.quarter === quarterNumber)
+            .reduce((sum, release) => sum + (release.released_amount || 0), 0)
+          const spent = quarterlyExpenditureRows
+            .filter((expenditure) => expenditure.quarter === quarterNumber)
+            .reduce((sum, expenditure) => sum + (expenditure.actual_expenditure || 0), 0)
+          return { quarter: q, released, spent }
         })
         setQuarterlyData(qData)
 
-        const centreMap = new Map<string, { approved: number; used: number }>()
-        ;(codeRows || []).forEach((r) => {
-          const key = (r.cost_centre_code as string) || (r.section_name as string) || 'Unassigned'
-          const e = centreMap.get(key) || { approved: 0, used: 0 }
-          e.approved += (r.revised_budget as number) || 0
-          e.used += ((r.committed_amount as number) || 0) + ((r.actual_expenditure as number) || 0)
-          centreMap.set(key, e)
-        })
         setCentreSpend(
-          Array.from(centreMap.entries())
-            .map(([name, v]) => ({ name, approved: v.approved, available: v.approved - v.used }))
+          costCentreRows
+            .map((row) => ({
+              name: row.cost_centre_code || row.cost_centre_name || row.section_name || 'Unassigned',
+              approved: row.approved_budget || 0,
+              available: row.available_balance || 0,
+            }))
             .sort((a, b) => b.approved - a.approved)
             .slice(0, 6)
         )
@@ -264,8 +301,8 @@ export default function DashboardPage() {
 
         setFf4Stats({
           total: allFF4s.length,
-          pending: allFF4s.filter(f => !!f.status && ['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED'].includes(f.status)).length,
-          paid: allFF4s.filter(f => f.status === 'PAID').length,
+          pending: (managementSummary?.ff4_awaiting_verification || 0) + (managementSummary?.ff4_awaiting_approval || 0) + (managementSummary?.ff4_processed_awaiting_payment || 0),
+          paid: managementSummary?.paid_awaiting_reconciliation || allFF4s.filter(f => f.status === 'PAID').length,
           reconciled: allFF4s.filter(f => f.status === 'RECONCILED').length
         })
 
@@ -277,13 +314,13 @@ export default function DashboardPage() {
     }
 
     fetchDashboardData()
-  }, [activeFinancialYear])
+  }, [currentYear, selectedFinancialYear])
 
   const budgetPieData = [
     { name: 'Available', value: budgetSummary.availableBalance },
-    { name: 'Committed', value: budgetSummary.committedAmount },
-    { name: 'Spent', value: budgetSummary.actualExpenditure },
-    { name: 'Unreleased', value: budgetSummary.totalBudget - budgetSummary.quarterlyReleased },
+    { name: 'Outstanding Commitments', value: budgetSummary.outstandingCommitments },
+    { name: 'Actual Expenditure', value: budgetSummary.actualExpenditure },
+    { name: 'Unreleased Funding', value: budgetSummary.unreleasedFunding },
   ].filter(d => d.value > 0)
 
   const ff3PieData = [
@@ -305,49 +342,82 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-slate-600 mt-1">Financial Year {activeFinancialYear} Overview</p>
+          <p className="text-slate-600 mt-1">Financial Year {selectedFinancialYear} Overview</p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-slate-600">
-          <BarChart3 className="h-4 w-4" />
-          Last updated: {new Date().toLocaleString('en-GB')}
+        <div className="flex items-center gap-3 text-sm text-slate-600">
+          <label className="flex items-center gap-2">
+            <span className="font-medium text-slate-700">Financial Year</span>
+            <select
+              value={selectedFinancialYear}
+              onChange={(event) => setSelectedFinancialYear(Number(event.target.value))}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-png-red"
+            >
+              {availableFinancialYears.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </label>
+          <div className="hidden sm:flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            Last updated: {new Date().toLocaleString('en-GB')}
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <MetricCard
-          title="Total Budget"
-          value={`K ${budgetSummary.totalBudget.toLocaleString()}`}
-          subtitle="Original + Supplemental"
+          title="Approved Budget"
+          value={`K ${budgetSummary.approvedBudget.toLocaleString()}`}
+          subtitle="Authorised budget lines"
           icon={<Wallet className="h-5 w-5" />}
           tone="maroon"
         />
         <MetricCard
-          title="Released"
-          value={`K ${budgetSummary.quarterlyReleased.toLocaleString()}`}
-          subtitle={`${((budgetSummary.quarterlyReleased / budgetSummary.totalBudget) * 100 || 0).toFixed(0)}% of budget`}
+          title="Funded Amount"
+          value={`K ${budgetSummary.fundedAmount.toLocaleString()}`}
+          subtitle={`${((budgetSummary.fundedAmount / budgetSummary.approvedBudget) * 100 || 0).toFixed(0)}% of approved budget`}
           icon={<TrendingUp className="h-5 w-5" />}
           tone="gold"
         />
         <MetricCard
-          title="Committed"
-          value={`K ${budgetSummary.committedAmount.toLocaleString()}`}
-          subtitle="Active commitments"
+          title="Released Amount"
+          value={`K ${budgetSummary.releasedAmount.toLocaleString()}`}
+          subtitle={`${((budgetSummary.releasedAmount / budgetSummary.fundedAmount) * 100 || 0).toFixed(0)}% of funded amount`}
+          icon={<CheckCircle2 className="h-5 w-5" />}
+          tone="green"
+        />
+        <MetricCard
+          title="Pending FF3"
+          value={`K ${budgetSummary.pendingFF3.toLocaleString()}`}
+          subtitle="Awaiting workflow action"
+          icon={<Clock className="h-5 w-5" />}
+          tone="red"
+        />
+        <MetricCard
+          title="Outstanding Commitments"
+          value={`K ${budgetSummary.outstandingCommitments.toLocaleString()}`}
+          subtitle="Committed but unpaid"
           icon={<FileText className="h-5 w-5" />}
           tone="red"
         />
         <MetricCard
-          title="Spent"
+          title="Actual Expenditure"
           value={`K ${budgetSummary.actualExpenditure.toLocaleString()}`}
-          subtitle={`${((budgetSummary.actualExpenditure / budgetSummary.quarterlyReleased) * 100 || 0).toFixed(1)}% of released`}
+          subtitle={`${((budgetSummary.actualExpenditure / budgetSummary.releasedAmount) * 100 || 0).toFixed(1)}% of released amount`}
           icon={<DollarSign className="h-5 w-5" />}
           tone="maroon"
         />
         <MetricCard
-          title="Available"
+          title="Available Balance"
           value={`K ${budgetSummary.availableBalance.toLocaleString()}`}
-          subtitle="Ready to commit"
+          subtitle="Released less commitments and actuals"
           icon={<CheckCircle2 className="h-5 w-5" />}
           tone="green"
+        />
+        <MetricCard
+          title="Unfunded / Unreleased"
+          value={`K ${(budgetSummary.unfundedBudget + budgetSummary.unreleasedFunding).toLocaleString()}`}
+          subtitle={`Unfunded K ${budgetSummary.unfundedBudget.toLocaleString()} • Unreleased K ${budgetSummary.unreleasedFunding.toLocaleString()}`}
+          icon={<Layers className="h-5 w-5" />}
+          tone="gold"
         />
       </div>
 
@@ -380,7 +450,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Quarterly Releases & Spending</h2>
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Release, Commitment & Expenditure Position</h2>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={quarterlyData}>
@@ -397,7 +467,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Budget Preparation Row — workflow statistics + Budget by Cost Centre */}
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <div className="flex items-center justify-between mb-4">
@@ -512,7 +581,7 @@ export default function DashboardPage() {
             </div>
             <div className="text-center p-3 bg-png-red/10 rounded-lg">
               <p className="text-2xl font-bold text-png-red">{ff4Stats.pending}</p>
-              <p className="text-xs text-slate-600">Processing</p>
+              <p className="text-xs text-slate-600">Awaiting action</p>
             </div>
             <div className="text-center p-3 bg-green-50 rounded-lg">
               <p className="text-2xl font-bold text-green-600">{ff4Stats.paid}</p>
@@ -577,11 +646,13 @@ export default function DashboardPage() {
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Available Balance Formula</h2>
           <div className="space-y-3">
-            <BalanceLine label="Quarterly Released" amount={budgetSummary.quarterlyReleased} />
-            <BalanceLine label="Less: Commitments" amount={-budgetSummary.committedAmount} isNegative />
+            <BalanceLine label="Released Amount" amount={budgetSummary.releasedAmount} />
+            <BalanceLine label="Less: Pending FF3" amount={-budgetSummary.pendingFF3} isNegative />
+            <BalanceLine label="Less: Outstanding Commitments" amount={-budgetSummary.outstandingCommitments} isNegative />
             <BalanceLine label="Less: Actual Expenditure" amount={-budgetSummary.actualExpenditure} isNegative />
             <div className="border-t border-slate-200 pt-3 mt-3">
               <BalanceLine label="Available Balance" amount={budgetSummary.availableBalance} isTotal />
+              <BalanceLine label="Projected After Pending FF3" amount={budgetSummary.projectedAvailableAfterPending} />
             </div>
           </div>
 
@@ -591,12 +662,12 @@ export default function DashboardPage() {
               <div className="flex h-full">
                 <div
                   className="bg-png-red h-full"
-                  style={{ width: `${(budgetSummary.actualExpenditure / budgetSummary.quarterlyReleased * 100) || 0}%` }}
+                  style={{ width: `${(budgetSummary.actualExpenditure / budgetSummary.releasedAmount * 100) || 0}%` }}
                   title="Spent"
                 />
                 <div
                   className="bg-png-gold h-full"
-                  style={{ width: `${(budgetSummary.committedAmount / budgetSummary.quarterlyReleased * 100) || 0}%` }}
+                  style={{ width: `${(budgetSummary.outstandingCommitments / budgetSummary.releasedAmount * 100) || 0}%` }}
                   title="Committed"
                 />
               </div>
@@ -604,15 +675,15 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between mt-2 text-xs text-slate-600">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-png-red rounded-full"></span>
-                Spent: {((budgetSummary.actualExpenditure / budgetSummary.quarterlyReleased * 100) || 0).toFixed(1)}%
+                Spent: {((budgetSummary.actualExpenditure / budgetSummary.releasedAmount * 100) || 0).toFixed(1)}%
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-png-gold rounded-full"></span>
-                Committed: {((budgetSummary.committedAmount / budgetSummary.quarterlyReleased * 100) || 0).toFixed(1)}%
+                Committed: {((budgetSummary.outstandingCommitments / budgetSummary.releasedAmount * 100) || 0).toFixed(1)}%
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-slate-300 rounded-full"></span>
-                Available: {((budgetSummary.availableBalance / budgetSummary.quarterlyReleased * 100) || 0).toFixed(1)}%
+                Available: {((budgetSummary.availableBalance / budgetSummary.releasedAmount * 100) || 0).toFixed(1)}%
               </span>
             </div>
           </div>
