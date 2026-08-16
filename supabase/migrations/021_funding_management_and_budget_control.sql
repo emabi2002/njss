@@ -922,7 +922,7 @@ GRANT EXECUTE ON FUNCTION njss_create_budget_release(UUID, INTEGER, INTEGER, NUM
 -- 6. REPORT CATALOGUE OPTIONAL REGISTRATION
 -- ---------------------------------------------------------------------
 
-DO $
+DO $$
 DECLARE
   v_funding_category_id UUID;
 BEGIN
@@ -957,4 +957,4 @@ BEGIN
       required_permission = EXCLUDED.required_permission,
       is_active = true;
   END IF;
-END $;
+END $$;

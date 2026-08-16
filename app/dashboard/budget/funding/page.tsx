@@ -250,7 +250,7 @@ function AllocationsPanel({ receipts, allocations, budgetLines, canAllocate, can
   onAction: (fn: () => Promise<unknown>, success: string) => Promise<void>
 }) {
   const availableReceipts = receipts.filter((r) => r.status === "APPROVED" && (r.receipt_unallocated_balance || 0) > 0)
-  const [form, setForm] = useState({ funding_receipt_id: "", budget_allocation_id: "", allocated_amount: "", allocation_date: today(), notes: "", approve_immediately: false })
+  const [form, setForm] = useState({ funding_receipt_id: "", budget_allocation_id: "", allocated_amount: "", allocation_date: today(), notes: "" })
   const receipt = receipts.find((r) => r.id === form.funding_receipt_id)
   const line = budgetLines.find((b) => b.id === form.budget_allocation_id)
   const maxAllocation = Math.max(0, Math.min(receipt?.receipt_unallocated_balance || 0, (line?.revised_budget || 0) - (line?.funded || 0)))
@@ -260,8 +260,7 @@ function AllocationsPanel({ receipts, allocations, budgetLines, canAllocate, can
     allocated_amount: parseFloat(form.allocated_amount),
     allocation_date: form.allocation_date,
     notes: clean(form.notes),
-    approve_immediately: form.approve_immediately,
-  }), "Funding allocation recorded.").then(() => setForm((f) => ({ ...f, allocated_amount: "", notes: "" })))
+  }), "Funding allocation recorded as DRAFT for separate approval.").then(() => setForm((f) => ({ ...f, allocated_amount: "", notes: "" })))
 
   return <div className="space-y-4">
     {canAllocate && <div className="bg-white rounded-lg border border-png-gold/40 p-5">
@@ -273,7 +272,7 @@ function AllocationsPanel({ receipts, allocations, budgetLines, canAllocate, can
         <Field label="Date" type="date" value={form.allocation_date} onChange={(v) => setForm({ ...form, allocation_date: v })} className="md:col-span-1" />
         <button onClick={submit} disabled={!form.funding_receipt_id || !form.budget_allocation_id || !form.allocated_amount} className="md:col-span-1 px-3 py-2 mt-5 rounded-lg bg-png-red text-white text-sm font-medium disabled:opacity-50"><Plus className="h-4 w-4 mx-auto" /></button>
       </div>
-      <label className="mt-3 inline-flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={form.approve_immediately} onChange={(e) => setForm({ ...form, approve_immediately: e.target.checked })} /> Approve immediately if authorised</label>
+      <p className="mt-3 text-xs text-slate-600">Funding allocations are always created as DRAFT and require a separate approval step.</p>
       {(receipt || line) && <p className="mt-2 text-xs text-slate-600">Receipt balance <b>{fmt(receipt?.receipt_unallocated_balance)}</b> · Approved budget <b>{fmt(line?.revised_budget)}</b> · Existing funded <b>{fmt(line?.funded)}</b> · Existing released <b>{fmt(line?.released)}</b> · Maximum allocation <b className="text-png-maroon">{fmt(maxAllocation)}</b></p>}
     </div>}
     <DataCard title="Funding Allocation Report" empty="No funding allocations yet.">

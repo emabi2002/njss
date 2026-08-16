@@ -153,7 +153,11 @@ export type FundingAllocationInput = {
   allocated_amount: number
   allocation_date?: string | null
   notes?: string | null
-  approve_immediately?: boolean
+}
+
+export type BudgetReleaseFundingLineInput = {
+  funding_allocation_id: string
+  amount: number
 }
 
 async function postBudgetWorkflow<T>(body: Record<string, unknown>): Promise<T> {
@@ -742,13 +746,56 @@ export async function getBudgetByCode(financialYear: number) {
 // ==========================================
 
 export async function getAllocationsForRelease(financialYear: number) {
-  const { data, error } = await supabase
-    .from('v_authoritative_budget_position')
-    .select('*')
-    .eq('financial_year', financialYear)
-  if (error) throw error
+  const [{ data: positionRows, error: positionError }, { data: fundingRows, error: fundingError }] = await Promise.all([
+    supabase
+      .from('v_authoritative_budget_position')
+      .select('*')
+      .eq('financial_year', financialYear),
+    supabase
+      .from('v_funding_allocation_register')
+      .select('id, budget_allocation_id, allocation_number, allocated_amount, released_from_allocation, allocation_unreleased_balance, funding_source_code, funding_source_name, status')
+      .eq('financial_year', financialYear)
+      .eq('status', 'APPROVED'),
+  ])
+  if (positionError) throw positionError
+  if (fundingError) throw fundingError
 
-  const scopedRows = await filterRowsToCurrentScope(data)
+  const scopedRows = await filterRowsToCurrentScope(positionRows)
+  const fundingByBudget = new Map<string, Array<{
+    funding_allocation_id: string
+    allocation_number: string | null
+    funding_source_code: string | null
+    funding_source_name: string | null
+    allocated_amount: number
+    released_from_allocation: number
+    allocation_unreleased_balance: number
+  }>>()
+
+  for (const row of (fundingRows || []) as Array<{
+    id: string
+    budget_allocation_id: string
+    allocation_number: string | null
+    funding_source_code: string | null
+    funding_source_name: string | null
+    allocated_amount: number
+    released_from_allocation: number | null
+    allocation_unreleased_balance: number | null
+  }>) {
+    const remaining = row.allocation_unreleased_balance || 0
+    if (remaining <= 0) continue
+    const list = fundingByBudget.get(row.budget_allocation_id) || []
+    list.push({
+      funding_allocation_id: row.id,
+      allocation_number: row.allocation_number,
+      funding_source_code: row.funding_source_code,
+      funding_source_name: row.funding_source_name,
+      allocated_amount: row.allocated_amount || 0,
+      released_from_allocation: row.released_from_allocation || 0,
+      allocation_unreleased_balance: remaining,
+    })
+    fundingByBudget.set(row.budget_allocation_id, list)
+  }
+
   return ((scopedRows || []) as AuthoritativeBudgetPosition[]).map((a) => ({
     id: a.budget_allocation_id,
     revised_budget: a.approved_budget || 0,
@@ -756,6 +803,7 @@ export async function getAllocationsForRelease(financialYear: number) {
     released: a.released_amount || 0,
     unreleased_funding: a.unreleased_funding || 0,
     releasable: Math.max(0, Math.min((a.approved_budget || 0) - (a.released_amount || 0), a.unreleased_funding || 0)),
+    funding_options: fundingByBudget.get(a.budget_allocation_id) || [],
     department_name: a.department_name || null,
     section_name: a.section_name || null,
     cost_centre_code: a.cost_centre_code || null,
@@ -782,16 +830,15 @@ export type QuarterlyReleaseResult = {
   quarter: number
   release_date: string
   released_amount: number
-  funding_allocation_id?: string | null
+  funding_lines?: BudgetReleaseFundingLineInput[]
 }
-
 export async function createQuarterlyRelease(input: {
   budget_allocation_id: string
   financial_year: number
   quarter: number
   released_amount: number
   release_date?: string
-  funding_allocation_id?: string | null
+  funding_lines: BudgetReleaseFundingLineInput[]
   notes?: string | null
 }) {
   return postBudgetWorkflow<QuarterlyReleaseResult>({ operation: 'create-quarterly-release', input })

@@ -64,6 +64,15 @@ type Allocation = {
   released: number
   unreleased_funding?: number
   releasable: number
+  funding_options?: Array<{
+    funding_allocation_id: string
+    allocation_number: string | null
+    funding_source_code: string | null
+    funding_source_name: string | null
+    allocated_amount: number
+    released_from_allocation: number
+    allocation_unreleased_balance: number
+  }>
   department_name: string | null
   section_name: string | null
   cost_centre_code: string | null
@@ -424,6 +433,7 @@ function ReleasesView({ year, releases, allocations, periods, canRelease, onChan
   year: number; releases: ReleaseRow[]; allocations: Allocation[]; periods: BudgetPeriodOption[]; canRelease: boolean; onChanged: () => void
 }) {
   const [allocId, setAllocId] = useState("")
+  const [fundingAllocationId, setFundingAllocationId] = useState("")
   const [quarter, setQuarter] = useState(1)
   const [amount, setAmount] = useState("")
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
@@ -431,18 +441,28 @@ function ReleasesView({ year, releases, allocations, periods, canRelease, onChan
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
 
   const selected = allocations.find((a) => a.id === allocId)
+  const selectedFundingOption = selected?.funding_options?.find((option) => option.funding_allocation_id === fundingAllocationId)
   const totalReleased = releases.reduce((s, r) => s + (r.released_amount || 0), 0)
 
   const submit = async () => {
     const amt = parseFloat(amount)
-    if (!allocId || !amt || amt <= 0) return
+    if (!allocId || !fundingAllocationId || !amt || amt <= 0) return
+    if (!selectedFundingOption) {
+      setMsg({ type: "err", text: "Select an approved funding allocation for this release." })
+      return
+    }
+    if (amt > selectedFundingOption.allocation_unreleased_balance) {
+      setMsg({ type: "err", text: `Release exceeds selected funding allocation balance of K ${selectedFundingOption.allocation_unreleased_balance.toLocaleString()}.` })
+      return
+    }
     setSaving(true)
     setMsg(null)
     try {
-      const r = await createQuarterlyRelease({ budget_allocation_id: allocId, financial_year: year, quarter, released_amount: amt, release_date: date })
+      const r = await createQuarterlyRelease({ budget_allocation_id: allocId, financial_year: year, quarter, released_amount: amt, release_date: date, funding_lines: [{ funding_allocation_id: fundingAllocationId, amount: amt }] })
       setMsg({ type: "ok", text: `Released K ${amt.toLocaleString()} (${r?.release_number || "Q" + quarter}) for ${selected?.full_expense_code || "allocation"}.` })
       setAmount("")
       setAllocId("")
+      setFundingAllocationId("")
       onChanged()
     } catch (err: unknown) {
       setMsg({ type: "err", text: err instanceof Error ? err.message : "Release failed." })
@@ -463,17 +483,36 @@ function ReleasesView({ year, releases, allocations, periods, canRelease, onChan
             </div>
           )}
           <div className="grid md:grid-cols-12 gap-3 items-end">
-            <div className="md:col-span-5">
+            <div className="md:col-span-4">
               <label className="block text-xs font-medium text-slate-500 mb-1">Budget Code / Allocation</label>
               <select
                 value={allocId}
-                onChange={(e) => setAllocId(e.target.value)}
+                onChange={(e) => {
+                  setAllocId(e.target.value)
+                  setFundingAllocationId("")
+                }}
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red"
               >
                 <option value="">Select an approved budget code...</option>
                 {allocations.map((a) => (
                   <option key={a.id} value={a.id} disabled={a.releasable <= 0}>
                     {(a.full_expense_code || a.cost_centre_code || "—")} · {a.department_name} · funded K{(a.funded || 0).toLocaleString()} · releasable K{a.releasable.toLocaleString()}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="md:col-span-3">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Funding Allocation</label>
+              <select
+                value={fundingAllocationId}
+                onChange={(e) => setFundingAllocationId(e.target.value)}
+                disabled={!selected}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-50"
+              >
+                <option value="">Select funding source...</option>
+                {(selected?.funding_options || []).map((option) => (
+                  <option key={option.funding_allocation_id} value={option.funding_allocation_id}>
+                    {option.allocation_number || "Funding"} · {option.funding_source_code || option.funding_source_name || "Source"} · balance K{option.allocation_unreleased_balance.toLocaleString()}
                   </option>
                 ))}
               </select>
@@ -510,7 +549,7 @@ function ReleasesView({ year, releases, allocations, periods, canRelease, onChan
             <div className="md:col-span-1">
               <button
                 onClick={submit}
-                disabled={!allocId || !amount || saving}
+                disabled={!allocId || !fundingAllocationId || !amount || saving}
                 className="w-full px-3 py-2 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon disabled:opacity-50 flex items-center justify-center gap-1"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
@@ -519,7 +558,7 @@ function ReleasesView({ year, releases, allocations, periods, canRelease, onChan
           </div>
           {selected && (
             <p className="mt-2 text-xs text-slate-500">
-              Approved <b>K {selected.revised_budget.toLocaleString()}</b> · funded <b>K {(selected.funded || 0).toLocaleString()}</b> · already released <b>K {selected.released.toLocaleString()}</b> · remaining funded release <b className="text-png-maroon">K {selected.releasable.toLocaleString()}</b>
+              Approved <b>K {selected.revised_budget.toLocaleString()}</b> · funded <b>K {(selected.funded || 0).toLocaleString()}</b> · already released <b>K {selected.released.toLocaleString()}</b> · remaining funded release <b className="text-png-maroon">K {selected.releasable.toLocaleString()}</b>{selectedFundingOption ? <> · selected funding balance <b className="text-png-maroon">K {selectedFundingOption.allocation_unreleased_balance.toLocaleString()}</b></> : null}
             </p>
           )}
         </div>
