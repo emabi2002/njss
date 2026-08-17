@@ -61,6 +61,22 @@ type CostRow = {
   notes: string | null
 }
 
+type BackupValidation = {
+  valid: boolean
+  status: string
+  issues: string[]
+  details?: Record<string, unknown>
+  nextSteps?: string[]
+}
+
+type DataQualityResult = {
+  generatedAt: string
+  summary: Array<{ validation: string; issues: number; detail: string }>
+  archiveCandidates: { longPendingFf3: number; unreconciledPayments: number; note: string }
+  cleanupWizard: string[]
+  safetyNotice: string
+}
+
 type Summary = {
   generatedAt: string
   health: {
@@ -218,6 +234,9 @@ export default function OperationsDashboardPage() {
   const [form, setForm] = useState<CostForm>(emptyCostForm)
   const [alertEdits, setAlertEdits] = useState<Record<string, AlertEdit>>({})
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [backupStatus, setBackupStatus] = useState("")
+  const [backupValidation, setBackupValidation] = useState<BackupValidation | null>(null)
+  const [dataQuality, setDataQuality] = useState<DataQualityResult | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -335,6 +354,75 @@ export default function OperationsDashboardPage() {
     }
   }
 
+  const createBackup = async () => {
+    setSaving(true)
+    setError("")
+    setSuccess("")
+    setBackupStatus("Creating portable NJSS backup package...")
+    try {
+      const res = await fetch("/api/operations/housekeeping/backup", { method: "POST", headers: await authHeaders() })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || `Backup request failed with status ${res.status}`)
+      }
+      const blob = await res.blob()
+      const filename = res.headers.get("X-NJSS-Backup-Filename") || `NJSS_Backup_${new Date().toISOString().slice(0, 10)}.zip`
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      setBackupStatus(`Backup generated and downloaded: ${filename}`)
+      setSuccess("Portable backup package generated. Store it only in an approved secure location.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create backup.")
+      setBackupStatus("")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const validateBackup = async (file: File | null) => {
+    if (!file) return
+    setSaving(true)
+    setError("")
+    setSuccess("")
+    setBackupValidation(null)
+    try {
+      const formData = new FormData()
+      formData.append("backup", file)
+      const res = await fetch("/api/operations/housekeeping/validate-backup", { method: "POST", headers: await authHeaders(), body: formData })
+      const body = (await res.json()) as BackupValidation & { error?: string }
+      if (!res.ok && body.error) throw new Error(body.error)
+      setBackupValidation(body)
+      setSuccess(body.valid ? "Backup validated. Review details before any restoration." : "Backup rejected during validation.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to validate backup.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const runDataQualityScan = async () => {
+    setSaving(true)
+    setError("")
+    setSuccess("")
+    try {
+      const res = await fetch("/api/operations/housekeeping/data-quality", { cache: "no-store", headers: await authHeaders() })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || "Unable to run data quality scan.")
+      setDataQuality(body as DataQualityResult)
+      setSuccess("Data quality scan completed. Review issues before selecting any corrective action.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to run data quality scan.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <PagePermissionGate any={["operations.view", "operations.manage", "settings.manage", "all"]} title="System Support & Operations">
       <div className="space-y-6">
@@ -365,6 +453,8 @@ export default function OperationsDashboardPage() {
 
         {error && <Notice tone="red" icon={<AlertCircle className="h-5 w-5" />} text={error} />}
         {success && <Notice tone="green" icon={<CheckCircle2 className="h-5 w-5" />} text={success} />}
+
+        {backupStatus && <Notice tone="green" icon={<ShieldCheck className="h-5 w-5" />} text={backupStatus} />}
 
         {loading ? (
           <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white py-24">
@@ -774,6 +864,103 @@ export default function OperationsDashboardPage() {
                 <Link href="/dashboard/system-info" className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-png-red hover:text-png-maroon">
                   Open system information <FileText className="h-4 w-4" />
                 </Link>
+              </Panel>
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-2">
+              <Panel title="Housekeeping Backup & Validation" icon={<ShieldCheck className="h-5 w-5 text-png-red" />}>
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <h3 className="text-sm font-semibold text-slate-900">Backup package</h3>
+                    <p className="mt-1 text-sm text-slate-600">Generate a portable backup package for secure offline storage and approved operational recovery procedures.</p>
+                    <button onClick={createBackup} disabled={saving} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+                      <ShieldCheck className="h-4 w-4" />
+                      {saving ? "Processing..." : "Create backup"}
+                    </button>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <h3 className="text-sm font-semibold text-slate-900">Validate backup file</h3>
+                    <p className="mt-1 text-sm text-slate-600">Upload a backup archive to verify integrity and suitability before restoration.</p>
+                    <input
+                      type="file"
+                      accept=".zip,.tar,.gz,.tgz,.json,.sql"
+                      onChange={(event) => validateBackup(event.target.files?.[0] || null)}
+                      className="mt-3 block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-slate-800"
+                    />
+                  </div>
+
+                  {backupValidation && (
+                    <div className={`rounded-xl border p-4 ${backupValidation.valid ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+                      <div className="flex items-center gap-2">
+                        {backupValidation.valid ? <CheckCircle2 className="h-5 w-5 text-green-700" /> : <AlertTriangle className="h-5 w-5 text-red-700" />}
+                        <p className={`text-sm font-semibold ${backupValidation.valid ? "text-green-800" : "text-red-800"}`}>{backupValidation.status}</p>
+                      </div>
+                      {backupValidation.issues.length > 0 && (
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                          {backupValidation.issues.map((issue, index) => (
+                            <li key={`${issue}-${index}`}>{issue}</li>
+                          ))}
+                        </ul>
+                      )}
+                      {backupValidation.nextSteps?.length ? (
+                        <div className="mt-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide">Next steps</p>
+                          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+                            {backupValidation.nextSteps.map((step, index) => (
+                              <li key={`${step}-${index}`}>{step}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </Panel>
+
+              <Panel title="Data Quality & Cleanup" icon={<Database className="h-5 w-5 text-png-red" />}>
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">Scan for quality issues</p>
+                    <p className="mt-1 text-sm text-slate-600">Run a housekeeping scan to identify records that may need review, archiving, or corrective cleanup.</p>
+                    <button onClick={runDataQualityScan} disabled={saving} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+                      <Activity className="h-4 w-4" />
+                      {saving ? "Scanning..." : "Run data quality scan"}
+                    </button>
+                  </div>
+
+                  {dataQuality && (
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <p className="text-sm font-semibold text-slate-900">Scan results</p>
+                      <p className="mt-1 text-xs text-slate-500">Generated {fmtDate(dataQuality.generatedAt)}</p>
+                      <div className="mt-3 space-y-2">
+                        {dataQuality.summary.map((item) => (
+                          <div key={item.validation} className="rounded-lg bg-slate-50 px-3 py-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-sm font-medium text-slate-800">{item.validation}</p>
+                              <p className="text-sm font-semibold text-slate-900">{fmtNumber(item.issues)}</p>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-600">{item.detail}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        <p className="font-semibold">Archive candidates</p>
+                        <p className="mt-1">Long pending FF3: {fmtNumber(dataQuality.archiveCandidates.longPendingFf3)}</p>
+                        <p>Unreconciled payments: {fmtNumber(dataQuality.archiveCandidates.unreconciledPayments)}</p>
+                        <p className="mt-1 text-xs">{dataQuality.archiveCandidates.note}</p>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {dataQuality.cleanupWizard.map((step, index) => (
+                          <div key={`${step}-${index}`} className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                            {step}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">{dataQuality.safetyNotice}</p>
+                    </div>
+                  )}
+                </div>
               </Panel>
             </section>
           </>

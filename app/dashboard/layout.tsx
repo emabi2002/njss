@@ -40,11 +40,14 @@ const COLLAPSIBLE_MODULES = new Set([
 ])
 
 const HIDDEN_SUPPORT_MENU_CODES = new Set([
+  "administration.uat",
   "systems_administration.health",
   "systems_administration.transactions",
   "systems_administration.storage_database",
   "systems_administration.costs",
   "systems_administration.alerts",
+  "systems_administration.uat",
+  "systems_administration.info",
 ])
 
 function moduleDisplayName(module: RbacModule) {
