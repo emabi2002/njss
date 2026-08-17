@@ -6,8 +6,19 @@ import type { DataScopeType, PermissionCode, RbacRole, UserAccessContext } from 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
+function bearerToken(request: NextRequest) {
+  const header = request.headers.get('authorization') || ''
+  const match = header.match(/^Bearer\s+(.+)$/i)
+  return match?.[1]?.trim() || ''
+}
+
 export function createRequestSupabaseClient(request: NextRequest, response: NextResponse = NextResponse.next()) {
   return createServerClient(supabaseUrl, supabaseAnonKey, {
+    global: bearerToken(request)
+      ? {
+          headers: { Authorization: `Bearer ${bearerToken(request)}` },
+        }
+      : undefined,
     cookies: {
       getAll() {
         return request.cookies.getAll()

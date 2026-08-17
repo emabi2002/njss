@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { AlertCircle, CheckCircle2, Database, GitCommitHorizontal, Info, Loader2, RefreshCw, Server } from "lucide-react"
 import { PagePermissionGate } from "@/components/PermissionGate"
+import { supabase } from "@/lib/supabase"
 
 type SystemInfo = {
   commitSha: string
@@ -10,6 +11,13 @@ type SystemInfo = {
   environment: string
   supabaseProjectRef: string | null
   phase: string
+}
+
+async function authHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined
 }
 
 export default function SystemInfoPage() {
@@ -21,7 +29,7 @@ export default function SystemInfoPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch("/api/system-info", { cache: "no-store" })
+      const res = await fetch("/api/system-info", { cache: "no-store", headers: await authHeaders() })
       if (!res.ok) throw new Error(`System info request failed with status ${res.status}`)
       setInfo((await res.json()) as SystemInfo)
     } catch (err) {

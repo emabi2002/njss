@@ -23,6 +23,7 @@ import {
   Wrench,
 } from "lucide-react"
 import { PagePermissionGate } from "@/components/PermissionGate"
+import { supabase } from "@/lib/supabase"
 
 type LiveProviderCost = {
   id: string
@@ -181,6 +182,16 @@ const emptyCostForm: CostForm = {
   operational_budget: "",
 }
 
+async function authHeaders(extra?: HeadersInit) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  return {
+    ...(extra || {}),
+    ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+  }
+}
+
 const fmtNumber = (value: number | null | undefined) => (value === null || value === undefined ? "Not Available" : new Intl.NumberFormat("en-GB").format(value))
 const fmtMoney = (value: number | null | undefined, currency = "PGK") => (value === null || value === undefined ? "Not Available" : `${currency} ${new Intl.NumberFormat("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}`)
 const fmtPercent = (value: number | string | null | undefined) => (typeof value === "number" ? `${value.toFixed(1)}%` : "Not Available")
@@ -212,7 +223,7 @@ export default function OperationsDashboardPage() {
     setLoading(true)
     setError("")
     try {
-      const res = await fetch("/api/operations/summary", { cache: "no-store" })
+      const res = await fetch("/api/operations/summary", { cache: "no-store", headers: await authHeaders() })
       if (!res.ok) throw new Error(`Operations summary request failed with status ${res.status}`)
       const data = (await res.json()) as Summary
       setSummary(data)
@@ -269,7 +280,7 @@ export default function OperationsDashboardPage() {
     try {
       const res = await fetch("/api/operations/costs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           service_provider: form.service_provider,
           cost_category: form.cost_category,
@@ -305,7 +316,7 @@ export default function OperationsDashboardPage() {
     try {
       const res = await fetch("/api/operations/alerts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           code,
           threshold_value: edit.threshold_value === "" ? null : Number(edit.threshold_value),
@@ -677,10 +688,7 @@ export default function OperationsDashboardPage() {
                 <div className="space-y-3">
                   {summary.alerts.active.length ? (
                     summary.alerts.active.map((alert) => (
-                      <div
-                        key={alert.code}
-                        className={`rounded-xl border p-3 text-sm ${alert.severity === "critical" ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}
-                      >
+                      <div key={alert.code} className={`rounded-xl border p-3 text-sm ${alert.severity === "critical" ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
                         <p className="font-semibold">{alert.title}</p>
                         <p className="mt-1">{alert.detail}</p>
                       </div>
@@ -728,11 +736,7 @@ export default function OperationsDashboardPage() {
                               }
                               className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs"
                             />
-                            <button
-                              onClick={() => saveAlertSetting(setting.code)}
-                              disabled={saving}
-                              className="rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white disabled:opacity-60"
-                            >
+                            <button onClick={() => saveAlertSetting(setting.code)} disabled={saving} className="rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white disabled:opacity-60">
                               Save
                             </button>
                           </div>
