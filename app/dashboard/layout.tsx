@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   ChevronDown,
   ChevronRight,
@@ -46,7 +46,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const pathname = usePathname()
   const router = useRouter()
-  const searchParams = useSearchParams()
   const { user, profile, role, loading, signOut, menus, modules } = useAuth()
 
   useEffect(() => {
@@ -83,18 +82,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     window.localStorage.setItem("njss-sidebar-groups", JSON.stringify(expandedGroups))
   }, [expandedGroups])
 
-  const currentPathWithQuery = useMemo(() => {
-    const query = searchParams.toString()
-    return query ? `${pathname}?${query}` : pathname
-  }, [pathname, searchParams])
-
   const isActive = useCallback(
     (href: string) => {
-      const [targetPath, targetQuery] = href.split("?")
-      if (targetQuery) return currentPathWithQuery === href
+      const [targetPath] = href.split("?")
       return pathname === targetPath || pathname.startsWith(targetPath + "/")
     },
-    [currentPathWithQuery, pathname],
+    [pathname],
   )
 
   const visibleNavigation: NavItem[] = useMemo(
