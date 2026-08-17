@@ -10,6 +10,12 @@ import { useAuth } from "@/contexts/AuthContext"
 
 const LOGIN_TIMEOUT_MS = 10000
 
+function safeRedirectPath(value: string | null) {
+  if (!value) return "/dashboard"
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return "/dashboard"
+  return value
+}
+
 async function withLoginTimeout<T>(promise: Promise<T>) {
   let timeoutId: ReturnType<typeof setTimeout> | undefined
   try {
@@ -44,7 +50,7 @@ function LoginContent() {
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState("")
 
-  const redirectTo = searchParams.get("redirect") || "/dashboard"
+  const redirectTo = safeRedirectPath(searchParams.get("redirect"))
 
   // Redirect if already logged in with a REAL session (ignore the testing-mode
   // placeholder identity so the login page stays reachable to switch roles).

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { Plus, Download, Search, Eye, Edit, CheckCircle2, Clock, XCircle, FileText, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { getActiveFinancialYear } from "@/lib/financial-year"
 import { useAuth } from "@/contexts/AuthContext"
 
 type FF3Status = "DRAFT" | "SUBMITTED" | "ENDORSED_SUPERVISOR" | "ENDORSED_SECTION_HEAD" | "APPROVED" | "COMMITTED" | "REJECTED" | "CANCELLED" | "RETURNED" | "EXPIRED"
@@ -30,7 +31,7 @@ export default function FF3ListPage() {
   const [statuses, setStatuses] = useState<WorkflowStatus[]>([])
   const [stats, setStats] = useState({ total: 0, draft: 0, pending: 0, approved: 0, rejected: 0 })
   const { can } = useAuth()
-  const activeFinancialYear = new Date().getFullYear()
+  const [activeFinancialYear, setActiveFinancialYear] = useState(new Date().getFullYear())
 
   const fetchFF3Records = useCallback(async () => {
     setLoading(true)
@@ -90,6 +91,10 @@ export default function FF3ListPage() {
       setLoading(false)
     }
   }, [activeFinancialYear, statusFilter])
+
+  useEffect(() => {
+    getActiveFinancialYear().then(setActiveFinancialYear).catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     // Data fetch on mount / filter change is the intended effect here.

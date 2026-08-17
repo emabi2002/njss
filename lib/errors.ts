@@ -23,5 +23,5 @@ export function toUserMessage(error: unknown, fallback = "The requested operatio
   for (const [pattern, message] of MESSAGE_RULES) {
     if (pattern.test(raw)) return message
   }
-  return raw || fallback
+  return fallback
 }

@@ -27,7 +27,7 @@ export function PermissionGate({
     if (permission) return can(permission)
     if (any) return canAny(any)
     if (all) return canAll(all)
-    return true
+    return false
   })()
 
   return allowed ? <>{children}</> : <>{fallback}</>

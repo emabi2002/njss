@@ -16,6 +16,7 @@ import {
   UserPlus,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { authFetch } from "@/lib/auth-fetch"
 import { useAuth } from "@/contexts/AuthContext"
 import { AccessDenied } from "@/components/AccessDenied"
 import type { DataScopeType, RbacMenuItem, RbacModule, RbacPermission } from "@/lib/rbac/types"
@@ -113,7 +114,7 @@ export default function UsersPage() {
           .order("created_at", { ascending: false }),
         supabase.from("roles").select("id, name, description").eq("is_active", true).order("name"),
         supabase.from("departments").select("id, name").eq("is_active", true).order("name"),
-        fetch("/api/rbac").then((res) => (res.ok ? res.json() : null)).catch(() => null),
+        authFetch("/api/rbac").then((res) => (res.ok ? res.json() : null)).catch(() => null),
       ])
 
       setUsers((usersRes.data || []) as unknown as User[])
@@ -286,7 +287,7 @@ export default function UsersPage() {
 
     setRolePermissions((prev) => [...prev.filter((row) => row.role_id !== roleId), ...next.map((code) => ({ role_id: roleId, permission: code, is_allowed: true }))])
 
-    const res = await fetch("/api/rbac", {
+    const res = await authFetch("/api/rbac", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "save-role-permissions", roleId, permissions: next }),
@@ -300,7 +301,7 @@ export default function UsersPage() {
   const handleCreateRole = async () => {
     setError("")
     setSuccess("")
-    const res = await fetch("/api/rbac", {
+    const res = await authFetch("/api/rbac", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "create-role", role: roleForm }),
@@ -317,7 +318,7 @@ export default function UsersPage() {
 
   const handleScopeChange = async (roleId: string, scopeType: DataScopeType) => {
     setRoleScopes((prev) => [...prev.filter((row) => row.role_id !== roleId), { role_id: roleId, scope_type: scopeType }])
-    const res = await fetch("/api/rbac", {
+    const res = await authFetch("/api/rbac", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "save-role-scope", roleId, scopeType }),

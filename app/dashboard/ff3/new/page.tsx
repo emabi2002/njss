@@ -387,13 +387,13 @@ export default function NewFF3Page() {
           procurement_method_id: formData.procurement_method_id || null,
           status: 'DRAFT',
           selected_supplier_id: formData.supplier_not_required ? null : selectedQuotation?.supplier_id || null,
-          selected_supplier_name: formData.supplier_not_required ? 'SUPPLIER_NOT_REQUIRED' : selectedQuotation?.supplier_name || null,
+          selected_supplier_name: formData.supplier_not_required ? null : selectedQuotation?.supplier_name || null,
           supplier_not_required: formData.supplier_not_required,
           supplier_not_required_reason: formData.supplier_not_required ? formData.supplier_not_required_reason : null,
           supplier_not_required_expenditure_type: formData.supplier_not_required ? formData.supplier_not_required_expenditure_type : null,
           supplier_not_required_comments: formData.supplier_not_required ? formData.supplier_not_required_comments || null : null,
           total_estimated_amount: totalEstimate,
-          is_within_budget: status === 'SUBMITTED' ? true : totalEstimate <= (latestBudget?.available ?? budgetInfo.available_balance),
+          is_within_budget: totalEstimate <= (latestBudget?.available ?? budgetInfo.available_balance),
           submitted_date: status === 'SUBMITTED' ? new Date().toISOString() : null
         })
         .select()
@@ -446,13 +446,13 @@ export default function NewFF3Page() {
         if (quotsError) throw quotsError
       }
 
-      setSuccess(`FF3 ${header.ff3_number} ${status === 'DRAFT' ? 'saved as draft' : 'submitted for approval'}!`)
-
       // Use the controlled database workflow for submission so pending state is budget-checked atomically.
       if (status === 'SUBMITTED') {
         await approveFF3(header.id, 'SUBMIT', 'Submitted from FF3 creation screen')
         await notifyFF3Submitted(header.ff3_number, header.id, totalEstimate)
       }
+
+      setSuccess(`FF3 ${header.ff3_number} ${status === 'DRAFT' ? 'saved as draft' : 'submitted for approval'}!`)
 
       // Redirect after short delay
       setTimeout(() => {

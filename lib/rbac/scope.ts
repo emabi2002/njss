@@ -19,8 +19,9 @@ export async function getCurrentScopeContext(): Promise<ScopeContext | null> {
 
   const { data: profile } = await supabase
     .from('users')
-    .select('id, department_id, section_id, user_roles(role:roles(id, data_scope_type))')
+    .select('id, department_id, section_id, is_active, user_roles(role:roles(id, data_scope_type))')
     .or(`auth_user_id.eq.${user.id},email.eq.${user.email || ''}`)
+    .eq('is_active', true)
     .limit(1)
     .maybeSingle()
 
@@ -53,7 +54,7 @@ export async function getCurrentScopeContext(): Promise<ScopeContext | null> {
 }
 
 export function isRecordInScope(context: ScopeContext | null, record: ScopeableRecord) {
-  if (!context) return true
+  if (!context) return false
   if (context.permissions.includes('all')) return true
 
   const scopes = context.scopes.length ? context.scopes : [{ scope_type: 'OWN_RECORDS' as DataScopeType }]
@@ -78,6 +79,6 @@ export function isRecordInScope(context: ScopeContext | null, record: ScopeableR
 
 export async function filterRowsToCurrentScope<T extends ScopeableRecord>(rows: T[] | null | undefined) {
   const list = rows || []
-  const context = await getCurrentScopeContext().catch(() => null)
+  const context = await getCurrentScopeContext()
   return list.filter((row) => isRecordInScope(context, row))
 }

@@ -1,5 +1,15 @@
 import { supabase } from './supabase'
 
+async function authJsonFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const headers = new Headers(init.headers)
+  if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json')
+  if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`)
+  return fetch(input, { ...init, headers })
+}
+
 export const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -324,9 +334,8 @@ export async function deleteBudgetLine(lineId: string) {
 }
 
 export async function transitionSubmission(id: string, action: 'SUBMIT' | 'RETURN' | 'RESUBMIT' | 'REVIEW' | 'APPROVE' | 'REJECT', comments = '', userEmail = '') {
-  const response = await fetch('/api/workflows/budget', {
+  const response = await authJsonFetch('/api/workflows/budget', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ operation: 'transition-submission', id, action, comments, userEmail }),
   })
   const json = await response.json()

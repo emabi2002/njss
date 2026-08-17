@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   if (guard.response) return guard.response
 
   const [
-    duplicateInvoices,
+    missingInvoiceReferences,
     missingDepartments,
     orphanedDocuments,
     invalidFf4Dates,
@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
     missingUsers,
     longPendingFf3,
     unreconciledPayments,
+    orphanedFf4Payments,
   ] = await Promise.all([
     safeCount('ff4_headers', (q) => q.or('invoice_number.is.null,invoice_number.eq.')),
     safeCount('users', (q) => q.is('department_id', null)),
@@ -48,17 +49,18 @@ export async function GET(request: NextRequest) {
     safeCount('users', (q) => q.or('email.is.null,full_name.is.null')),
     safeCount('ff3_headers', (q) => q.or('status.eq.SUBMITTED,status.eq.RETURNED')),
     safeCount('payment_transactions', (q) => q.eq('reconciled', false)),
+    safeCount('payment_transactions', (q) => q.is('ff4_header_id', null)),
   ])
 
   const summary = [
-    { validation: 'Duplicate Records', issues: duplicateInvoices ?? 0, detail: 'Probable duplicate/incomplete invoice references requiring side-by-side review.' },
+    { validation: 'Missing Invoice References', issues: missingInvoiceReferences ?? 'Not Available', detail: 'FF4 records with blank invoice references requiring completion or documented exception.' },
     { validation: 'Missing Mandatory Fields', issues: (missingDepartments ?? 0) + (missingUsers ?? 0), detail: 'Users or operational records missing required owner/department/profile fields.' },
-    { validation: 'Invalid References', issues: 0, detail: 'Foreign-key relationship checks should be run before/after restore.' },
-    { validation: 'Orphaned Documents', issues: orphanedDocuments ?? 0, detail: 'Documents without a valid parent reference.' },
-    { validation: 'Invalid Dates', issues: invalidFf4Dates ?? 0, detail: 'Payment or approval dates outside configured periods.' },
-    { validation: 'Invalid Statuses', issues: invalidStatuses ?? 0, detail: 'Records with missing or invalid workflow status.' },
-    { validation: 'Missing Department', issues: missingDepartments ?? 0, detail: 'Users or records without department assignment.' },
-    { validation: 'Broken Relationships', issues: orphanedDocuments ?? 0, detail: 'Child records that need reassignment, repair, archive, or safe deletion review.' },
+    { validation: 'Invalid References', issues: orphanedFf4Payments ?? 'Not Available', detail: 'Detected child financial records without a valid FF4 parent reference.' },
+    { validation: 'Orphaned Documents', issues: orphanedDocuments ?? 'Not Available', detail: 'Documents without a valid parent reference.' },
+    { validation: 'Invalid Dates', issues: invalidFf4Dates ?? 'Not Available', detail: 'Payment or approval dates outside configured periods.' },
+    { validation: 'Invalid Statuses', issues: invalidStatuses ?? 'Not Available', detail: 'Records with missing or invalid workflow status.' },
+    { validation: 'Missing Department', issues: missingDepartments ?? 'Not Available', detail: 'Users or records without department assignment.' },
+    { validation: 'Broken Relationships', issues: (orphanedDocuments ?? 0) + (orphanedFf4Payments ?? 0), detail: 'Child records that need reassignment, repair, archive, or safe deletion review.' },
   ]
 
   const supabase = createServerSupabaseClient()

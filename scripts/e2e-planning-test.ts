@@ -24,6 +24,17 @@ function loadEnv() {
 }
 loadEnv()
 
+function requireDestructiveScriptApproval() {
+  if (process.env.NJSS_ALLOW_DESTRUCTIVE !== '1') {
+    throw new Error('Refusing to run planning E2E script. Set NJSS_ALLOW_DESTRUCTIVE=1 only for an approved disposable UAT/development environment.')
+  }
+  const appEnv = (process.env.NEXT_PUBLIC_APP_ENV || '').toLowerCase()
+  if (appEnv === 'production' || appEnv === 'prod') {
+    throw new Error('Refusing to run planning E2E script against a production environment.')
+  }
+}
+requireDestructiveScriptApproval()
+
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 const FY = 2025
 let pass = 0, fail = 0

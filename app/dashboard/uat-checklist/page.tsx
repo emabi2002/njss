@@ -14,7 +14,7 @@ const uatRows: UatRow[] = [
   {
     testNo: "UAT-001",
     function: "Migration readiness",
-    scenario: "Confirm migrations 000 through 028, plus any Phase 6 additive migration, are applied in order in the target Supabase project.",
+    scenario: "Confirm migrations 000 through the latest additive hardening migration are applied in order in the target Supabase project.",
     expectedResult: "Database schema contains all authoritative Phase 1-5 transaction and reporting objects without modifying earlier migrations.",
   },
   {
@@ -108,7 +108,7 @@ export default function UatChecklistPage() {
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-png-red">
               <ClipboardCheck className="h-4 w-4" />
-              Phase 6 readiness
+              System Assurance & UAT
             </div>
             <h1 className="mt-2 text-2xl font-bold text-slate-900">NJSS UAT Checklist</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">

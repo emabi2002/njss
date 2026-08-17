@@ -38,7 +38,9 @@ export function getAuthorizedMenus(permissions: PermissionCode[], menus: RbacMen
 }
 
 export function getRoutePermissions(pathname: string) {
-  return ROUTE_PERMISSIONS.find((route) => route.pattern.test(pathname))?.permissions || []
+  const matched = ROUTE_PERMISSIONS.find((route) => route.pattern.test(pathname))
+  if (matched) return matched.permissions
+  return pathname.startsWith('/dashboard') ? ['__deny_unmapped_route__'] : []
 }
 
 export function canAccessRoute(permissions: PermissionCode[], pathname: string) {
@@ -118,7 +120,7 @@ export async function getUserPermissions(userId: string): Promise<PermissionCode
 }
 
 export async function getUserDataScopes(userId: string, roles: RbacRole[]): Promise<RbacDataScope[]> {
-  if (!isSupabaseNetworkEnabled) return roles.map((role) => ({ scope_type: role.data_scope_type || 'SYSTEM_WIDE' }))
+  if (!isSupabaseNetworkEnabled) return roles.map((role) => ({ scope_type: role.data_scope_type || 'OWN_RECORDS' }))
   try {
     const roleIds = roles.map((role) => role.id)
     const [roleScopes, userScopes] = await Promise.all([

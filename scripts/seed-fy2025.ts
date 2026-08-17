@@ -21,7 +21,19 @@ function loadEnv() {
     if (m) process.env[m[1]] = m[2].replace(/^"|"$/g, '')
   }
 }
+
+function requireDestructiveScriptApproval() {
+  if (process.env.NJSS_ALLOW_DESTRUCTIVE !== '1') {
+    throw new Error('Refusing to run UAT/development seed script. Set NJSS_ALLOW_DESTRUCTIVE=1 only for an approved disposable UAT/development environment.')
+  }
+  const appEnv = (process.env.NEXT_PUBLIC_APP_ENV || '').toLowerCase()
+  if (appEnv === 'production' || appEnv === 'prod') {
+    throw new Error('Refusing to run UAT/development seed script against a production environment.')
+  }
+}
+
 loadEnv()
+requireDestructiveScriptApproval()
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 const FY = 2025

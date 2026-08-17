@@ -286,10 +286,19 @@ export type PayableCommitmentRow = {
   commitment_status: string
 }
 
+async function authJsonFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const headers = new Headers(init.headers)
+  if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json')
+  if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`)
+  return fetch(input, { ...init, headers })
+}
+
 async function postBudgetWorkflow<T>(body: Record<string, unknown>): Promise<T> {
-  const response = await fetch('/api/workflows/budget', {
+  const response = await authJsonFetch('/api/workflows/budget', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   const json = await response.json()
@@ -298,9 +307,8 @@ async function postBudgetWorkflow<T>(body: Record<string, unknown>): Promise<T> 
 }
 
 async function postSupplierWorkflow<T>(body: Record<string, unknown>): Promise<T> {
-  const response = await fetch('/api/workflows/suppliers', {
+  const response = await authJsonFetch('/api/workflows/suppliers', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   const json = await response.json()
@@ -309,9 +317,8 @@ async function postSupplierWorkflow<T>(body: Record<string, unknown>): Promise<T
 }
 
 async function postFF4Workflow<T>(body: Record<string, unknown>): Promise<T> {
-  const response = await fetch('/api/workflows/ff4', {
+  const response = await authJsonFetch('/api/workflows/ff4', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   const json = await response.json()
@@ -717,9 +724,8 @@ export async function createFF4Controlled(payload: FF4CreatePayload, submit = fa
 export type FF3ApprovalAction = 'SUBMIT' | 'ENDORSE_SUPERVISOR' | 'ENDORSE_SECTION_HEAD' | 'APPROVE' | 'REJECT' | 'CANCEL' | 'RETURN'
 
 export async function approveFF3(ff3Id: string, action: FF3ApprovalAction, comments?: string) {
-  const response = await fetch('/api/workflows/ff3', {
+  const response = await authJsonFetch('/api/workflows/ff3', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ff3Id, action, comments }),
   })
   const json = await response.json()
@@ -738,9 +744,8 @@ export async function getCommitmentTransactions(commitmentId: string) {
 }
 
 export async function adjustCommitment(input: CommitmentAdjustmentInput) {
-  const response = await fetch('/api/workflows/commitments', {
+  const response = await authJsonFetch('/api/workflows/commitments', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   })
   const json = await response.json()

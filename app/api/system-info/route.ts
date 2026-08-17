@@ -20,6 +20,6 @@ export async function GET(request: NextRequest) {
     buildTime: process.env.NEXT_PUBLIC_BUILD_TIME || process.env.BUILD_TIME || null,
     environment: process.env.NEXT_PUBLIC_APP_ENV || process.env.NODE_ENV || 'unknown',
     supabaseProjectRef: supabaseProjectRef(),
-    phase: 'Phase 6 production-support readiness',
+    phase: 'System Assurance & UAT',
   })
 }

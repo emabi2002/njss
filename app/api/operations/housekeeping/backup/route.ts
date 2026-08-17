@@ -4,7 +4,8 @@ import packageJson from '@/package.json'
 import { requirePermission } from '@/lib/rbac/server'
 import { createServerSupabaseClient } from '@/lib/supabase'
 
-const READ_PERMISSIONS = ['operations.view', 'operations.manage', 'settings.manage', 'all']
+const READ_PERMISSIONS = ['operations.manage', 'settings.manage', 'all']
+const EXPORT_PAGE_SIZE = 1000
 const EXPORT_TABLES = [
   'departments',
   'sections',
@@ -30,8 +31,21 @@ function stamp(date = new Date()) {
 
 async function tableExport(supabase: ReturnType<typeof createServerSupabaseClient>, table: string) {
   try {
-    const { data, error, count } = await supabase.from(table).select('*', { count: 'exact' }).limit(5000)
-    return { table, status: error ? 'error' : 'exported', count: count || data?.length || 0, rows: data || [], error: error?.message || null }
+    const rows: unknown[] = []
+    let from = 0
+    let totalCount: number | null = null
+
+    while (true) {
+      const to = from + EXPORT_PAGE_SIZE - 1
+      const { data, error, count } = await supabase.from(table).select('*', { count: from === 0 ? 'exact' : undefined }).range(from, to)
+      if (error) return { table, status: 'error', count: rows.length, rows, error: error.message }
+      if (from === 0) totalCount = count ?? null
+      rows.push(...(data || []))
+      if (!data || data.length < EXPORT_PAGE_SIZE) break
+      from += EXPORT_PAGE_SIZE
+    }
+
+    return { table, status: 'exported', count: totalCount ?? rows.length, rows, error: null }
   } catch (error) {
     return { table, status: 'error', count: 0, rows: [], error: error instanceof Error ? error.message : 'Export failed' }
   }
@@ -44,26 +58,27 @@ export async function POST(request: NextRequest) {
   const supabase = createServerSupabaseClient()
   const now = new Date()
   const backupId = `NJSS-${now.getTime()}`
-  const filename = `NJSS_Backup_${stamp(now)}.zip`
+  const filename = `NJSS_Portable_Data_Export_${stamp(now)}.zip`
   const exports = await Promise.all(EXPORT_TABLES.map((table) => tableExport(supabase, table)))
   const recordCounts = Object.fromEntries(exports.map((item) => [item.table, item.count]))
 
+  const systemSettings = exports.find((item) => item.table === 'system_settings')?.rows as Array<Record<string, unknown>> | undefined
   const manifest = {
     backupId,
-    type: 'NJSS_PORTABLE_BACKUP',
+    type: 'NJSS_PORTABLE_DATA_EXPORT',
     createdAt: now.toISOString(),
     createdBy: guard.context?.email || guard.context?.name || 'Unknown administrator',
     application: 'NJSS CREMS',
     applicationVersion: process.env.NEXT_PUBLIC_APP_VERSION || packageJson.version || 'Not Available',
-    databaseSchemaVersion: exports.find((item) => item.table === 'system_settings')?.rows?.find((row: Record<string, unknown>) => row.setting_key === 'latest_database_migration') || null,
+    databaseSchemaVersion: systemSettings?.find((row) => row.setting_key === 'latest_database_migration') || null,
     recordCounts,
-    tableLimitNotice: 'Table exports are capped at 5,000 rows per table in this in-application portable backup package. Use managed database tools for full infrastructure-level snapshots when required.',
-    restorePolicy: 'Upload backups must be validated, reviewed, explicitly confirmed, safety-backed-up, restored, and verified. This endpoint does not perform destructive restoration.',
+    exportPolicy: 'This is a portable application data export, not a full managed database backup. Production backup must be handled through approved Supabase/database backup tooling that captures schema, data, RPCs, triggers, views, indexes, RLS, storage metadata, sequences and migration state.',
+    restorePolicy: 'No destructive restoration is performed by this endpoint. Restoration requires Upload, Validate, Review, Safety Backup, Explicit Confirmation, Restore, Verify and Restore Report controls.',
   }
 
   const zip = new JSZip()
   zip.file('manifest.json', JSON.stringify(manifest, null, 2))
-  zip.file('README.txt', 'NJSS portable database backup package. Validate before any restoration. Do not edit backup contents.\n')
+  zip.file('README.txt', 'NJSS portable application data export. This is not a full database backup. Validate before any restoration. Do not edit export contents.\n')
   const exportFolder = zip.folder('database_export')
   for (const item of exports) {
     exportFolder?.file(`${item.table}.json`, JSON.stringify({ table: item.table, status: item.status, count: item.count, error: item.error, rows: item.rows }, null, 2))
@@ -75,7 +90,7 @@ export async function POST(request: NextRequest) {
     user_id: guard.context?.userId || null,
     user_email: guard.context?.email || null,
     user_name: guard.context?.name || null,
-    action: 'HOUSEKEEPING_BACKUP_CREATED',
+    action: 'HOUSEKEEPING_PORTABLE_EXPORT_CREATED',
     entity_type: 'SYSTEM_BACKUP',
     entity_reference: backupId,
     new_values: { backupId, filename, recordCounts, bytes: buffer.length },

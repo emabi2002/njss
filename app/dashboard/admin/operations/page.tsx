@@ -356,7 +356,7 @@ export default function OperationsDashboardPage() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#D4A62A]">
-                <Gauge className="h-4 w-4" /> Phase 6 production support readiness
+                <Gauge className="h-4 w-4" /> System Assurance & UAT
               </div>
               <h1 className="mt-4 text-3xl font-bold">Operations Dashboard</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-300">

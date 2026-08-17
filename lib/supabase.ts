@@ -14,6 +14,10 @@ const supabaseAnonKey = requireValue(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 )
 
+if (typeof window === 'undefined' && process.env.NJSS_STRICT_ENV === 'true') {
+  requireValue('SUPABASE_SERVICE_ROLE_KEY', process.env.SUPABASE_SERVICE_ROLE_KEY)
+}
+
 export const isSupabaseNetworkEnabled = process.env.NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED !== 'false'
 
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
@@ -46,7 +50,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 export function createServerSupabaseClient() {
   const serviceRoleKey = requireValue(
     'SUPABASE_SERVICE_ROLE_KEY',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPBASE_SERVICE_ROLE_KEY
+    process.env.SUPABASE_SERVICE_ROLE_KEY
   )
 
   return createClient(supabaseUrl, serviceRoleKey, {

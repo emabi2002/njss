@@ -41,23 +41,13 @@ export async function getServerAccessContext(request: NextRequest, response: Nex
 
   const { data: profile } = await supabase
     .from('users')
-    .select('id, auth_user_id, email, full_name, department_id, section_id, user_roles(role:roles(id, name, description, data_scope_type))')
+    .select('id, auth_user_id, email, full_name, department_id, section_id, is_active, user_roles(role:roles(id, name, description, data_scope_type))')
     .or(`auth_user_id.eq.${user.id},email.eq.${user.email || ''}`)
+    .eq('is_active', true)
     .limit(1)
     .maybeSingle()
 
-  if (!profile) {
-    return {
-      userId: user.id,
-      authUserId: user.id,
-      email: user.email || '',
-      name: user.email?.split('@')[0] || 'User',
-      roles: [],
-      roleNames: [],
-      permissions: [],
-      scopes: [{ scope_type: 'OWN_RECORDS' }],
-    }
-  }
+  if (!profile) return null
 
   const roles = ((profile.user_roles || []) as unknown as Array<{ role: { id: string; name: string; description: string | null; data_scope_type?: string | null } | null }>)
     .map((row) => row.role)
@@ -112,8 +102,8 @@ export function hasServerPermission(context: UserAccessContext | null, permissio
 }
 
 export function hasAnyServerPermission(context: UserAccessContext | null, permissions: PermissionCode[]) {
-  if (!permissions.length) return true
   if (!context) return false
+  if (!permissions.length) return false
   return context.permissions.includes('all') || permissions.some((permission) => context.permissions.includes(permission))
 }
 

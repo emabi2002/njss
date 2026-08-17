@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { Plus, Search, Eye, DollarSign, CheckCircle2, Clock, Download, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { getActiveFinancialYear } from "@/lib/financial-year"
 import { useAuth } from "@/contexts/AuthContext"
 
 type FF4Status = "DRAFT" | "SUBMITTED" | "VERIFIED" | "APPROVED" | "PROCESSED" | "PAID" | "RECONCILED" | "CANCELLED"
@@ -38,8 +39,7 @@ export default function FF4ListPage() {
     total: 0, draft: 0, submitted: 0, verified: 0, approved: 0, processed: 0, paid: 0, reconciled: 0, cancelled: 0, totalValue: 0, actualExpenditure: 0
   })
   const { can } = useAuth()
-  const activeFinancialYear = new Date().getFullYear()
-  const [financialYear, setFinancialYear] = useState(activeFinancialYear)
+  const [financialYear, setFinancialYear] = useState(new Date().getFullYear())
   const [departmentFilter, setDepartmentFilter] = useState("ALL")
   const [sectionFilter, setSectionFilter] = useState("ALL")
   const [supplierFilter, setSupplierFilter] = useState("ALL")
@@ -90,6 +90,10 @@ export default function FF4ListPage() {
       setLoading(false)
     }
   }, [financialYear, statusFilter, departmentFilter, sectionFilter, supplierFilter])
+
+  useEffect(() => {
+    getActiveFinancialYear().then(setFinancialYear).catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     // Data fetch on mount / filter change is the intended effect here.
@@ -175,7 +179,7 @@ export default function FF4ListPage() {
             <option value="ALL">All Status</option>
             {statuses.map((status) => <option key={status.status_code} value={status.status_code}>{status.display_name}</option>)}
           </select>
-          <input type="number" value={financialYear} onChange={(e) => setFinancialYear(parseInt(e.target.value) || activeFinancialYear)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input type="number" value={financialYear} onChange={(e) => setFinancialYear(parseInt(e.target.value) || financialYear)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <input value={departmentFilter === 'ALL' ? '' : departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value || 'ALL')} placeholder="Department ID filter" className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <input value={sectionFilter === 'ALL' ? '' : sectionFilter} onChange={(e) => setSectionFilter(e.target.value || 'ALL')} placeholder="Section ID filter" className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <input value={supplierFilter === 'ALL' ? '' : supplierFilter} onChange={(e) => setSupplierFilter(e.target.value || 'ALL')} placeholder="Supplier ID filter" className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />

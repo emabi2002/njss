@@ -5,6 +5,7 @@ import Link from "next/link"
 import { AlertCircle, CheckCircle2, DollarSign, FileCheck, Loader2, RotateCcw } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { adjustCommitment, getCommitmentTransactions, type CommitmentTransaction } from "@/lib/api"
+import { getActiveFinancialYear } from "@/lib/financial-year"
 import { useAuth } from "@/contexts/AuthContext"
 
 type Commitment = {
@@ -29,7 +30,7 @@ type AdjustmentDraft = {
 }
 
 export default function CommitmentsPage() {
-  const activeFinancialYear = new Date().getFullYear()
+  const [activeFinancialYear, setActiveFinancialYear] = useState(new Date().getFullYear())
   const { can } = useAuth()
   const [loading, setLoading] = useState(true)
   const [posting, setPosting] = useState(false)
@@ -56,6 +57,10 @@ export default function CommitmentsPage() {
       setLoading(false)
     }
   }, [activeFinancialYear])
+
+  useEffect(() => {
+    getActiveFinancialYear().then(setActiveFinancialYear).catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
