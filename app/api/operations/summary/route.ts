@@ -5,7 +5,6 @@ import { createServerSupabaseClient } from '@/lib/supabase'
 import { loadLiveProviderCosts, type LiveCostProviderResult } from '@/lib/operations/live-costs'
 
 const ADMIN_PERMISSIONS = ['operations.view', 'operations.manage', 'settings.manage', 'users.manage', 'audit.view', 'all']
-const COST_CATEGORIES = ['Database', 'File storage', 'Hosting', 'Domain/DNS', 'Email', 'SMS', 'Backup', 'Monitoring', 'Support', 'Other']
 const PENDING_FF3 = ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD', 'RETURNED']
 const PENDING_FF4 = ['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED']
 
@@ -19,20 +18,6 @@ type CountQuery = PromiseLike<CountResult> & {
   is: (column: string, value: unknown) => CountQuery
 }
 type StorageObjectRow = { bucket_id: string | null; name: string | null; metadata: Record<string, unknown> | null; created_at: string | null }
-type CostRow = {
-  id: string
-  service_provider: string
-  cost_category: string
-  billing_month: string
-  currency: string
-  monthly_fixed_cost: number | null
-  usage_cost: number | null
-  other_cost: number | null
-  total_cost: number | null
-  invoice_reference: string | null
-  payment_status: string
-  notes: string | null
-}
 type AlertSetting = { code: string; label: string; threshold_value: number | null; enabled: boolean; notes: string | null }
 
 function monthStart(date = new Date()) {
@@ -90,12 +75,32 @@ function parseCurrencyRates(baseCurrency: string) {
   return rates
 }
 
-function convertToBase(amount: number | null | undefined, currency: string | null | undefined, rates: Record<string, number>, baseCurrency: string) {
-  if (amount === null || amount === undefined) return 0
+function convertToBaseOrNull(amount: number | null | undefined, currency: string | null | undefined, rates: Record<string, number>, baseCurrency: string) {
+  if (amount === null || amount === undefined) return null
   const normalized = (currency || baseCurrency).toUpperCase()
   const rate = rates[normalized]
-  if (!rate) return 0
+  if (!rate) return null
   return amount * rate
+}
+
+function sumKnownProviderCosts(providers: LiveCostProviderResult[], selector: 'currentMonthCost' | 'previousMonthCost', rates: Record<string, number>, baseCurrency: string) {
+  let total = 0
+  let known = 0
+  for (const provider of providers) {
+    const converted = convertToBaseOrNull(provider[selector], provider.currency, rates, baseCurrency)
+    if (converted !== null) {
+      total += converted
+      known += 1
+    }
+  }
+  return { total: known > 0 ? total : null, known }
+}
+
+function projectedMonthEndCost(currentCost: number | null, now = new Date()) {
+  if (currentCost === null) return null
+  const elapsed = Math.max(1, now.getDate())
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  return (currentCost / elapsed) * daysInMonth
 }
 
 async function count(query: PromiseLike<CountResult>) {
@@ -183,6 +188,59 @@ async function loadStorage(supabase: ReturnType<typeof createServerSupabaseClien
   }
 }
 
+async function recordProviderSyncSnapshot(
+  supabase: ReturnType<typeof createServerSupabaseClient>,
+  provider: LiveCostProviderResult,
+  baseCurrency: string,
+  rates: Record<string, number>,
+  context: { userId?: string | null; email?: string | null },
+) {
+  try {
+    const startedAt = new Date().toISOString()
+    const baseAmount = convertToBaseOrNull(provider.currentMonthCost, provider.currency, rates, baseCurrency)
+    const exchangeRate = provider.currentMonthCost && baseAmount !== null ? baseAmount / provider.currentMonthCost : null
+    const { error } = await supabase.from('operations_cost_provider_snapshots').insert({
+      provider_id: provider.id,
+      provider_name: provider.name,
+      service_name: provider.provider,
+      cost_category: provider.category,
+      billing_period: provider.billingPeriod,
+      usage_label: provider.usageLabel,
+      usage_value: provider.usageValue === null || provider.usageValue === undefined ? null : String(provider.usageValue),
+      usage_unit: provider.usageUnit,
+      native_currency: provider.currency,
+      native_amount: provider.currentMonthCost,
+      base_currency: baseCurrency,
+      base_amount: baseAmount,
+      exchange_rate: exchangeRate,
+      exchange_rate_source: exchangeRate ? 'OPERATIONS_CURRENCY_RATES' : null,
+      exchange_rate_checked_at: exchangeRate ? new Date().toISOString() : null,
+      api_status: provider.status,
+      billing_status: provider.currentMonthCost === null ? 'BILLING_DATA_UNAVAILABLE' : 'API_REPORTED',
+      data_source: provider.source,
+      estimated: provider.source !== 'provider_api' && provider.source !== 'configured_endpoint',
+      last_synchronised_at: provider.lastCheckedAt,
+      raw_metadata: { notes: provider.notes, dashboardUrl: provider.dashboardUrl },
+    })
+    await supabase.from('operations_provider_sync_logs').insert({
+      provider_id: provider.id,
+      provider_name: provider.name,
+      api_service: provider.source,
+      sync_started_at: startedAt,
+      sync_completed_at: new Date().toISOString(),
+      records_retrieved: provider.currentMonthCost === null ? 0 : 1,
+      billing_period: provider.billingPeriod,
+      success: provider.status === 'connected' || provider.status === 'partial',
+      error_message: provider.status === 'unavailable' ? provider.notes : null,
+      initiated_by: context.userId || null,
+      initiated_by_email: context.email || null,
+    })
+    if (error) throw error
+  } catch {
+    // Snapshot/audit persistence must not break the operations dashboard response.
+  }
+}
+
 function buildAlerts(input: {
   settings: AlertSetting[]
   storagePercent: number | null
@@ -236,19 +294,19 @@ function buildAlerts(input: {
   const liveUnavailable = setting('live_cost_provider_unavailable', 1)
   const unavailableProviders = input.liveProviderCosts.filter((provider) => provider.status === 'unavailable')
   if (liveUnavailable.enabled && unavailableProviders.length > 0) {
-    alerts.push({ code: 'live_cost_provider_unavailable', severity: 'warning', title: 'Live provider costing unavailable', detail: `${unavailableProviders.map((provider) => provider.name).join(', ')} could not be reached.` })
+    alerts.push({ code: 'live_cost_provider_unavailable', severity: 'warning', title: 'Provider billing API unavailable', detail: `${unavailableProviders.map((provider) => provider.name).join(', ')} could not be reached.` })
   }
 
   const liveNotConfigured = setting('live_cost_provider_not_configured', 1)
   const notConfiguredProviders = input.liveProviderCosts.filter((provider) => provider.status === 'not_configured')
   if (liveNotConfigured.enabled && notConfiguredProviders.length > 0) {
-    alerts.push({ code: 'live_cost_provider_not_configured', severity: 'info', title: 'Live provider costing not configured', detail: `${notConfiguredProviders.map((provider) => provider.name).join(', ')} need server-side connector configuration before online costs can be displayed.` })
+    alerts.push({ code: 'live_cost_provider_not_configured', severity: 'info', title: 'Provider billing API not configured', detail: `${notConfiguredProviders.map((provider) => provider.name).join(', ')} need server-side connector configuration before provider costs can be displayed.` })
   }
 
   const liveCostChange = setting('live_cost_monthly_change_threshold', 25)
   const changedProviders = input.liveProviderCosts.filter((provider) => typeof provider.percentageChange === 'number' && liveCostChange.threshold !== null && Math.abs(provider.percentageChange) > liveCostChange.threshold)
   if (liveCostChange.enabled && changedProviders.length > 0) {
-    alerts.push({ code: 'live_cost_monthly_change_threshold', severity: 'warning', title: 'Live provider cost changed materially', detail: `${changedProviders.map((provider) => provider.name).join(', ')} exceeded the configured month-on-month cost threshold.` })
+    alerts.push({ code: 'live_cost_monthly_change_threshold', severity: 'warning', title: 'Provider API cost changed materially', detail: `${changedProviders.map((provider) => provider.name).join(', ')} exceeded the configured month-on-month cost threshold.` })
   }
 
   return alerts
@@ -269,30 +327,28 @@ export async function GET(request: NextRequest) {
 
   const liveProviderCostsPromise = loadLiveProviderCosts()
 
-  const [dbPing, dbStats, storage, manualMetrics, backupSetting, migrationSetting] = await Promise.all([
+  const [dbPing, dbStats, storage, backupSetting, migrationSetting] = await Promise.all([
     supabase.from('system_settings').select('setting_key').limit(1),
     loadDbStats(request),
     loadStorage(supabase),
-    loadSetting(supabase, 'operations_manual_metrics'),
     loadSetting(supabase, 'operations_backup_status'),
     loadSetting(supabase, 'latest_database_migration'),
   ])
 
-  const [usersRes, userRolesRes, loginLogsRes, alertSettingsRes, costsRes] = await Promise.all([
+  const [usersRes, userRolesRes, loginLogsRes, alertSettingsRes] = await Promise.all([
     supabase.from('users').select('id, email, full_name, is_active, created_at'),
     supabase.from('user_roles').select('user_id, role:roles(name, is_active)').limit(10000),
     supabase.from('audit_logs').select('user_id, user_email, action, created_at').eq('action', 'LOGIN').order('created_at', { ascending: false }).limit(10000),
     supabase.from('system_alert_settings').select('code, label, threshold_value, enabled, notes').order('code'),
-    supabase.from('system_operating_costs').select('*').gte('billing_month', `${now.getFullYear() - 1}-01-01`).order('billing_month', { ascending: false }),
   ])
 
   const liveProviderCosts = await liveProviderCostsPromise
+  await Promise.all(liveProviderCosts.map((provider) => recordProviderSyncSnapshot(supabase, provider, baseCurrency, currencyRates, { userId: guard.context?.userId, email: guard.context?.email })))
 
   const userRows = (usersRes.data || []) as Array<{ id: string; email: string; full_name: string | null; is_active: boolean | null; created_at: string }>
   const roleRows = (userRolesRes.data || []) as unknown as Array<{ user_id: string; role: { name: string | null; is_active?: boolean | null } | null }>
   const loginRows = (loginLogsRes.data || []) as Array<{ user_id: string | null; user_email: string | null; created_at: string }>
   const alertSettings = ((alertSettingsRes.data || []) as AlertSetting[]).length ? (alertSettingsRes.data || []) as AlertSetting[] : []
-  const costRows = (costsRes.data || []) as CostRow[]
 
   const lastLoginByUser = new Map<string, string>()
   for (const login of loginRows) {
@@ -347,14 +403,22 @@ export async function GET(request: NextRequest) {
     safeTableCount(supabase, 'documents', (q) => q.is('reference_id', null)),
   ])
 
-  const currentCosts = costRows.filter((row) => row.billing_month?.startsWith(thisMonth.slice(0, 7)))
-  const previousCosts = costRows.filter((row) => row.billing_month?.startsWith(prevMonth.slice(0, 7)))
-  const manualCurrentCost = currentCosts.reduce((sum, row) => sum + convertToBase(Number(row.total_cost || 0), row.currency, currencyRates, baseCurrency), 0)
-  const manualPreviousCost = previousCosts.reduce((sum, row) => sum + convertToBase(Number(row.total_cost || 0), row.currency, currencyRates, baseCurrency), 0)
-  const liveCurrentCost = liveProviderCosts.reduce((sum, provider) => sum + convertToBase(provider.currentMonthCost, provider.currency, currencyRates, baseCurrency), 0)
-  const livePreviousCost = liveProviderCosts.reduce((sum, provider) => sum + convertToBase(provider.previousMonthCost, provider.currency, currencyRates, baseCurrency), 0)
+  const currentProviderCosts = sumKnownProviderCosts(liveProviderCosts, 'currentMonthCost', currencyRates, baseCurrency)
+  const previousProviderCosts = sumKnownProviderCosts(liveProviderCosts, 'previousMonthCost', currencyRates, baseCurrency)
+  const currentCost = currentProviderCosts.total
+  const previousCost = previousProviderCosts.total
+  const totalProviders = liveProviderCosts.length
+  const unavailableProviders = liveProviderCosts.filter((provider) => provider.currentMonthCost === null)
+  const providersWithCurrentCost = currentProviderCosts.known
+  const lastSyncedAt =
+    liveProviderCosts
+      .map((provider) => provider.lastCheckedAt)
+      .filter(Boolean)
+      .sort()
+      .at(-1) || null
   const liveTotalsByCurrency = Array.from(
     liveProviderCosts
+      .filter((provider) => provider.currentMonthCost !== null || provider.previousMonthCost !== null)
       .reduce((map, provider) => {
         const current = map.get(provider.currency) || { currency: provider.currency, currentMonth: 0, previousMonth: 0 }
         current.currentMonth += provider.currentMonthCost || 0
@@ -365,27 +429,18 @@ export async function GET(request: NextRequest) {
       .values()
   )
 
-  const currentCost = manualCurrentCost + liveCurrentCost
-  const previousCost = manualPreviousCost + livePreviousCost
   const monthlyTotals = new Map<string, number>()
-  for (const row of costRows) {
-    const key = row.billing_month?.slice(0, 7)
-    if (key) monthlyTotals.set(key, (monthlyTotals.get(key) || 0) + convertToBase(Number(row.total_cost || 0), row.currency, currencyRates, baseCurrency))
-  }
-  if (liveCurrentCost) monthlyTotals.set(thisMonth.slice(0, 7), (monthlyTotals.get(thisMonth.slice(0, 7)) || 0) + liveCurrentCost)
-  if (livePreviousCost) monthlyTotals.set(prevMonth.slice(0, 7), (monthlyTotals.get(prevMonth.slice(0, 7)) || 0) + livePreviousCost)
+  if (currentCost !== null) monthlyTotals.set(thisMonth.slice(0, 7), currentCost)
+  if (previousCost !== null) monthlyTotals.set(prevMonth.slice(0, 7), previousCost)
 
   const costTrend = Array.from(monthlyTotals.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, total]) => ({ month, total }))
-  const averageMonthlyCost = costTrend.length ? costTrend.reduce((sum, row) => sum + row.total, 0) / costTrend.length : 0
-  const operationalBudget = Number(manualMetrics?.monthly_operating_budget || 0)
+  const averageMonthlyCost = costTrend.length ? costTrend.reduce((sum, row) => sum + row.total, 0) / costTrend.length : null
 
-  const storageCapacityBytes = Number(manualMetrics?.storage_capacity_bytes || 0)
-  const dbPreviousSizeBytes = Number(manualMetrics?.database_previous_size_bytes || 0)
-  const dbSizeBytes = Number(dbStats?.database_size_bytes || manualMetrics?.database_size_bytes || 0) || null
-  const dbGrowthPercent = dbPreviousSizeBytes > 0 && dbSizeBytes ? ((dbSizeBytes - dbPreviousSizeBytes) / dbPreviousSizeBytes) * 100 : null
-  const storagePercent = storageCapacityBytes > 0 && typeof storage.totalSizeBytes === 'number' ? (storage.totalSizeBytes / storageCapacityBytes) * 100 : null
+  const dbSizeBytes = Number(dbStats?.database_size_bytes || 0) || null
+  const dbGrowthPercent = null
+  const storagePercent = null
 
   const alerts = buildAlerts({
     settings: alertSettings,
@@ -393,8 +448,8 @@ export async function GET(request: NextRequest) {
     dbGrowthPercent,
     backupStatus: typeof backupSetting?.status === 'string' ? backupSetting.status : null,
     recentErrorCount: recentErrors || 0,
-    currentCost,
-    averageCost: averageMonthlyCost,
+    currentCost: currentCost || 0,
+    averageCost: averageMonthlyCost || 0,
     inactivePrivilegedUsers,
     liveProviderCosts,
   })
@@ -467,23 +522,27 @@ export async function GET(request: NextRequest) {
       },
     },
     costs: {
-      categories: COST_CATEGORIES,
       baseCurrency,
       currentMonth: currentCost,
       previousMonth: previousCost,
-      manualCurrentMonth: manualCurrentCost,
-      manualPreviousMonth: manualPreviousCost,
-      liveCurrentMonth: liveCurrentCost,
-      livePreviousMonth: livePreviousCost,
+      projectedMonthEndCost: projectedMonthEndCost(currentCost, now),
+      projectedAnnualOperatingCost: averageMonthlyCost === null ? null : averageMonthlyCost * 12,
+      percentageChange: previousCost && currentCost !== null ? ((currentCost - previousCost) / previousCost) * 100 : null,
+      averageMonthlyCost,
       liveTotalsByCurrency,
       liveProviders: liveProviderCosts,
-      percentageChange: previousCost > 0 ? ((currentCost - previousCost) / previousCost) * 100 : null,
-      averageMonthlyCost,
-      projectedAnnualOperatingCost: averageMonthlyCost * 12,
-      operationalBudget,
-      budgetVariance: operationalBudget ? operationalBudget - currentCost : null,
+      totalProviders,
+      providersWithCurrentCost,
+      unavailableProviders: unavailableProviders.map((provider) => ({ id: provider.id, name: provider.name, status: provider.status, notes: provider.notes })),
+      allProvidersSynced: totalProviders > 0 && providersWithCurrentCost === totalProviders,
+      lastSyncedAt,
+      dataAvailabilityLabel:
+        totalProviders === 0
+          ? 'No provider integrations configured'
+          : providersWithCurrentCost === totalProviders
+            ? `All ${totalProviders} providers synchronised`
+            : `${providersWithCurrentCost} of ${totalProviders} cost sources available • ${totalProviders - providersWithCurrentCost} awaiting API data`,
       trend: costTrend,
-      rows: costRows.slice(0, 100),
       currencyRatesConfigured: Object.keys(currencyRates).filter((currency) => currency !== baseCurrency),
     },
     alerts: {

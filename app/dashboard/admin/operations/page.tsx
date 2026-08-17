@@ -46,21 +46,6 @@ type LiveProviderCost = {
   dashboardUrl: string | null
 }
 
-type CostRow = {
-  id: string
-  service_provider: string
-  cost_category: string
-  billing_month: string
-  currency: string
-  monthly_fixed_cost: number | null
-  usage_cost: number | null
-  other_cost: number | null
-  total_cost: number | null
-  invoice_reference: string | null
-  payment_status: string
-  notes: string | null
-}
-
 type BackupValidation = {
   valid: boolean
   status: string
@@ -128,24 +113,23 @@ type Summary = {
     requiringAttention: { longPendingFf3: number | null; longPendingFf4: number | null; unreconciledPayments: number | null; recentErrors: number | null }
   }
   costs: {
-    categories: string[]
-    currentMonth: number
-    previousMonth: number
+    currentMonth: number | null
+    previousMonth: number | null
+    projectedMonthEndCost: number | null
     percentageChange: number | null
-    averageMonthlyCost: number
-    projectedAnnualOperatingCost: number
-    operationalBudget: number
-    budgetVariance: number | null
-    manualCurrentMonth: number
-    manualPreviousMonth: number
-    liveCurrentMonth: number
-    livePreviousMonth: number
+    averageMonthlyCost: number | null
+    projectedAnnualOperatingCost: number | null
     baseCurrency: string
     liveTotalsByCurrency: Array<{ currency: string; currentMonth: number; previousMonth: number }>
     currencyRatesConfigured: string[]
     trend: Array<{ month: string; total: number }>
     liveProviders: LiveProviderCost[]
-    rows: Array<CostRow>
+    totalProviders: number
+    providersWithCurrentCost: number
+    unavailableProviders: Array<{ id: string; name: string; status: string; notes: string }>
+    allProvidersSynced: boolean
+    lastSyncedAt: string | null
+    dataAvailabilityLabel: string
   }
   alerts: {
     active: Array<{ code: string; severity: "info" | "warning" | "critical"; title: string; detail: string }>
@@ -164,38 +148,10 @@ type Summary = {
   }
 }
 
-type CostForm = {
-  service_provider: string
-  cost_category: string
-  billing_month: string
-  currency: string
-  monthly_fixed_cost: string
-  usage_cost: string
-  other_cost: string
-  invoice_reference: string
-  payment_status: string
-  notes: string
-  operational_budget: string
-}
-
 type AlertEdit = {
   threshold_value: string
   enabled: boolean
   notes: string
-}
-
-const emptyCostForm: CostForm = {
-  service_provider: "",
-  cost_category: "Database",
-  billing_month: new Date().toISOString().slice(0, 7),
-  currency: "PGK",
-  monthly_fixed_cost: "0",
-  usage_cost: "0",
-  other_cost: "0",
-  invoice_reference: "",
-  payment_status: "Pending",
-  notes: "",
-  operational_budget: "",
 }
 
 async function authHeaders(extra?: HeadersInit) {
@@ -231,7 +187,6 @@ export default function OperationsDashboardPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
-  const [form, setForm] = useState<CostForm>(emptyCostForm)
   const [alertEdits, setAlertEdits] = useState<Record<string, AlertEdit>>({})
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [backupStatus, setBackupStatus] = useState("")
@@ -246,7 +201,6 @@ export default function OperationsDashboardPage() {
       if (!res.ok) throw new Error(`Operations summary request failed with status ${res.status}`)
       const data = (await res.json()) as Summary
       setSummary(data)
-      setForm((current) => ({ ...current, operational_budget: data.costs.operationalBudget ? String(data.costs.operationalBudget) : current.operational_budget }))
       setAlertEdits(
         Object.fromEntries(
           data.alerts.settings.map((setting) => [
@@ -283,7 +237,13 @@ export default function OperationsDashboardPage() {
   const priorityCards = useMemo(() => {
     if (!summary) return []
     return [
-      { label: "Monthly Operating Cost", value: fmtMoney(summary.costs.currentMonth, summary.costs.baseCurrency), sub: `Live: ${fmtMoney(summary.costs.liveCurrentMonth, summary.costs.baseCurrency)} • Manual: ${fmtMoney(summary.costs.manualCurrentMonth, summary.costs.baseCurrency)}`, icon: ReceiptText, tone: "gold" },
+      {
+        label: summary.costs.allProvidersSynced ? "Monthly Operating Cost" : "Known Monthly Operating Cost",
+        value: fmtMoney(summary.costs.currentMonth, summary.costs.baseCurrency),
+        sub: `${summary.costs.dataAvailabilityLabel} • Last sync ${fmtDate(summary.costs.lastSyncedAt)}`,
+        icon: ReceiptText,
+        tone: summary.costs.allProvidersSynced ? "gold" : "red",
+      },
       { label: "Storage Growth", value: fmtBytes(summary.capacity.storageLast30DaysBytes), sub: "Last 30 days", icon: HardDrive, tone: "slate" },
       { label: "Database Growth", value: fmtPercent(summary.capacity.databaseGrowthPercent), sub: `Size: ${fmtBytes(summary.capacity.databaseSizeBytes)}`, icon: Database, tone: "slate" },
       { label: "Active Users", value: fmtNumber(summary.users.active), sub: `${summary.users.inactive} inactive or disabled`, icon: Users, tone: "green" },
@@ -291,40 +251,6 @@ export default function OperationsDashboardPage() {
       { label: "Recent Errors", value: fmtNumber(summary.transactions.requiringAttention.recentErrors), sub: "Last 7 days", icon: AlertTriangle, tone: (summary.transactions.requiringAttention.recentErrors || 0) > 0 ? "red" : "green" },
     ]
   }, [summary, healthTone])
-
-  const saveCost = async () => {
-    setSaving(true)
-    setError("")
-    setSuccess("")
-    try {
-      const res = await fetch("/api/operations/costs", {
-        method: "POST",
-        headers: await authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          service_provider: form.service_provider,
-          cost_category: form.cost_category,
-          billing_month: form.billing_month,
-          currency: form.currency,
-          monthly_fixed_cost: Number(form.monthly_fixed_cost || 0),
-          usage_cost: Number(form.usage_cost || 0),
-          other_cost: Number(form.other_cost || 0),
-          invoice_reference: form.invoice_reference || null,
-          payment_status: form.payment_status,
-          notes: form.notes || null,
-          operational_budget: form.operational_budget ? Number(form.operational_budget) : undefined,
-        }),
-      })
-      const body = await res.json()
-      if (!res.ok) throw new Error(body.error || "Unable to save operating cost.")
-      setSuccess("Operating cost entry saved and audit logged.")
-      setForm({ ...emptyCostForm, operational_budget: form.operational_budget })
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save operating cost.")
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const saveAlertSetting = async (code: string) => {
     const edit = alertEdits[code]
@@ -434,7 +360,7 @@ export default function OperationsDashboardPage() {
               </div>
               <h1 className="mt-4 text-3xl font-bold">Operations Dashboard</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-300">
-                A restricted support dashboard for system health, capacity planning, user-access oversight, storage/database monitoring, operational costs, alerts and housekeeping. It does not alter financial workflows or expose secrets.
+                A restricted support dashboard for system health, capacity planning, user-access oversight, storage/database monitoring, provider/API costs, alerts and housekeeping. It does not alter financial workflows or expose secrets.
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -442,10 +368,10 @@ export default function OperationsDashboardPage() {
                 onClick={() => setAutoRefresh((value) => !value)}
                 className={`inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold ${autoRefresh ? "bg-green-500/20 text-green-100" : "bg-white/10 text-white hover:bg-white/15"}`}
               >
-                <Activity className="h-4 w-4" /> {autoRefresh ? "Live refresh on" : "Live refresh off"}
+                <Activity className="h-4 w-4" /> {autoRefresh ? "API refresh on" : "API refresh off"}
               </button>
               <button onClick={load} className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15">
-                <RefreshCw className="h-4 w-4" /> Refresh
+                <RefreshCw className="h-4 w-4" /> Refresh APIs
               </button>
             </div>
           </div>
@@ -622,25 +548,32 @@ export default function OperationsDashboardPage() {
             </section>
 
             <section className="grid gap-4 xl:grid-cols-3">
-              <Panel title="Operating Costs" icon={<ReceiptText className="h-5 w-5 text-png-red" />} className="xl:col-span-2">
+              <Panel title="Provider API Availability & Breakdown" icon={<ReceiptText className="h-5 w-5 text-png-red" />} className="xl:col-span-2">
                 <div className="grid gap-3 md:grid-cols-4">
-                  <Metric label={`Current month (${summary.costs.baseCurrency})`} value={fmtMoney(summary.costs.currentMonth, summary.costs.baseCurrency)} />
+                  <Metric label={`Current billing cycle (${summary.costs.baseCurrency})`} value={fmtMoney(summary.costs.currentMonth, summary.costs.baseCurrency)} />
                   <Metric label={`Previous month (${summary.costs.baseCurrency})`} value={fmtMoney(summary.costs.previousMonth, summary.costs.baseCurrency)} />
-                  <Metric label="Change" value={fmtPercent(summary.costs.percentageChange)} />
-                  <Metric label={`Projected annual (${summary.costs.baseCurrency})`} value={fmtMoney(summary.costs.projectedAnnualOperatingCost, summary.costs.baseCurrency)} />
-                  <Metric label={`Live provider costs (${summary.costs.baseCurrency})`} value={fmtMoney(summary.costs.liveCurrentMonth, summary.costs.baseCurrency)} />
-                  <Metric label={`Manual register (${summary.costs.baseCurrency})`} value={fmtMoney(summary.costs.manualCurrentMonth, summary.costs.baseCurrency)} />
+                  <Metric label="Monthly change" value={fmtPercent(summary.costs.percentageChange)} />
+                  <Metric label="Projected month-end" value={fmtMoney(summary.costs.projectedMonthEndCost, summary.costs.baseCurrency)} />
+                  <Metric label="Cost data availability" value={summary.costs.dataAvailabilityLabel} />
+                  <Metric label="Last synchronised" value={fmtDate(summary.costs.lastSyncedAt)} />
                 </div>
+
+                {summary.costs.unavailableProviders.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <p className="font-semibold">Provider billing data incomplete</p>
+                    <p className="mt-1">{summary.costs.unavailableProviders.length} provider cost source(s) are awaiting API data. The displayed total is the known provider-derived cost only.</p>
+                  </div>
+                )}
 
                 <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
                   <table className="min-w-[760px] w-full text-sm">
                     <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                       <tr>
-                        <th className="px-3 py-2">Live provider</th>
+                        <th className="px-3 py-2">Provider</th>
                         <th>Category</th>
                         <th>Status</th>
                         <th>Source</th>
-                        <th>Current month</th>
+                        <th>Provider cost</th>
                         <th>Previous month</th>
                         <th>Usage</th>
                         <th>Last checked</th>
@@ -673,7 +606,7 @@ export default function OperationsDashboardPage() {
                       ) : (
                         <tr>
                           <td colSpan={8} className="px-3 py-3 text-slate-500">
-                            No live provider cost records are available.
+                            No provider billing API records are available. Configure provider integrations before using cost monitoring.
                           </td>
                         </tr>
                       )}
@@ -682,13 +615,13 @@ export default function OperationsDashboardPage() {
                 </div>
 
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                  Live provider totals are converted into {summary.costs.baseCurrency} only when server-side exchange rates are configured. Original provider currency values remain visible in the live provider table. Configured conversion currencies:{" "}
+                  Provider totals are converted into {summary.costs.baseCurrency} only when server-side exchange rates are configured. Original provider currency values remain visible in the provider table. Configured conversion currencies:{" "}
                   {summary.costs.currencyRatesConfigured.length ? summary.costs.currencyRatesConfigured.join(", ") : "none"}.
                 </div>
                 {summary.costs.liveTotalsByCurrency.length > 0 && (
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
                     {summary.costs.liveTotalsByCurrency.map((item) => (
-                      <Metric key={item.currency} label={`Live total ${item.currency}`} value={fmtMoney(item.currentMonth, item.currency)} />
+                      <Metric key={item.currency} label={`Provider total ${item.currency}`} value={fmtMoney(item.currentMonth, item.currency)} />
                     ))}
                   </div>
                 )}
@@ -705,70 +638,8 @@ export default function OperationsDashboardPage() {
                       )
                     })
                   ) : (
-                    <p className="self-center text-sm text-slate-500">No cost trend yet. Add monthly support costs below.</p>
+                    <p className="self-center text-sm text-slate-500">No provider cost trend is available yet. Cost history is populated from API synchronisation snapshots only.</p>
                   )}
-                </div>
-
-                <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="min-w-[850px] w-full text-sm">
-                    <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="px-3 py-2">Service/provider</th>
-                        <th>Category</th>
-                        <th>Month</th>
-                        <th>Currency</th>
-                        <th>Fixed</th>
-                        <th>Usage</th>
-                        <th>Other</th>
-                        <th>Total</th>
-                        <th>Status</th>
-                        <th>Invoice/reference</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {summary.costs.rows.length ? (
-                        summary.costs.rows.slice(0, 10).map((row) => (
-                          <tr key={row.id} className="border-t border-slate-100">
-                            <td className="px-3 py-2 font-medium text-slate-900">{row.service_provider}</td>
-                            <td>{row.cost_category}</td>
-                            <td>{row.billing_month?.slice(0, 7)}</td>
-                            <td>{row.currency}</td>
-                            <td>{fmtMoney(row.monthly_fixed_cost, row.currency)}</td>
-                            <td>{fmtMoney(row.usage_cost, row.currency)}</td>
-                            <td>{fmtMoney(row.other_cost, row.currency)}</td>
-                            <td className="font-semibold">{fmtMoney(row.total_cost, row.currency)}</td>
-                            <td>{row.payment_status}</td>
-                            <td>{row.invoice_reference || "-"}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={10} className="px-3 py-3 text-slate-500">
-                            No operating cost records have been entered yet.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </Panel>
-
-              <Panel title="Add Monthly Operating Cost" icon={<ReceiptText className="h-5 w-5 text-png-red" />}>
-                <div className="space-y-3">
-                  <Input label="Service/provider" value={form.service_provider} onChange={(v) => setForm({ ...form, service_provider: v })} />
-                  <Select label="Cost category" value={form.cost_category} onChange={(v) => setForm({ ...form, cost_category: v })} options={summary.costs.categories} />
-                  <Input label="Billing month" type="month" value={form.billing_month} onChange={(v) => setForm({ ...form, billing_month: v })} />
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input label="Fixed" type="number" value={form.monthly_fixed_cost} onChange={(v) => setForm({ ...form, monthly_fixed_cost: v })} />
-                    <Input label="Usage" type="number" value={form.usage_cost} onChange={(v) => setForm({ ...form, usage_cost: v })} />
-                    <Input label="Other" type="number" value={form.other_cost} onChange={(v) => setForm({ ...form, other_cost: v })} />
-                  </div>
-                  <Input label="Invoice/reference" value={form.invoice_reference} onChange={(v) => setForm({ ...form, invoice_reference: v })} />
-                  <Select label="Payment status" value={form.payment_status} onChange={(v) => setForm({ ...form, payment_status: v })} options={["Pending", "Approved", "Paid", "Disputed", "Not Applicable"]} />
-                  <Input label="Operational monthly budget" type="number" value={form.operational_budget} onChange={(v) => setForm({ ...form, operational_budget: v })} />
-                  <button onClick={saveCost} disabled={saving} className="w-full rounded-lg bg-png-red px-3 py-2 text-sm font-semibold text-white hover:bg-png-maroon disabled:opacity-60">
-                    {saving ? "Saving..." : "Save cost entry"}
-                  </button>
                 </div>
               </Panel>
             </section>
@@ -1071,29 +942,5 @@ function Notice({ tone, icon, text }: { tone: "red" | "green"; icon: React.React
       {icon}
       <p>{text}</p>
     </div>
-  )
-}
-
-function Input({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red" />
-    </label>
-  )
-}
-
-function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red">
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
   )
 }

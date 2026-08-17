@@ -165,7 +165,7 @@ function parseFeedResult(config: FeedConfig, data: unknown, source: LiveCostProv
     usageValue: typeof usageValue === 'number' || typeof usageValue === 'string' ? usageValue : null,
     usageUnit: config.usageUnitPath ? String(getPath(data, config.usageUnitPath) || '') || null : null,
     invoiceReference: config.invoiceReferencePath ? String(getPath(data, config.invoiceReferencePath) || '') || null : null,
-    notes: config.notes || (current === null ? 'Connected, but this endpoint did not expose a current-month cost value.' : 'Live provider cost retrieved online.'),
+    notes: config.notes || (current === null ? 'Connected, but this endpoint did not expose a current billing-period cost value.' : 'Provider billing cost retrieved from API.'),
     dashboardUrl: config.dashboardUrl || null,
   }
 }
@@ -219,7 +219,7 @@ function builtInProviders(): BuiltInProvider[] {
       fallbackCheckUrl: ref ? `https://api.supabase.com/v1/projects/${ref}` : null,
       fallbackTokenEnvForCheck: 'SUPABASE_ACCESS_TOKEN',
       dashboardUrlEnv: 'SUPABASE_DASHBOARD_URL',
-      notesWhenNotConfigured: 'Live Supabase cost requires a server-side SUPABASE_COST_ENDPOINT or a Management API token for connectivity checks. If the provider does not expose billing totals through API, keep recording invoice values in the manual register.',
+      notesWhenNotConfigured: 'Supabase cost monitoring requires a server-side SUPABASE_COST_ENDPOINT or a Management API token for connectivity checks. If the provider does not expose billing totals through API, this provider must remain marked as billing data unavailable.',
     },
     {
       id: 'netlify',
@@ -236,7 +236,7 @@ function builtInProviders(): BuiltInProvider[] {
       fallbackCheckUrl: accountSlug ? `https://api.netlify.com/api/v1/accounts/${accountSlug}` : null,
       fallbackTokenEnvForCheck: 'NETLIFY_AUTH_TOKEN',
       dashboardUrlEnv: 'NETLIFY_DASHBOARD_URL',
-      notesWhenNotConfigured: 'Live Netlify cost requires a server-side NETLIFY_COST_ENDPOINT or Netlify account token for connectivity checks. Billing totals may need an approved billing export/API endpoint from Netlify.',
+      notesWhenNotConfigured: 'Netlify cost monitoring requires a server-side NETLIFY_COST_ENDPOINT or Netlify account token for connectivity checks. If Netlify does not expose billing totals through API, this provider must remain marked as billing data unavailable.',
     },
   ]
 }
@@ -257,7 +257,7 @@ async function loadBuiltInProvider(provider: BuiltInProvider) {
       previousMonthCostPath: env(provider.previousAmountPathEnv) || 'previousMonthCost',
       currencyPath: env(provider.currencyPathEnv) || 'currency',
       dashboardUrl: dashboardUrl || undefined,
-      notes: 'Live provider costing endpoint configured server-side.',
+      notes: 'Provider billing endpoint configured server-side.',
     }, 'provider_api')
   }
 
