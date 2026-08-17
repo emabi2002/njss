@@ -20,6 +20,38 @@ type CostCentre = { id: string; code: string; name: string; section_id: string |
 type ExpenseCode = { id: string; full_expense_code: string; section_id: string | null }
 type BudgetInfo = { available_balance: number; quarterly_released: number }
 type BudgetCheck = { budgetAllocationId: string | null; mappingStatus: string; allocationCount: number; revised: number; released: number; pending: number; committed: number; spent: number; available: number; projectedAvailableAfterPending: number; hasAllocation: boolean } | null
+type FF3ItemDraft = {
+  line_number: number
+  item_code: string
+  item_description: string
+  specifications: string
+  quantity: number
+  unit_of_measure: string
+  unit_of_measure_id: string
+  estimated_unit_price: number
+  source_quotation_id: string
+  source_quotation_line_id: string
+  line_notes: string
+}
+
+const newItemLine = (lineNumber: number): FF3ItemDraft => ({
+  line_number: lineNumber,
+  item_code: "",
+  item_description: "",
+  specifications: "",
+  quantity: 0,
+  unit_of_measure: "",
+  unit_of_measure_id: "",
+  estimated_unit_price: 0,
+  source_quotation_id: "",
+  source_quotation_line_id: "",
+  line_notes: "",
+})
+
+const money = (value: number) => Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const lineTotal = (item: FF3ItemDraft) => (Number(item.quantity) || 0) * (Number(item.estimated_unit_price) || 0)
+const isBlankItem = (item: FF3ItemDraft) => !item.item_code.trim() && !item.item_description.trim() && !item.specifications.trim() && !item.unit_of_measure_id && !item.unit_of_measure.trim() && !item.line_notes.trim() && Number(item.quantity || 0) === 0 && Number(item.estimated_unit_price || 0) === 0
+const isValidItem = (item: FF3ItemDraft) => Boolean(item.item_description.trim() && Number(item.quantity) > 0 && item.unit_of_measure_id && Number(item.estimated_unit_price) >= 0)
 
 export default function NewFF3Page() {
   const router = useRouter()
@@ -66,9 +98,7 @@ export default function NewFF3Page() {
     supplier_not_required_comments: "",
   })
 
-  const [items, setItems] = useState([
-    { line_number: 1, item_description: "", specifications: "", quantity: 0, unit_of_measure: "", unit_of_measure_id: "", estimated_unit_price: 0 }
-  ])
+  const [items, setItems] = useState<FF3ItemDraft[]>([newItemLine(1)])
 
   const [quotations, setQuotations] = useState([
     { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" },
@@ -212,22 +242,70 @@ export default function NewFF3Page() {
     return () => { cancelled = true }
   }, [formData.expense_code_registry_id, formData.section_id, formData.department_id, formData.cost_centre_id, formData.funding_source_id, formData.project_id, formData.financial_year])
 
+  const renumberItems = (rows: FF3ItemDraft[]) => rows.map((item, index) => ({ ...item, line_number: index + 1 }))
+
   const addItem = () => {
-    setItems([...items, {
-      line_number: items.length + 1,
-      item_description: "",
-      specifications: "",
-      quantity: 0,
-      unit_of_measure: "",
-      unit_of_measure_id: "",
-      estimated_unit_price: 0
-    }])
+    setItems((current) => [...current, newItemLine(current.length + 1)])
+  }
+
+  const updateItem = (index: number, patch: Partial<FF3ItemDraft>) => {
+    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
   }
 
   const removeItem = (index: number) => {
-    if (items.length > 1) {
-      setItems(items.filter((_, i) => i !== index))
-    }
+    setItems((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index)
+      return renumberItems(next.length ? next : [newItemLine(1)])
+    })
+  }
+
+  const resolveUnit = (value: string) => {
+    const needle = value.trim().toLowerCase()
+    if (!needle) return null
+    return units.find((unit) => unit.id === value || unit.code?.toLowerCase() === needle || unit.name.toLowerCase() === needle) || null
+  }
+
+  const handleItemGridPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const text = event.clipboardData.getData("text")
+    if (!text.includes("\t") && !text.includes("\n")) return
+    event.preventDefault()
+    const parsedRows = text
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => line.split("\t"))
+      .filter((cols) => cols.some((col) => col.trim()))
+
+    const imported = parsedRows
+      .filter((cols) => !/description|item|service/i.test(cols[0] || ""))
+      .map((cols, index) => {
+        const unit = resolveUnit(cols[3] || "")
+        return {
+          ...newItemLine(index + 1),
+          item_description: (cols[0] || "").trim(),
+          specifications: (cols[1] || "").trim(),
+          quantity: Number(String(cols[2] || "0").replace(/,/g, "")) || 0,
+          unit_of_measure_id: unit?.id || "",
+          unit_of_measure: unit?.name || (cols[3] || "").trim(),
+          estimated_unit_price: Number(String(cols[4] || "0").replace(/,/g, "")) || 0,
+          line_notes: (cols[5] || "").trim(),
+        }
+      })
+
+    if (imported.length) setItems((current) => renumberItems([...current.filter((item) => !isBlankItem(item)), ...imported]))
+  }
+
+  const handleItemGridKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter") return
+    const target = event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    if (target.dataset.finalCell !== "true") return
+    const rowIndex = Number(target.dataset.rowIndex || -1)
+    if (rowIndex !== items.length - 1) return
+    event.preventDefault()
+    addItem()
+    setTimeout(() => {
+      const next = document.querySelector<HTMLInputElement>(`[data-item-cell="${rowIndex + 1}-description"]`)
+      next?.focus()
+    }, 0)
   }
 
   const addQuotation = () => {
@@ -287,7 +365,9 @@ export default function NewFF3Page() {
     setSupportingDocs(prev => prev.filter((_, i) => i !== index))
   }
 
-  const totalEstimate = items.reduce((sum, item) => sum + (item.quantity * item.estimated_unit_price), 0)
+  const validItems = items.filter((item) => !isBlankItem(item) && isValidItem(item))
+  const invalidItems = items.filter((item) => !isBlankItem(item) && !isValidItem(item))
+  const totalEstimate = validItems.reduce((sum, item) => sum + lineTotal(item), 0)
   const effectiveAvailable = budgetCheck?.hasAllocation ? budgetCheck.available : budgetInfo.available_balance
   const selectedCode = expenseCodes.find(c => c.id === formData.expense_code_registry_id)
   const selectedQuotation = quotations.find(q => q.is_selected)
@@ -310,6 +390,18 @@ export default function NewFF3Page() {
     setSubmitting(true)
 
     try {
+      const rowsToSave = items.filter((item) => !isBlankItem(item))
+      const invalidRows = rowsToSave.filter((item) => !isValidItem(item))
+      if (invalidRows.length > 0) {
+        setError('Complete every populated line item before saving: Description, Quantity greater than zero, Unit of Measure, and non-negative Unit Price are required.')
+        setSubmitting(false)
+        return
+      }
+      if (status === 'SUBMITTED' && rowsToSave.length === 0) {
+        setError('Add at least one valid requisition line item before submission.')
+        setSubmitting(false)
+        return
+      }
       let latestBudget = budgetCheck
       // Check budget before submitting against the exact approved Excel budget allocation.
       if (status === 'SUBMITTED') {
@@ -403,16 +495,20 @@ export default function NewFF3Page() {
 
       // Insert FF3 items
       const itemsToInsert = items
-        .filter(item => item.item_description)
+        .filter(item => !isBlankItem(item) && isValidItem(item))
         .map((item, index) => ({
           ff3_header_id: header.id,
           line_number: index + 1,
+          item_code: item.item_code || null,
           item_description: item.item_description,
           specifications: item.specifications || null,
           quantity: item.quantity,
           unit_of_measure: item.unit_of_measure || null,
           unit_of_measure_id: item.unit_of_measure_id || null,
-          estimated_unit_price: item.estimated_unit_price
+          estimated_unit_price: item.estimated_unit_price,
+          source_quotation_id: item.source_quotation_id || null,
+          source_quotation_line_id: item.source_quotation_line_id || null,
+          line_notes: item.line_notes || null
         }))
 
       if (itemsToInsert.length > 0) {
@@ -671,93 +767,92 @@ export default function NewFF3Page() {
         </div>
       </div>
 
-      {/* Section C: Item Details */}
-      <div className="bg-white rounded-lg border border-slate-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">Section C: Item Details</h2>
-          <button
-            onClick={addItem}
-            className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Add Item
-          </button>
+      {/* Section C: Requisition Line Items */}
+      <div className="bg-white rounded-lg border border-slate-200 p-4 sm:p-6">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Section C: Requisition Line Items</h2>
+            <p className="mt-1 text-sm text-slate-600">Enter one database line per quoted item or service. Units are loaded from the controlled units register.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={addItem} className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2">
+              <Plus className="h-4 w-4" /> Add Line Item
+            </button>
+            <button type="button" onClick={() => setError('Structured quotation-line import will be available when quotation lines have been entered into ff3_quotation_items. Uploaded PDFs/images are not parsed automatically.')} className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+              Import from Quotation
+            </button>
+            <button type="button" onClick={() => setError('Excel/CSV import requires Upload → Map Columns → Preview → Validate → Import. Paste rows from Excel into the grid for this release.')} className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+              Import Excel/CSV
+            </button>
+          </div>
         </div>
-        <div className="space-y-4">
-          {items.map((item, index) => (
-            <div key={index} className="border border-slate-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="font-medium text-slate-700">Item {index + 1}</span>
-                {items.length > 1 && (
-                  <button onClick={() => removeItem(index)} className="text-red-600 hover:text-red-700">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Item Description <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={item.item_description}
-                    onChange={(e) => {
-                      const newItems = [...items]
-                      newItems[index].item_description = e.target.value
-                      setItems(newItems)
-                    }}
-                    placeholder="Enter item description"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Quantity</label>
-                  <input
-                    type="number"
-                    value={item.quantity || ""}
-                    onChange={(e) => {
-                      const newItems = [...items]
-                      newItems[index].quantity = parseFloat(e.target.value) || 0
-                      setItems(newItems)
-                    }}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Unit Price (K)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={item.estimated_unit_price || ""}
-                    onChange={(e) => {
-                      const newItems = [...items]
-                      newItems[index].estimated_unit_price = parseFloat(e.target.value) || 0
-                      setItems(newItems)
-                    }}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-                  />
-                </div>
-                <LookupSelect label="Unit of Measure" value={item.unit_of_measure_id} options={units} placeholder="Select unit" canAdd addTable="units_of_measure" addLabel="+ Add Unit" onRefresh={async () => setUnits(await loadLookup('units_of_measure'))} onChange={(value, option) => {
-                  const newItems = [...items]
-                  newItems[index].unit_of_measure_id = value
-                  newItems[index].unit_of_measure = option?.name || ""
-                  setItems(newItems)
-                }} />
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Total (K)</label>
-                  <input
-                    type="text"
-                    value={(item.quantity * item.estimated_unit_price).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    disabled
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 font-medium"
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
+
+        {invalidItems.length > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {invalidItems.length} populated line item(s) need Description, Quantity, Unit of Measure and Unit Price before saving or submitting.
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-xl border border-slate-200" onPaste={handleItemGridPaste} onKeyDown={handleItemGridKeyDown}>
+          <table className="min-w-[1280px] w-full border-collapse text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="w-12 border-b border-slate-200 px-2 py-2 text-right">#</th>
+                <th className="w-[260px] border-b border-slate-200 px-2 py-2">Item / Service Description</th>
+                <th className="w-[260px] border-b border-slate-200 px-2 py-2">Specifications / Details</th>
+                <th className="w-24 border-b border-slate-200 px-2 py-2 text-right">Qty</th>
+                <th className="w-44 border-b border-slate-200 px-2 py-2">Unit</th>
+                <th className="w-36 border-b border-slate-200 px-2 py-2 text-right">Unit Price (K)</th>
+                <th className="w-36 border-b border-slate-200 px-2 py-2 text-right">Line Total (K)</th>
+                <th className="w-40 border-b border-slate-200 px-2 py-2">Quote Ref / Notes</th>
+                <th className="w-20 border-b border-slate-200 px-2 py-2 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, index) => {
+                const invalid = !isBlankItem(item) && !isValidItem(item)
+                return (
+                  <tr key={index} className={`${invalid ? 'bg-amber-50' : index % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'} align-top`}>
+                    <td className="border-b border-slate-100 px-2 py-2 text-right font-semibold text-slate-600">{index + 1}</td>
+                    <td className="border-b border-slate-100 px-2 py-1.5">
+                      <input data-item-cell={`${index}-description`} value={item.item_description} onChange={(e) => updateItem(index, { item_description: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Description" />
+                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1.5">
+                      <input value={item.specifications} onChange={(e) => updateItem(index, { specifications: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Technical requirement" />
+                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1.5">
+                      <input type="number" min="0" step="0.01" value={item.quantity || ""} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) || 0 })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-right focus:outline-none focus:ring-2 focus:ring-png-red" />
+                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1.5">
+                      <select value={item.unit_of_measure_id} onChange={(e) => {
+                        const unit = units.find((row) => row.id === e.target.value)
+                        updateItem(index, { unit_of_measure_id: e.target.value, unit_of_measure: unit?.name || "" })
+                      }} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red">
+                        <option value="">Select unit</option>
+                        {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code ? `${unit.code} — ${unit.name}` : unit.name}</option>)}
+                      </select>
+                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1.5">
+                      <input type="number" min="0" step="0.01" value={item.estimated_unit_price || ""} onChange={(e) => updateItem(index, { estimated_unit_price: Number(e.target.value) || 0 })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-right focus:outline-none focus:ring-2 focus:ring-png-red" />
+                    </td>
+                    <td className="border-b border-slate-100 px-2 py-2 text-right font-semibold text-slate-900">{money(lineTotal(item))}</td>
+                    <td className="border-b border-slate-100 px-2 py-1.5">
+                      <input data-final-cell="true" data-row-index={index} value={item.line_notes} onChange={(e) => updateItem(index, { line_notes: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Q-001 / notes" />
+                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1.5 text-center">
+                      <button type="button" onClick={() => removeItem(index)} className="inline-flex rounded-md p-2 text-red-600 hover:bg-red-50" aria-label={`Remove line ${index + 1}`}>
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
-        <div className="mt-4 flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-          <span className="font-semibold text-slate-900">Total Estimated Amount:</span>
-          <span className="text-xl font-bold text-slate-900">K {totalEstimate.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+        <div className="mt-4 flex flex-col gap-2 rounded-lg bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <span className="font-semibold text-slate-900">TOTAL ESTIMATED REQUISITION:</span>
+          <span className="text-xl font-bold text-slate-900">K {money(totalEstimate)}</span>
         </div>
       </div>
 
