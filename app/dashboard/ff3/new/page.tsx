@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Save, Send, Plus, Trash2, AlertCircle, CheckCircle2, ArrowLeft, Loader2, Upload, X, FileText } from "lucide-react"
-import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
 import { checkBudgetAndNotify, notifyFF3Submitted } from "@/lib/notifications"
@@ -30,20 +29,8 @@ type FF3ItemDraft = {
   unit_of_measure: string
   unit_of_measure_id: string
   estimated_unit_price: number
-  source_quotation_id: string
-  source_quotation_line_id: string
   line_notes: string
 }
-type ImportStep = "idle" | "map" | "preview"
-type ImportColumnMap = {
-  item_description: string
-  specifications: string
-  quantity: string
-  unit_of_measure: string
-  estimated_unit_price: string
-  line_notes: string
-}
-type QuotationLineDraft = FF3ItemDraft
 
 const newItemLine = (lineNumber: number): FF3ItemDraft => ({
   line_number: lineNumber,
@@ -54,21 +41,9 @@ const newItemLine = (lineNumber: number): FF3ItemDraft => ({
   unit_of_measure: "",
   unit_of_measure_id: "",
   estimated_unit_price: 0,
-  source_quotation_id: "",
-  source_quotation_line_id: "",
   line_notes: "",
 })
 
-const defaultImportMap: ImportColumnMap = {
-  item_description: "",
-  specifications: "",
-  quantity: "",
-  unit_of_measure: "",
-  estimated_unit_price: "",
-  line_notes: "",
-}
-
-const normalizeHeader = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")
 const money = (value: number) => Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const lineTotal = (item: FF3ItemDraft) => (Number(item.quantity) || 0) * (Number(item.estimated_unit_price) || 0)
 const isBlankItem = (item: FF3ItemDraft) => !item.item_code.trim() && !item.item_description.trim() && !item.specifications.trim() && !item.unit_of_measure_id && !item.unit_of_measure.trim() && !item.line_notes.trim() && Number(item.quantity || 0) === 0 && Number(item.estimated_unit_price || 0) === 0
@@ -125,13 +100,6 @@ export default function NewFF3Page() {
     { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" },
     { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" }
   ])
-
-  const [quotationItems, setQuotationItems] = useState<Record<number, QuotationLineDraft[]>>({})
-  const [showQuotationItems, setShowQuotationItems] = useState<Record<number, boolean>>({})
-  const [importStep, setImportStep] = useState<ImportStep>("idle")
-  const [importHeaders, setImportHeaders] = useState<string[]>([])
-  const [importRows, setImportRows] = useState<Record<string, string>[]>([])
-  const [importMap, setImportMap] = useState<ImportColumnMap>(defaultImportMap)
 
   const [supportingDocs, setSupportingDocs] = useState<UploadedFile[]>([])
   const [uploadingQuotation, setUploadingQuotation] = useState<number | null>(null)
@@ -239,33 +207,6 @@ export default function NewFF3Page() {
   const updateItem = (index: number, patch: Partial<FF3ItemDraft>) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
   const removeItem = (index: number) => setItems((current) => renumberItems(current.filter((_, itemIndex) => itemIndex !== index).length ? current.filter((_, itemIndex) => itemIndex !== index) : [newItemLine(1)]))
 
-  const resolveUnit = (value: string) => {
-    const needle = value.trim().toLowerCase()
-    if (!needle) return null
-    return units.find((unit) => unit.id === value || unit.code?.toLowerCase() === needle || unit.name.toLowerCase() === needle) || null
-  }
-
-  const handleItemGridPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
-    const text = event.clipboardData.getData("text")
-    if (!text.includes("\t") && !text.includes("\n")) return
-    event.preventDefault()
-    const parsedRows = text.trim().split(/\r?\n/).map((line) => line.split("\t")).filter((cols) => cols.some((col) => col.trim()))
-    const imported = parsedRows.filter((cols) => !/description|item|service/i.test(cols[0] || "")).map((cols, index) => {
-      const unit = resolveUnit(cols[3] || "")
-      return {
-        ...newItemLine(index + 1),
-        item_description: (cols[0] || "").trim(),
-        specifications: (cols[1] || "").trim(),
-        quantity: Number(String(cols[2] || "0").replace(/,/g, "")) || 0,
-        unit_of_measure_id: unit?.id || "",
-        unit_of_measure: unit?.name || (cols[3] || "").trim(),
-        estimated_unit_price: Number(String(cols[4] || "0").replace(/,/g, "")) || 0,
-        line_notes: (cols[5] || "").trim(),
-      }
-    })
-    if (imported.length) setItems((current) => renumberItems([...current.filter((item) => !isBlankItem(item)), ...imported]))
-  }
-
   const handleItemGridKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Enter") return
     const target = event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
@@ -280,84 +221,7 @@ export default function NewFF3Page() {
     }, 0)
   }
 
-  const rowsFromMappedImport = (rows = importRows, map = importMap) => rows.map((row, index) => {
-    const unit = resolveUnit(row[map.unit_of_measure] || "")
-    return {
-      ...newItemLine(index + 1),
-      item_description: (row[map.item_description] || "").trim(),
-      specifications: (row[map.specifications] || "").trim(),
-      quantity: Number(String(row[map.quantity] || "0").replace(/,/g, "")) || 0,
-      unit_of_measure_id: unit?.id || "",
-      unit_of_measure: unit?.name || (row[map.unit_of_measure] || "").trim(),
-      estimated_unit_price: Number(String(row[map.estimated_unit_price] || "0").replace(/,/g, "")) || 0,
-      line_notes: (row[map.line_notes] || "").trim(),
-    }
-  })
-
-  const guessImportMap = (headers: string[]): ImportColumnMap => {
-    const find = (...needles: string[]) => headers.find((header) => needles.some((needle) => normalizeHeader(header).includes(needle))) || ""
-    return {
-      item_description: find("description", "item", "service"),
-      specifications: find("spec", "detail"),
-      quantity: find("qty", "quantity"),
-      unit_of_measure: find("uom", "unit"),
-      estimated_unit_price: find("unit_price", "price", "rate"),
-      line_notes: find("quote", "note", "ref"),
-    }
-  }
-
-  const handleLineImportFile = async (file: File) => {
-    const buffer = await file.arrayBuffer()
-    const workbook = XLSX.read(buffer, { type: "array" })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    const matrix = XLSX.utils.sheet_to_json<Array<string | number | null>>(sheet, { header: 1, defval: "" })
-    const headerRow = (matrix[0] || []).map((cell) => String(cell || "").trim()).filter(Boolean)
-    const dataRows = matrix.slice(1).filter((row) => row.some((cell) => String(cell || "").trim()))
-    const rows = dataRows.map((row) => Object.fromEntries(headerRow.map((header, index) => [header, String(row[index] || "").trim()])))
-    setImportHeaders(headerRow)
-    setImportRows(rows)
-    setImportMap(guessImportMap(headerRow))
-    setImportStep("map")
-  }
-
-  const importMappedRowsToGrid = () => {
-    const imported = rowsFromMappedImport()
-    const invalid = imported.filter((row) => !isValidItem(row))
-    if (invalid.length > 0) {
-      setError(`${invalid.length} imported row(s) failed validation. Check column mapping, unit names, quantities and prices before import.`)
-      return
-    }
-    setItems((current) => renumberItems([...current.filter((item) => !isBlankItem(item)), ...imported]))
-    setImportStep("idle")
-    setImportHeaders([])
-    setImportRows([])
-    setImportMap(defaultImportMap)
-    setError("")
-  }
-
   const addQuotation = () => setQuotations([...quotations, { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" }])
-  const addQuotationLine = (quotationIndex: number) => setQuotationItems((current) => {
-    const lines = current[quotationIndex] || []
-    return { ...current, [quotationIndex]: [...lines, newItemLine(lines.length + 1)] }
-  })
-  const updateQuotationLine = (quotationIndex: number, lineIndex: number, patch: Partial<QuotationLineDraft>) => setQuotationItems((current) => {
-    const lines = current[quotationIndex] || []
-    return { ...current, [quotationIndex]: lines.map((line, index) => index === lineIndex ? { ...line, ...patch } : line) }
-  })
-  const removeQuotationLine = (quotationIndex: number, lineIndex: number) => setQuotationItems((current) => {
-    const lines = (current[quotationIndex] || []).filter((_, index) => index !== lineIndex)
-    return { ...current, [quotationIndex]: renumberItems(lines.length ? lines : [newItemLine(1)]) }
-  })
-  const importQuotationLinesToSectionC = (quotationIndex: number) => {
-    const lines = (quotationItems[quotationIndex] || []).filter((line) => !isBlankItem(line) && isValidItem(line))
-    if (!lines.length) {
-      setError("Enter and validate structured quotation lines before importing them into Section C.")
-      return
-    }
-    const quotation = quotations[quotationIndex]
-    setItems((current) => renumberItems([...current.filter((item) => !isBlankItem(item)), ...lines.map((line) => ({ ...line, source_quotation_id: "", source_quotation_line_id: "", line_notes: line.line_notes || quotation.quotation_number || `Quotation ${quotationIndex + 1}` }))]))
-    setError("")
-  }
 
   const handleQuotationUpload = async (index: number, file: File) => {
     if (!file) return
@@ -413,7 +277,7 @@ export default function NewFF3Page() {
       const rowsToSave = items.filter((item) => !isBlankItem(item))
       const invalidRows = rowsToSave.filter((item) => !isValidItem(item))
       if (invalidRows.length > 0) {
-        setError("Complete every populated line item before saving: Description, Quantity greater than zero, Unit of Measure, and non-negative Unit Price are required.")
+        setError("Complete every populated line item before saving or submitting.")
         setSubmitting(false)
         return
       }
@@ -509,8 +373,6 @@ export default function NewFF3Page() {
         unit_of_measure: item.unit_of_measure || null,
         unit_of_measure_id: item.unit_of_measure_id || null,
         estimated_unit_price: item.estimated_unit_price,
-        source_quotation_id: item.source_quotation_id || null,
-        source_quotation_line_id: item.source_quotation_line_id || null,
         line_notes: item.line_notes || null
       }))
 
@@ -532,31 +394,8 @@ export default function NewFF3Page() {
       }))
 
       if (quotsToInsert.length > 0) {
-        const { data: insertedQuotations, error: quotsError } = await supabase.from("ff3_quotations").insert(quotsToInsert).select("id, quotation_number")
+        const { error: quotsError } = await supabase.from("ff3_quotations").insert(quotsToInsert)
         if (quotsError) throw quotsError
-
-        const structuredQuotationLines = (insertedQuotations || []).flatMap((quotation, insertedIndex) => {
-          const originalIndex = quotations.findIndex((q) => q.quotation_number === quotation.quotation_number && q.supplier_name && q.quotation_amount > 0)
-          const quotationIndex = originalIndex >= 0 ? originalIndex : insertedIndex
-          return (quotationItems[quotationIndex] || [])
-            .filter((line) => !isBlankItem(line) && isValidItem(line))
-            .map((line, lineIndex) => ({
-              quotation_id: quotation.id,
-              line_number: lineIndex + 1,
-              item_code: line.item_code || null,
-              item_description: line.item_description,
-              specifications: line.specifications || null,
-              quantity: line.quantity,
-              unit_of_measure_id: line.unit_of_measure_id || null,
-              quoted_unit_price: line.estimated_unit_price,
-              notes: line.line_notes || null,
-            }))
-        })
-
-        if (structuredQuotationLines.length > 0) {
-          const { error: quoteItemsError } = await supabase.from("ff3_quotation_items").insert(structuredQuotationLines)
-          if (quoteItemsError) throw quoteItemsError
-        }
       }
 
       if (status === "SUBMITTED") {
@@ -632,56 +471,12 @@ export default function NewFF3Page() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={addItem} className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2"><Plus className="h-4 w-4" /> Add Line Item</button>
-            <button type="button" onClick={() => setError("Structured quotation-line import will be available when quotation lines have been entered into ff3_quotation_items. Uploaded PDFs/images are not parsed automatically.")} className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Import from Quotation</button>
-            <label className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 cursor-pointer">
-              Import Excel/CSV
-              <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(event) => event.target.files?.[0] && handleLineImportFile(event.target.files[0])} />
-            </label>
           </div>
         </div>
 
         {invalidItems.length > 0 && <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{invalidItems.length} populated line item(s) need Description, Quantity, Unit of Measure and Unit Price before saving or submitting.</div>}
 
-        {importStep !== "idle" && (
-          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h3 className="font-semibold text-slate-900">Import Line Items</h3>
-                <p className="text-sm text-slate-600">Upload → Map Columns → Preview → Validate → Import. Nothing is saved until the FF3 is saved.</p>
-              </div>
-              <button type="button" onClick={() => setImportStep("idle")} className="text-sm font-semibold text-slate-600 hover:text-slate-900">Cancel</button>
-            </div>
-            {importStep === "map" && (
-              <div className="grid gap-3 md:grid-cols-3">
-                {Object.keys(defaultImportMap).map((key) => (
-                  <label key={key} className="text-sm font-medium text-slate-700">
-                    {key.replace(/_/g, " ")}
-                    <select value={importMap[key as keyof ImportColumnMap]} onChange={(event) => setImportMap((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2">
-                      <option value="">Not mapped</option>
-                      {importHeaders.map((header) => <option key={header} value={header}>{header}</option>)}
-                    </select>
-                  </label>
-                ))}
-                <div className="md:col-span-3 flex justify-end">
-                  <button type="button" onClick={() => setImportStep("preview")} className="px-4 py-2 rounded-lg bg-png-red text-white font-semibold">Preview & Validate</button>
-                </div>
-              </div>
-            )}
-            {importStep === "preview" && (
-              <div className="space-y-3">
-                <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white">
-                  <table className="min-w-[900px] w-full text-sm">
-                    <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-2 py-2 text-left">Description</th><th className="px-2 py-2 text-left">Specs</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-left">Unit</th><th className="px-2 py-2 text-right">Price</th><th className="px-2 py-2 text-left">Status</th></tr></thead>
-                    <tbody>{rowsFromMappedImport().slice(0, 50).map((row, index) => <tr key={index} className={isValidItem(row) ? "" : "bg-amber-50"}><td className="border-t px-2 py-1">{row.item_description}</td><td className="border-t px-2 py-1">{row.specifications}</td><td className="border-t px-2 py-1 text-right">{row.quantity}</td><td className="border-t px-2 py-1">{row.unit_of_measure}</td><td className="border-t px-2 py-1 text-right">{money(row.estimated_unit_price)}</td><td className="border-t px-2 py-1">{isValidItem(row) ? "Valid" : "Check mapping/unit"}</td></tr>)}</tbody>
-                  </table>
-                </div>
-                <div className="flex justify-between text-sm text-slate-600"><span>{importRows.length} row(s) loaded. Preview shows first 50 rows.</span><button type="button" onClick={importMappedRowsToGrid} className="px-4 py-2 rounded-lg bg-png-red text-white font-semibold">Import Validated Rows</button></div>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="overflow-x-auto rounded-xl border border-slate-200" onPaste={handleItemGridPaste} onKeyDown={handleItemGridKeyDown}>
+        <div className="overflow-x-auto rounded-xl border border-slate-200" onKeyDown={handleItemGridKeyDown}>
           <table className="min-w-[1280px] w-full border-collapse text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -777,28 +572,6 @@ export default function NewFF3Page() {
                   </label>
                 )}
               </div>
-
-              <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">Structured quotation lines</p>
-                    <p className="text-xs text-slate-500">Optional. Enter supplier quote lines here, then import them into Section C. PDFs/images are not parsed automatically.</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setShowQuotationItems((current) => ({ ...current, [index]: !current[index] }))} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700">{showQuotationItems[index] ? "Hide lines" : "Show lines"}</button>
-                    <button type="button" onClick={() => addQuotationLine(index)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700">Add quote line</button>
-                    <button type="button" onClick={() => importQuotationLinesToSectionC(index)} className="rounded-lg bg-png-red px-3 py-1.5 text-xs font-semibold text-white">Import to Section C</button>
-                  </div>
-                </div>
-                {showQuotationItems[index] && (
-                  <div className="overflow-x-auto rounded-lg border border-slate-200">
-                    <table className="min-w-[980px] w-full text-sm">
-                      <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-2 py-2 text-right">#</th><th className="px-2 py-2 text-left">Description</th><th className="px-2 py-2 text-left">Specifications</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-left">Unit</th><th className="px-2 py-2 text-right">Unit Price</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2 text-left">Notes</th><th className="px-2 py-2">Actions</th></tr></thead>
-                      <tbody>{(quotationItems[index] || [newItemLine(1)]).map((line, lineIndex) => <tr key={lineIndex}><td className="border-t px-2 py-1 text-right">{lineIndex + 1}</td><td className="border-t px-2 py-1"><input value={line.item_description} onChange={(event) => updateQuotationLine(index, lineIndex, { item_description: event.target.value })} className="w-full rounded border px-2 py-1" /></td><td className="border-t px-2 py-1"><input value={line.specifications} onChange={(event) => updateQuotationLine(index, lineIndex, { specifications: event.target.value })} className="w-full rounded border px-2 py-1" /></td><td className="border-t px-2 py-1"><input type="number" value={line.quantity || ""} onChange={(event) => updateQuotationLine(index, lineIndex, { quantity: Number(event.target.value) || 0 })} className="w-full rounded border px-2 py-1 text-right" /></td><td className="border-t px-2 py-1"><select value={line.unit_of_measure_id} onChange={(event) => { const unit = units.find((row) => row.id === event.target.value); updateQuotationLine(index, lineIndex, { unit_of_measure_id: event.target.value, unit_of_measure: unit?.name || "" }) }} className="w-full rounded border px-2 py-1"><option value="">Unit</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code ? `${unit.code} — ${unit.name}` : unit.name}</option>)}</select></td><td className="border-t px-2 py-1"><input type="number" value={line.estimated_unit_price || ""} onChange={(event) => updateQuotationLine(index, lineIndex, { estimated_unit_price: Number(event.target.value) || 0 })} className="w-full rounded border px-2 py-1 text-right" /></td><td className="border-t px-2 py-1 text-right font-semibold">{money(lineTotal(line))}</td><td className="border-t px-2 py-1"><input value={line.line_notes} onChange={(event) => updateQuotationLine(index, lineIndex, { line_notes: event.target.value })} className="w-full rounded border px-2 py-1" /></td><td className="border-t px-2 py-1 text-center"><button type="button" onClick={() => removeQuotationLine(index, lineIndex)} className="text-red-600"><Trash2 className="h-4 w-4" /></button></td></tr>)}</tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
             </div>
           ))}
         </div>
@@ -811,7 +584,7 @@ export default function NewFF3Page() {
           {uploadingDoc ? <Loader2 className="h-8 w-8 text-png-red animate-spin mb-2" /> : <Upload className="h-8 w-8 text-slate-400 mb-2" />}
           <span className="text-sm font-medium text-slate-700">{uploadingDoc ? "Uploading..." : "Click to upload supporting documents"}</span>
           <span className="text-xs text-slate-500 mt-1">PDF, JPG, PNG up to 10MB</span>
-          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={(e) => e.target.files?.[0] && handleDocUpload(e.target.files[0])} className="hidden" disabled={uploadingDoc} />
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={(e) => e.target.files?.[0] && handleDocUpload(e.target.files[0])} className="hidden" disabled={uploadingDoc} />
         </label>
         {supportingDocs.length > 0 && <div className="mt-4 space-y-2"><p className="text-sm font-medium text-slate-700">Uploaded Documents ({supportingDocs.length})</p>{supportingDocs.map((doc, index) => <div key={doc.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg"><FileText className="h-5 w-5 text-png-red" /><div className="flex-1 min-w-0"><a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-png-red hover:underline truncate block">{doc.name}</a><p className="text-xs text-slate-500">{(doc.size / 1024).toFixed(1)} KB</p></div><button type="button" onClick={() => removeDoc(index)} className="p-1 hover:bg-slate-200 rounded"><X className="h-4 w-4 text-slate-500" /></button></div>)}</div>}
       </div>
