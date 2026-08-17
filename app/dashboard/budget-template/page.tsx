@@ -20,6 +20,7 @@ import {
 import {
   MONTHS,
   createAuditEvent,
+  createBudgetCycle,
   createBudgetDivision,
   createDraftSubmission,
   deleteBudgetLine,
@@ -193,6 +194,8 @@ export default function BudgetTemplatePage() {
   const [selectedRow, setSelectedRow] = useState("")
   const [divisionSearch, setDivisionSearch] = useState("")
   const [showAddDivision, setShowAddDivision] = useState(false)
+  const [showAddCycle, setShowAddCycle] = useState(false)
+  const [newCycle, setNewCycle] = useState({ budget_year: String(new Date().getFullYear() + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
   const [newDivision, setNewDivision] = useState({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
   const [draftHeader, setDraftHeader] = useState({ cycle_id: "", division_id: "", budget_ceiling: "", submission_reference: "" })
 
@@ -337,6 +340,30 @@ export default function BudgetTemplatePage() {
       await loadDashboard()
     } catch (err) {
       setMessage({ type: "err", text: err instanceof Error ? `Could not create the draft submission: ${err.message}` : "Could not create the draft submission." })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addCycle = async () => {
+    if (!canAdmin || !newCycle.budget_year.trim() || !newCycle.cycle_type.trim() || !newCycle.name.trim()) return
+    setSaving(true)
+    try {
+      const created = await createBudgetCycle({
+        budget_year: Number(newCycle.budget_year),
+        cycle_type: newCycle.cycle_type,
+        name: newCycle.name,
+        submission_deadline: newCycle.submission_deadline || null,
+        department_ceiling: Number(newCycle.department_ceiling || 0),
+        instructions: 'Created from Budget Preparation controlled setup.',
+      })
+      setDraftHeader((h) => ({ ...h, cycle_id: created.id, budget_ceiling: String(created.department_ceiling || "") }))
+      setNewCycle({ budget_year: String(created.budget_year + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
+      setShowAddCycle(false)
+      await loadDashboard()
+      setMessage({ type: "ok", text: "Budget cycle added to the controlled budget cycle register." })
+    } catch (err) {
+      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not add budget cycle." })
     } finally {
       setSaving(false)
     }
@@ -639,9 +666,25 @@ export default function BudgetTemplatePage() {
             <div className="space-y-3 p-4">
               <Field label="Budget cycle">
                 <select value={draftHeader.cycle_id} onChange={(e) => setDraftHeader((h) => ({ ...h, cycle_id: e.target.value }))} className="input">
-                  <option value="">Select cycle</option>
+                  <option value="">Select cycle from database</option>
                   {lookups.cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
                 </select>
+                {canAdmin && (
+                  <div className="mt-2">
+                    <button type="button" onClick={() => setShowAddCycle((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">+ Add missing budget cycle to database</button>
+                    {showAddCycle && (
+                      <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                        <p className="text-[11px] text-amber-900">Creates a controlled row in <strong>budget_cycles</strong>. It will then appear in this dropdown from the database.</p>
+                        <input className="input" placeholder="Financial year, e.g. 2026" type="number" value={newCycle.budget_year} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, budget_year: e.target.value }))} />
+                        <input className="input" placeholder="Cycle type, e.g. ANNUAL" value={newCycle.cycle_type} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, cycle_type: e.target.value }))} />
+                        <input className="input" placeholder="Cycle name" value={newCycle.name} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, name: e.target.value }))} />
+                        <input className="input" placeholder="Submission deadline" type="date" value={newCycle.submission_deadline} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, submission_deadline: e.target.value }))} />
+                        <input className="input text-right" placeholder="Default budget ceiling" type="number" value={newCycle.department_ceiling} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, department_ceiling: e.target.value }))} />
+                        <button type="button" onClick={addCycle} disabled={saving} className="btn-primary w-full justify-center">Create controlled budget cycle</button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </Field>
               <Field label="Division / cost centre">
                 <div className="relative">
@@ -649,15 +692,16 @@ export default function BudgetTemplatePage() {
                   <input value={divisionSearch} onChange={(e) => setDivisionSearch(e.target.value)} className="input pl-8" placeholder="Search division" />
                 </div>
                 <select value={draftHeader.division_id} onChange={(e) => setDraftHeader((h) => ({ ...h, division_id: e.target.value }))} className="input mt-2">
-                  <option value="">Select active division</option>
+                  <option value="">Select active division from database</option>
                   {filteredDivisions.map((division) => <option key={division.id} value={division.id}>{division.code} — {division.name} — {division.cost_centre_code || division.cost_centre_name || "No cost centre"}</option>)}
                 </select>
+                {filteredDivisions.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No matching database record found. Use Add Division if you are authorised to create a controlled division/cost centre.</p>}
                 {restrictedDivisionUser && <p className="mt-1 text-[11px] text-slate-500">Division list is restricted by your assigned profile where possible.</p>}
               </Field>
               {canAdmin && (
                 <div>
-                  <button type="button" onClick={() => setShowAddDivision((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">+ Add Division</button>
-                  {showAddDivision && <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3"><input className="input" placeholder="Division code" value={newDivision.code} onChange={(e) => setNewDivision((d) => ({ ...d, code: e.target.value }))} /><input className="input" placeholder="Division name" value={newDivision.name} onChange={(e) => setNewDivision((d) => ({ ...d, name: e.target.value }))} /><input className="input" placeholder="Cost centre code" value={newDivision.cost_centre_code} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_code: e.target.value }))} /><input className="input" placeholder="Cost centre name" value={newDivision.cost_centre_name} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_name: e.target.value }))} /><button type="button" onClick={addDivision} className="btn-primary w-full justify-center">Create controlled division</button></div>}
+                  <button type="button" onClick={() => setShowAddDivision((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">+ Add missing division/cost centre to database</button>
+                  {showAddDivision && <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3"><p className="text-[11px] text-blue-900">Creates a controlled row in <strong>budget_divisions</strong>. It will then appear in this dropdown from the database.</p><input className="input" placeholder="Division code" value={newDivision.code} onChange={(e) => setNewDivision((d) => ({ ...d, code: e.target.value }))} /><input className="input" placeholder="Division name" value={newDivision.name} onChange={(e) => setNewDivision((d) => ({ ...d, name: e.target.value }))} /><input className="input" placeholder="Cost centre code" value={newDivision.cost_centre_code} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_code: e.target.value }))} /><input className="input" placeholder="Cost centre name" value={newDivision.cost_centre_name} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_name: e.target.value }))} /><button type="button" onClick={addDivision} disabled={saving} className="btn-primary w-full justify-center">Create controlled division</button></div>}
                 </div>
               )}
               <Field label="Budget ceiling"><input value={draftHeader.budget_ceiling} onChange={(e) => setDraftHeader((h) => ({ ...h, budget_ceiling: e.target.value }))} type="number" className="input text-right" /></Field>

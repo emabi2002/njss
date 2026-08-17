@@ -212,6 +212,23 @@ export async function getSubmissionDetail(id: string) {
   return { submission: submission.data as BudgetSubmission, lines: lines.data as BudgetLine[], history: history.data as BudgetWorkflowHistory[] }
 }
 
+export async function createBudgetCycle(input: { budget_year: number; cycle_type: string; name: string; submission_deadline?: string | null; department_ceiling?: number; instructions?: string | null }) {
+  const { data, error } = await supabase
+    .from('budget_cycles')
+    .insert({
+      budget_year: input.budget_year,
+      cycle_type: input.cycle_type.trim().toUpperCase(),
+      name: input.name.trim(),
+      submission_deadline: input.submission_deadline || null,
+      department_ceiling: input.department_ceiling || 0,
+      instructions: input.instructions || null,
+    })
+    .select('*')
+    .single()
+  if (error) throw error
+  return data as BudgetCycle
+}
+
 export async function createBudgetDivision(input: { code: string; name: string; department_id?: string | null; section_id?: string | null; cost_centre_code?: string | null; cost_centre_name?: string | null }) {
   const { data, error } = await supabase
     .from('budget_divisions')
