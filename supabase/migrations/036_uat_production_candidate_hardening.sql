@@ -219,22 +219,18 @@ BEGIN
 END $$;
 
 -- 9) Classify target system status for operations reporting.
--- Compatibility: older NJSS databases may not yet have these operational metadata columns.
-ALTER TABLE public.system_settings
-  ADD COLUMN IF NOT EXISTS is_public boolean NOT NULL DEFAULT false;
-
+-- Compatibility: older NJSS databases may not yet have updated_at on system_settings.
 ALTER TABLE public.system_settings
   ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
-INSERT INTO public.system_settings (setting_key, setting_value, description, is_public)
+INSERT INTO public.system_settings (setting_key, setting_value, description)
 VALUES
-  ('release_readiness_status', 'UAT READY - PRODUCTION CANDIDATE', 'Target status after hardening; not a Production Ready declaration.', true),
-  ('latest_database_migration', '036_uat_production_candidate_hardening', 'Latest applied NJSS migration identifier.', true),
-  ('backup_strategy', 'Use managed Supabase/database backups for production recovery. In-app export is portable data export only.', 'Production backup strategy summary.', false)
+  ('release_readiness_status', 'UAT READY - PRODUCTION CANDIDATE', 'Target status after hardening; not a Production Ready declaration.'),
+  ('latest_database_migration', '036_uat_production_candidate_hardening', 'Latest applied NJSS migration identifier.'),
+  ('backup_strategy', 'Use managed Supabase/database backups for production recovery. In-app export is portable data export only.', 'Production backup strategy summary.')
 ON CONFLICT (setting_key) DO UPDATE
 SET setting_value = EXCLUDED.setting_value,
     description = EXCLUDED.description,
-    is_public = EXCLUDED.is_public,
     updated_at = now();
 
 COMMIT;

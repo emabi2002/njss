@@ -95,8 +95,11 @@ CREATE POLICY ff3_quotation_items_manage_draft ON public.ff3_quotation_items
     )
   );
 
-INSERT INTO public.system_settings (setting_key, setting_value, description, is_public)
-VALUES ('latest_database_migration', '037_ff3_spreadsheet_line_items', 'Latest applied NJSS migration identifier.', true)
+ALTER TABLE public.system_settings
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+INSERT INTO public.system_settings (setting_key, setting_value, description)
+VALUES ('latest_database_migration', '037_ff3_spreadsheet_line_items', 'Latest applied NJSS migration identifier.')
 ON CONFLICT (setting_key) DO UPDATE
 SET setting_value = EXCLUDED.setting_value,
     description = EXCLUDED.description,
