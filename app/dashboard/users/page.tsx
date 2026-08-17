@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { Suspense, useCallback, useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   Users,
   Search,
@@ -43,6 +44,7 @@ type Department = {
 type RolePermissionRow = { role_id: string; permission: string; is_allowed: boolean }
 type RoleScopeRow = { role_id: string; scope_type: DataScopeType }
 type AdminTab = "users" | "roles" | "permissions" | "modules" | "scope" | "audit"
+const ADMIN_TABS: AdminTab[] = ["users", "roles", "permissions", "modules", "scope", "audit"]
 
 type UserFormData = {
   email: string
@@ -340,6 +342,10 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <AdminTabQuerySync onTabChange={setActiveTab} />
+      </Suspense>
+
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-png-red">Administration</p>
@@ -764,6 +770,17 @@ export default function UsersPage() {
       )}
     </div>
   )
+}
+
+function AdminTabQuerySync({ onTabChange }: { onTabChange: (tab: AdminTab) => void }) {
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const tab = searchParams.get("tab")
+    if (tab && ADMIN_TABS.includes(tab as AdminTab)) onTabChange(tab as AdminTab)
+  }, [onTabChange, searchParams])
+
+  return null
 }
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {

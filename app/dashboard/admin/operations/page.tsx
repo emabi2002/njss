@@ -325,7 +325,7 @@ export default function OperationsDashboardPage() {
   }
 
   return (
-    <PagePermissionGate any={["operations.view", "operations.manage", "settings.manage", "users.manage", "audit.view", "all"]} title="System Administration">
+    <PagePermissionGate any={["operations.view", "operations.manage", "settings.manage", "all"]} title="System Support & Operations">
       <div className="space-y-6">
         <div className="rounded-3xl border border-slate-200 bg-[#111827] p-6 text-white shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -333,7 +333,7 @@ export default function OperationsDashboardPage() {
               <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#D4A62A]">
                 <Gauge className="h-4 w-4" /> Phase 6 production support readiness
               </div>
-              <h1 className="mt-4 text-3xl font-bold">System Administration & Operations</h1>
+              <h1 className="mt-4 text-3xl font-bold">Operations Dashboard</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-300">
                 A restricted support dashboard for system health, capacity planning, user-access oversight, storage/database monitoring, operational costs, alerts and housekeeping. It does not alter financial workflows or expose secrets.
               </p>

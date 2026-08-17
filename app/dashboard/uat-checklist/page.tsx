@@ -102,7 +102,7 @@ export default function UatChecklistPage() {
   const today = new Date().toLocaleDateString("en-GB")
 
   return (
-    <PagePermissionGate permission="users.manage" title="UAT Checklist">
+    <PagePermissionGate any={["operations.view", "operations.manage", "settings.manage", "all"]} title="UAT Checklist">
       <div className="space-y-6">
         <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex-row lg:items-start lg:justify-between">
           <div>

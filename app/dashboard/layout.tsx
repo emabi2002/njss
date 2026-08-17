@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   ChevronDown,
   ChevronRight,
@@ -28,7 +28,16 @@ type NavGroup = { module: RbacModule; items: NavItem[]; active: boolean; collaps
 
 const SIDEBAR_EXPANDED_WIDTH = "w-64"
 const SIDEBAR_COLLAPSED_WIDTH = "w-[72px]"
-const COLLAPSIBLE_MODULES = new Set(["budget", "finance", "reports", "administration", "system", "transactions", "systems_administration"])
+const COLLAPSIBLE_MODULES = new Set([
+  "njss_operations",
+  "administration",
+  "systems_administration",
+  "budget",
+  "finance",
+  "reports",
+  "system",
+  "transactions",
+])
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -37,6 +46,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, profile, role, loading, signOut, menus, modules } = useAuth()
 
   useEffect(() => {
@@ -73,7 +83,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     window.localStorage.setItem("njss-sidebar-groups", JSON.stringify(expandedGroups))
   }, [expandedGroups])
 
-  const isActive = useCallback((href: string) => pathname === href || pathname.startsWith(href + "/"), [pathname])
+  const currentPathWithQuery = useMemo(() => {
+    const query = searchParams.toString()
+    return query ? `${pathname}?${query}` : pathname
+  }, [pathname, searchParams])
+
+  const isActive = useCallback(
+    (href: string) => {
+      const [targetPath, targetQuery] = href.split("?")
+      if (targetQuery) return currentPathWithQuery === href
+      return pathname === targetPath || pathname.startsWith(targetPath + "/")
+    },
+    [currentPathWithQuery, pathname],
+  )
 
   const visibleNavigation: NavItem[] = useMemo(
     () => menus.filter((item) => !item.parent_code).sort((a, b) => a.sort_order - b.sort_order),
@@ -258,9 +280,30 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {groupedNavigation.map((group) => {
                   const GroupIcon = ICONS[group.module.icon || "LayoutDashboard"] || LayoutDashboard
                   const expanded = !group.collapsible || group.active || expandedGroups[group.module.code]
+                  const isSupportGroup = group.module.code === "systems_administration"
 
                   return (
-                    <div key={group.module.code}>
+                    <div
+                      key={group.module.code}
+                      className={
+                        isSupportGroup
+                          ? sidebarCollapsed
+                            ? "mt-4 border-t border-[#D4A62A]/45 pt-3"
+                            : "mt-5 border-t border-[#D4A62A]/45 pt-4"
+                          : undefined
+                      }
+                    >
+                      {isSupportGroup && !sidebarCollapsed && (
+                        <div className="mb-2 rounded-lg border border-[#D4A62A]/25 bg-[#0E2035] px-3 py-2 shadow-inner">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#D4A62A]">
+                            System Support & Operations
+                          </p>
+                          <p className="mt-0.5 text-[10px] leading-tight text-slate-400">
+                            Technical monitoring and support controls
+                          </p>
+                        </div>
+                      )}
+
                       {group.collapsible ? (
                         <button
                           onClick={() => toggleGroup(group.module.code)}
@@ -276,7 +319,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                               sidebarCollapsed ? "hidden" : "block"
                             }`}
                           />
-                          <GroupIcon className={`h-5 w-5 shrink-0 ${group.active ? "text-[#D4A62A]" : "text-[#CBD5E1] group-hover:text-[#D4A62A]"}`} />
+                          <GroupIcon
+                            className={`h-5 w-5 shrink-0 ${group.active ? "text-[#D4A62A]" : "text-[#CBD5E1] group-hover:text-[#D4A62A]"}`}
+                          />
                           {!sidebarCollapsed && (
                             <>
                               <span className="flex-1 text-left">{group.module.name}</span>
@@ -306,8 +351,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                     : "font-medium text-[#CBD5E1] hover:bg-white/[0.07] hover:text-white"
                                 }`}
                               >
-                                <span className={`absolute left-0 h-6 w-1 rounded-r-full ${active ? "bg-[#D4A62A]" : "bg-transparent"}`} />
-                                <Icon className={`h-4.5 w-4.5 shrink-0 ${active ? "text-[#D4A62A]" : "text-[#CBD5E1] group-hover:text-[#D4A62A]"}`} />
+                                <span
+                                  className={`absolute left-0 h-6 w-1 rounded-r-full ${active ? "bg-[#D4A62A]" : "bg-transparent"}`}
+                                />
+                                <Icon
+                                  className={`h-4.5 w-4.5 shrink-0 ${active ? "text-[#D4A62A]" : "text-[#CBD5E1] group-hover:text-[#D4A62A]"}`}
+                                />
                                 <span className="truncate">{item.label}</span>
                               </Link>
                             )
@@ -327,11 +376,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                 onClick={() => setSidebarOpen(false)}
                                 title={item.label}
                                 className={`group relative flex h-10 items-center justify-center rounded-lg transition-colors duration-200 ease-in-out ${
-                                  active ? "bg-[#1C3B5A] text-white" : "text-[#CBD5E1] hover:bg-white/[0.07] hover:text-white"
+                                  active
+                                    ? "bg-[#1C3B5A] text-white"
+                                    : "text-[#CBD5E1] hover:bg-white/[0.07] hover:text-white"
                                 }`}
                               >
-                                <span className={`absolute left-0 h-6 w-1 rounded-r-full ${active ? "bg-[#D4A62A]" : "bg-transparent"}`} />
-                                <Icon className={`h-5 w-5 ${active ? "text-[#D4A62A]" : "text-[#CBD5E1] group-hover:text-[#D4A62A]"}`} />
+                                <span
+                                  className={`absolute left-0 h-6 w-1 rounded-r-full ${active ? "bg-[#D4A62A]" : "bg-transparent"}`}
+                                />
+                                <Icon
+                                  className={`h-5 w-5 ${active ? "text-[#D4A62A]" : "text-[#CBD5E1] group-hover:text-[#D4A62A]"}`}
+                                />
                               </Link>
                             )
                           })}
@@ -358,20 +413,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   {!sidebarCollapsed && (
                     <>
                       <div className="min-w-0 flex-1 text-left">
-                        <p className="truncate text-sm font-semibold text-white">{profile?.name || user?.email?.split("@")[0] || "User"}</p>
-                        <p className="truncate text-xs text-slate-300" suppressHydrationWarning>{role || "No role assigned"}</p>
+                        <p className="truncate text-sm font-semibold text-white">
+                          {profile?.name || user?.email?.split("@")[0] || "User"}
+                        </p>
+                        <p className="truncate text-xs text-slate-300" suppressHydrationWarning>
+                          {role || "No role assigned"}
+                        </p>
                       </div>
-                      <ChevronDown className={`h-4 w-4 text-slate-300 transition-transform ${userMenuOpen ? "rotate-180" : ""}`} />
+                      <ChevronDown
+                        className={`h-4 w-4 text-slate-300 transition-transform ${userMenuOpen ? "rotate-180" : ""}`}
+                      />
                     </>
                   )}
                 </button>
 
                 {userMenuOpen && (
-                  <div className={`absolute bottom-14 rounded-xl border border-slate-200 bg-white py-1 shadow-2xl ${sidebarCollapsed ? "left-14 w-56" : "left-0 right-0"}`}>
+                  <div
+                    className={`absolute bottom-14 rounded-xl border border-slate-200 bg-white py-1 shadow-2xl ${
+                      sidebarCollapsed ? "left-14 w-56" : "left-0 right-0"
+                    }`}
+                  >
                     <div className="border-b border-slate-100 px-4 py-3">
                       <p className="truncate text-sm font-semibold text-slate-900">{profile?.name || "User"}</p>
                       <p className="truncate text-xs text-slate-500">{user?.email || profile?.email}</p>
-                      <p className="mt-1 truncate text-[11px] font-medium text-[#7A1F2B]" suppressHydrationWarning>{role || "No role assigned"}</p>
+                      <p className="mt-1 truncate text-[11px] font-medium text-[#7A1F2B]" suppressHydrationWarning>
+                        {role || "No role assigned"}
+                      </p>
                     </div>
                     <Link
                       href="/dashboard/settings"

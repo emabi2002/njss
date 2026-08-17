@@ -29,44 +29,39 @@ import {
 import type { PermissionCode, RbacMenuItem, RbacModule, RbacPermission } from './types'
 
 export const MODULES: RbacModule[] = [
-  { code: 'dashboard', name: 'Dashboard', description: 'NJSS executive and operational overview', base_path: '/dashboard', icon: 'LayoutDashboard', sort_order: 10, is_active: true },
-  { code: 'budget', name: 'Budget', description: 'Budget preparation, ledgers, submissions, releases and consolidation', base_path: '/dashboard/budget', icon: 'Wallet', sort_order: 20, is_active: true },
-  { code: 'finance', name: 'Finance', description: 'FF3, FF4, commitments and payment workflows', base_path: '/dashboard/ff3', icon: 'FileText', sort_order: 30, is_active: true },
-  { code: 'reports', name: 'Reports', description: 'Management, finance and audit reporting', base_path: '/dashboard/reports', icon: 'BarChart3', sort_order: 40, is_active: true },
-  { code: 'systems_administration', name: 'System Administration', description: 'Production support, operations monitoring, security readiness and capacity planning', base_path: '/dashboard/admin/operations', icon: 'Gauge', sort_order: 85, is_active: true },
-  { code: 'administration', name: 'Administration', description: 'Users, roles, module registration, menu access, data scope and audit', base_path: '/dashboard/users', icon: 'ShieldCheck', sort_order: 90, is_active: true },
-  { code: 'system', name: 'System Configuration', description: 'Master data, registry and organization settings', base_path: '/dashboard/master', icon: 'Settings', sort_order: 100, is_active: true },
+  { code: 'njss_operations', name: 'NJSS Operations', description: 'Core NJSS planning, budget, funding, transaction and reporting functions', base_path: '/dashboard', icon: 'LayoutDashboard', sort_order: 10, is_active: true },
+  { code: 'administration', name: 'System Administration', description: 'Application users, access control, audit access and NJSS configuration', base_path: '/dashboard/users', icon: 'ShieldCheck', sort_order: 85, is_active: true },
+  { code: 'systems_administration', name: 'System Support & Operations', description: 'Infrastructure monitoring, technical support, capacity management, housekeeping and operating-cost controls', base_path: '/dashboard/admin/operations', icon: 'Gauge', sort_order: 95, is_active: true },
 ]
 
 export const MENU_ITEMS: RbacMenuItem[] = [
-  { code: 'dashboard.home', module_code: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard', sort_order: 10, required_permissions: ['dashboard.view'], is_active: true },
-  { code: 'budget.control', module_code: 'budget', label: 'Budget Control', href: '/dashboard/budget', icon: 'Wallet', sort_order: 20, required_permissions: ['budget.view', 'budget.module.view'], is_active: true },
-  { code: 'budget.funding', module_code: 'budget', label: 'Funding Management', href: '/dashboard/budget/funding', icon: 'Banknote', sort_order: 25, required_permissions: ['funding.view'], is_active: true },
-  { code: 'budget.template', module_code: 'budget', label: 'Budget Preparation', href: '/dashboard/budget-template', icon: 'Calculator', sort_order: 10, required_permissions: ['budget.template.view', 'budget.template.create', 'budget.template.edit', 'budget.template.submit', 'budget.template.review', 'budget.template.approve', 'budget.template'], is_active: true },
-  { code: 'budget.plans', module_code: 'budget', label: 'Historical Annual Plans', href: '/dashboard/plans', icon: 'BookOpen', sort_order: 90, required_permissions: ['all'], is_active: false },
-  { code: 'budget.commitments', module_code: 'budget', label: 'Commitment Ledger', href: '/dashboard/commitments', icon: 'FileCheck', sort_order: 50, required_permissions: ['commitment.view', 'budget.control.view', 'budget.view'], is_active: true },
-  { code: 'finance.ff3', module_code: 'finance', label: 'FF3 Requisitions', href: '/dashboard/ff3', icon: 'FileText', sort_order: 60, required_permissions: ['ff3.view', 'ff3.create', 'ff3.endorse', 'ff3.approve', 'ff3.reject'], is_active: true },
-  { code: 'finance.ff3.new', module_code: 'finance', label: 'New FF3', href: '/dashboard/ff3/new', icon: 'FileText', sort_order: 61, required_permissions: ['ff3.create'], is_active: true },
-  { code: 'finance.ff4', module_code: 'finance', label: 'FF4 Expenses', href: '/dashboard/ff4', icon: 'FileText', sort_order: 70, required_permissions: ['ff4.view', 'ff4.create', 'ff4.verify', 'ff4.process'], is_active: true },
-  { code: 'finance.ff4.new', module_code: 'finance', label: 'New FF4', href: '/dashboard/ff4/new', icon: 'FileText', sort_order: 71, required_permissions: ['ff4.create'], is_active: true },
-  { code: 'finance.suppliers', module_code: 'finance', label: 'Supplier Register', href: '/dashboard/suppliers', icon: 'Building2', sort_order: 55, required_permissions: ['supplier.view', 'supplier.create'], is_active: true },
-  { code: 'reports.library', module_code: 'reports', label: 'Relevant Reports', href: '/dashboard/reports', icon: 'BarChart3', sort_order: 80, required_permissions: ['reports.view', 'reports.export'], is_active: true },
-  { code: 'systems_administration.dashboard', module_code: 'systems_administration', label: 'Admin Dashboard', href: '/dashboard/admin/operations', icon: 'Gauge', sort_order: 10, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
+  { code: 'dashboard.home', module_code: 'njss_operations', label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard', sort_order: 10, required_permissions: ['dashboard.view'], is_active: true },
+  { code: 'budget.template', module_code: 'njss_operations', label: 'Planning', href: '/dashboard/budget-template', icon: 'Calculator', sort_order: 20, required_permissions: ['budget.template.view', 'budget.template.create', 'budget.template.edit', 'budget.template.submit', 'budget.template.review', 'budget.template.approve', 'budget.template'], is_active: true },
+  { code: 'budget.control', module_code: 'njss_operations', label: 'Budget', href: '/dashboard/budget', icon: 'Wallet', sort_order: 30, required_permissions: ['budget.view', 'budget.module.view'], is_active: true },
+  { code: 'budget.funding', module_code: 'njss_operations', label: 'Funding', href: '/dashboard/budget/funding', icon: 'Banknote', sort_order: 40, required_permissions: ['funding.view'], is_active: true },
+  { code: 'finance.ff3', module_code: 'njss_operations', label: 'FF3', href: '/dashboard/ff3', icon: 'FileText', sort_order: 50, required_permissions: ['ff3.view', 'ff3.create', 'ff3.endorse', 'ff3.approve', 'ff3.reject'], is_active: true },
+  { code: 'finance.ff3.new', module_code: 'njss_operations', parent_code: 'finance.ff3', label: 'New FF3', href: '/dashboard/ff3/new', icon: 'FileText', sort_order: 51, required_permissions: ['ff3.create'], is_active: true },
+  { code: 'budget.commitments', module_code: 'njss_operations', label: 'Commitments', href: '/dashboard/commitments', icon: 'FileCheck', sort_order: 60, required_permissions: ['commitment.view', 'budget.control.view', 'budget.view'], is_active: true },
+  { code: 'finance.ff4', module_code: 'njss_operations', label: 'FF4', href: '/dashboard/ff4', icon: 'FileText', sort_order: 70, required_permissions: ['ff4.view', 'ff4.create', 'ff4.verify', 'ff4.process'], is_active: true },
+  { code: 'finance.ff4.new', module_code: 'njss_operations', parent_code: 'finance.ff4', label: 'New FF4', href: '/dashboard/ff4/new', icon: 'FileText', sort_order: 71, required_permissions: ['ff4.create'], is_active: true },
+  { code: 'reports.library', module_code: 'njss_operations', label: 'Management Reports', href: '/dashboard/reports', icon: 'BarChart3', sort_order: 80, required_permissions: ['reports.view', 'reports.export'], is_active: true },
+  { code: 'finance.suppliers', module_code: 'njss_operations', label: 'Supplier Register', href: '/dashboard/suppliers', icon: 'Building2', sort_order: 90, required_permissions: ['supplier.view', 'supplier.create'], is_active: true },
+  { code: 'budget.plans', module_code: 'njss_operations', label: 'Historical Annual Plans', href: '/dashboard/plans', icon: 'BookOpen', sort_order: 100, required_permissions: ['all'], is_active: false },
+  { code: 'system.help', module_code: 'njss_operations', label: 'User Guide', href: '/dashboard/help', icon: 'BookOpen', sort_order: 110, required_permissions: ['dashboard.view'], is_active: true },
+  { code: 'administration.users', module_code: 'administration', label: 'Access Control', href: '/dashboard/users?tab=permissions', icon: 'ShieldCheck', sort_order: 10, required_permissions: ['users.manage', 'roles.manage', 'permissions.manage', 'modules.manage', 'data_scope.manage'], is_active: true },
+  { code: 'administration.audit', module_code: 'administration', label: 'Access Audit', href: '/dashboard/audit-log', icon: 'ClipboardList', sort_order: 20, required_permissions: ['audit.view'], is_active: true },
+  { code: 'system.settings', module_code: 'administration', label: 'System Settings', href: '/dashboard/settings', icon: 'Settings', sort_order: 30, required_permissions: ['settings.manage'], is_active: true },
+  { code: 'administration.users_access', module_code: 'administration', label: 'Users & Access', href: '/dashboard/users?tab=users', icon: 'UserCog', sort_order: 40, required_permissions: ['users.manage'], is_active: true },
+  { code: 'systems_administration.dashboard', module_code: 'systems_administration', label: 'Operations Dashboard', href: '/dashboard/admin/operations', icon: 'Gauge', sort_order: 10, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
   { code: 'systems_administration.health', module_code: 'systems_administration', label: 'System Health', href: '/dashboard/admin/operations/health', icon: 'HeartPulse', sort_order: 20, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
-  { code: 'systems_administration.users_access', module_code: 'systems_administration', label: 'Users & Access', href: '/dashboard/users', icon: 'UserCog', sort_order: 30, required_permissions: ['users.manage'], is_active: true },
-  { code: 'systems_administration.transactions', module_code: 'systems_administration', label: 'Transaction Monitor', href: '/dashboard/admin/operations/transactions', icon: 'Activity', sort_order: 40, required_permissions: ['operations.view', 'operations.manage', 'audit.view'], is_active: true },
-  { code: 'systems_administration.storage_database', module_code: 'systems_administration', label: 'Storage & Database', href: '/dashboard/admin/operations/storage-database', icon: 'Database', sort_order: 50, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
-  { code: 'systems_administration.costs', module_code: 'systems_administration', label: 'Operating Costs', href: '/dashboard/admin/operations/costs', icon: 'ReceiptText', sort_order: 60, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
-  { code: 'systems_administration.alerts', module_code: 'systems_administration', label: 'System Alerts', href: '/dashboard/admin/operations/alerts', icon: 'Bell', sort_order: 70, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
-  { code: 'systems_administration.housekeeping', module_code: 'systems_administration', label: 'Housekeeping', href: '/dashboard/admin/operations/housekeeping', icon: 'Wrench', sort_order: 80, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
-  { code: 'systems_administration.audit', module_code: 'systems_administration', label: 'Audit & System Activity', href: '/dashboard/audit-log', icon: 'ClipboardList', sort_order: 90, required_permissions: ['audit.view'], is_active: true },
+  { code: 'systems_administration.transactions', module_code: 'systems_administration', label: 'Transaction Monitor', href: '/dashboard/admin/operations/transactions', icon: 'Activity', sort_order: 30, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
+  { code: 'systems_administration.storage_database', module_code: 'systems_administration', label: 'Storage & Database', href: '/dashboard/admin/operations/storage-database', icon: 'Database', sort_order: 40, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
+  { code: 'systems_administration.costs', module_code: 'systems_administration', label: 'Operating Costs', href: '/dashboard/admin/operations/costs', icon: 'ReceiptText', sort_order: 50, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
+  { code: 'systems_administration.alerts', module_code: 'systems_administration', label: 'System Alerts', href: '/dashboard/admin/operations/alerts', icon: 'Bell', sort_order: 60, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
+  { code: 'systems_administration.housekeeping', module_code: 'systems_administration', label: 'Housekeeping', href: '/dashboard/admin/operations/housekeeping', icon: 'Wrench', sort_order: 70, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
+  { code: 'systems_administration.audit', module_code: 'systems_administration', label: 'Audit & System Activity', href: '/dashboard/audit-log', icon: 'ClipboardList', sort_order: 80, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
+  { code: 'systems_administration.uat', module_code: 'systems_administration', label: 'UAT Checklist', href: '/dashboard/uat-checklist', icon: 'ClipboardList', sort_order: 90, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
   { code: 'systems_administration.info', module_code: 'systems_administration', label: 'System Information', href: '/dashboard/system-info', icon: 'Info', sort_order: 100, required_permissions: ['operations.view', 'operations.manage', 'settings.manage'], is_active: true },
-  { code: 'administration.users', module_code: 'administration', label: 'Users', href: '/dashboard/users', icon: 'Users', sort_order: 90, required_permissions: ['users.manage'], is_active: true },
-  { code: 'administration.audit', module_code: 'administration', label: 'Access Audit', href: '/dashboard/audit-log', icon: 'ClipboardList', sort_order: 95, required_permissions: ['audit.view'], is_active: true },
-  { code: 'administration.uat', module_code: 'administration', label: 'UAT Checklist', href: '/dashboard/uat-checklist', icon: 'ClipboardList', sort_order: 96, required_permissions: ['users.manage'], is_active: true },
-  { code: 'system.master', module_code: 'system', label: 'Master Data', href: '/dashboard/master', icon: 'FolderOpen', sort_order: 100, required_permissions: ['masterdata.manage', 'registry.manage'], is_active: true },
-  { code: 'system.settings', module_code: 'system', label: 'System Settings', href: '/dashboard/settings', icon: 'Settings', sort_order: 110, required_permissions: ['settings.manage'], is_active: true },
-  { code: 'system.help', module_code: 'system', label: 'User Guide', href: '/dashboard/help', icon: 'BookOpen', sort_order: 120, required_permissions: ['dashboard.view'], is_active: true },
 ]
 
 const FINANCE_PERMISSIONS = [
@@ -141,21 +136,25 @@ const ADMIN_PERMISSIONS = [
   ['data_scope.manage', 'Manage data scope rules'],
   ['audit.view', 'View audit logs'],
   ['audit.export', 'Export audit logs'],
+]
+
+const SYSTEM_SUPPORT_PERMISSIONS = [
   ['operations.view', 'View system operations dashboards'],
   ['operations.manage', 'Manage system operations support data'],
 ]
 
 export const PERMISSION_CATALOG: RbacPermission[] = [
   { code: 'all', module_code: 'administration', action: 'manage', label: 'Full system access', is_active: true },
-  { code: 'dashboard.view', module_code: 'dashboard', action: 'view', label: 'View dashboard', is_active: true },
-  ...BUDGET_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'budget', action: actionFromCode(code), is_active: true }) as RbacPermission),
-  ...FINANCE_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'finance', action: actionFromCode(code), is_active: true }) as RbacPermission),
-  { code: 'reports.view', module_code: 'reports', action: 'view', label: 'View reports', is_active: true },
-  { code: 'reports.export', module_code: 'reports', action: 'export', label: 'Export reports', is_active: true },
-  { code: 'masterdata.manage', module_code: 'system', action: 'manage', label: 'Manage master data', is_active: true },
-  { code: 'registry.manage', module_code: 'system', action: 'manage', label: 'Manage registries', is_active: true },
-  { code: 'settings.manage', module_code: 'system', action: 'manage', label: 'Manage system settings', is_active: true },
+  { code: 'dashboard.view', module_code: 'njss_operations', action: 'view', label: 'View dashboard', is_active: true },
+  ...BUDGET_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'njss_operations', action: actionFromCode(code), is_active: true }) as RbacPermission),
+  ...FINANCE_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'njss_operations', action: actionFromCode(code), is_active: true }) as RbacPermission),
+  { code: 'reports.view', module_code: 'njss_operations', action: 'view', label: 'View reports', is_active: true },
+  { code: 'reports.export', module_code: 'njss_operations', action: 'export', label: 'Export reports', is_active: true },
+  { code: 'masterdata.manage', module_code: 'administration', action: 'manage', label: 'Manage master data', is_active: true },
+  { code: 'registry.manage', module_code: 'administration', action: 'manage', label: 'Manage registries', is_active: true },
+  { code: 'settings.manage', module_code: 'administration', action: 'manage', label: 'Manage system settings', is_active: true },
   ...ADMIN_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'administration', action: actionFromCode(code), is_active: true }) as RbacPermission),
+  ...SYSTEM_SUPPORT_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'systems_administration', action: actionFromCode(code), is_active: true }) as RbacPermission),
 ]
 
 export const ICONS: Record<string, LucideIcon> = {
@@ -206,7 +205,7 @@ export const ROUTE_PERMISSIONS: Array<{ pattern: RegExp; permissions: Permission
   { pattern: /^\/dashboard\/settings($|\/)/, permissions: ['settings.manage'] },
   { pattern: /^\/dashboard\/system-info($|\/)/, permissions: ['operations.view', 'operations.manage', 'settings.manage', 'all'] },
   { pattern: /^\/dashboard\/help($|\/)/, permissions: ['dashboard.view'] },
-  { pattern: /^\/dashboard\/uat-checklist($|\/)/, permissions: ['users.manage'] },
+  { pattern: /^\/dashboard\/uat-checklist($|\/)/, permissions: ['operations.view', 'operations.manage', 'settings.manage', 'all'] },
 ]
 
 function actionFromCode(code: string): RbacPermission['action'] {
