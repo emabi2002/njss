@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Save, Send, Plus, Trash2, AlertCircle, CheckCircle2, ArrowLeft, Loader2, Upload, X, FileText } from "lucide-react"
+import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import { uploadFile, BUCKETS, type UploadedFile } from "@/lib/storage"
 import { checkBudgetAndNotify, notifyFF3Submitted } from "@/lib/notifications"
@@ -19,7 +20,7 @@ type FundingSource = { id: string; code: string; name: string }
 type CostCentre = { id: string; code: string; name: string; section_id: string | null; department_id: string | null }
 type ExpenseCode = { id: string; full_expense_code: string; section_id: string | null }
 type BudgetInfo = { available_balance: number; quarterly_released: number }
-type BudgetCheck = { budgetAllocationId: string | null; mappingStatus: string; allocationCount: number; revised: number; released: number; pending: number; committed: number; spent: number; available: number; projectedAvailableAfterPending: number; hasAllocation: boolean } | null
+type BudgetCheck = { budgetAllocationId: string | null; mappingStatus: string; allocationCount: number; revised: number; released: number; pending: number; committed: number; spent: number; available: number; projectedAvailableAfterPending: number; hasAllocation: boolean; withinBudget?: boolean } | null
 type FF3ItemDraft = {
   line_number: number
   item_code: string
@@ -33,6 +34,16 @@ type FF3ItemDraft = {
   source_quotation_line_id: string
   line_notes: string
 }
+type ImportStep = "idle" | "map" | "preview"
+type ImportColumnMap = {
+  item_description: string
+  specifications: string
+  quantity: string
+  unit_of_measure: string
+  estimated_unit_price: string
+  line_notes: string
+}
+type QuotationLineDraft = FF3ItemDraft
 
 const newItemLine = (lineNumber: number): FF3ItemDraft => ({
   line_number: lineNumber,
@@ -48,7 +59,17 @@ const newItemLine = (lineNumber: number): FF3ItemDraft => ({
   line_notes: "",
 })
 
-const money = (value: number) => Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const defaultImportMap: ImportColumnMap = {
+  item_description: "",
+  specifications: "",
+  quantity: "",
+  unit_of_measure: "",
+  estimated_unit_price: "",
+  line_notes: "",
+}
+
+const normalizeHeader = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")
+const money = (value: number) => Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const lineTotal = (item: FF3ItemDraft) => (Number(item.quantity) || 0) * (Number(item.estimated_unit_price) || 0)
 const isBlankItem = (item: FF3ItemDraft) => !item.item_code.trim() && !item.item_description.trim() && !item.specifications.trim() && !item.unit_of_measure_id && !item.unit_of_measure.trim() && !item.line_notes.trim() && Number(item.quantity || 0) === 0 && Number(item.estimated_unit_price || 0) === 0
 const isValidItem = (item: FF3ItemDraft) => Boolean(item.item_description.trim() && Number(item.quantity) > 0 && item.unit_of_measure_id && Number(item.estimated_unit_price) >= 0)
@@ -61,7 +82,6 @@ export default function NewFF3Page() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  // Master data
   const [departments, setDepartments] = useState<Department[]>([])
   const [sections, setSections] = useState<Section[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -106,26 +126,32 @@ export default function NewFF3Page() {
     { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" }
   ])
 
+  const [quotationItems, setQuotationItems] = useState<Record<number, QuotationLineDraft[]>>({})
+  const [showQuotationItems, setShowQuotationItems] = useState<Record<number, boolean>>({})
+  const [importStep, setImportStep] = useState<ImportStep>("idle")
+  const [importHeaders, setImportHeaders] = useState<string[]>([])
+  const [importRows, setImportRows] = useState<Record<string, string>[]>([])
+  const [importMap, setImportMap] = useState<ImportColumnMap>(defaultImportMap)
+
   const [supportingDocs, setSupportingDocs] = useState<UploadedFile[]>([])
   const [uploadingQuotation, setUploadingQuotation] = useState<number | null>(null)
   const [uploadingDoc, setUploadingDoc] = useState(false)
 
-  // Fetch master data on mount
   useEffect(() => {
     async function fetchMasterData() {
       try {
         const [deptRes, secRes, projRes, provRes, fundRes, ccRes, codeRes, urgencyRows, methodRows, unitRows, supplierRows] = await Promise.all([
-          supabase.from('departments').select('id, code, name').eq('is_active', true).order('name'),
-          supabase.from('sections').select('id, code, name, department_id').eq('is_active', true).order('name'),
-          supabase.from('projects').select('id, code, name').eq('is_active', true).order('name'),
-          supabase.from('provinces').select('id, code, name').eq('is_active', true).order('name'),
-          supabase.from('funding_sources').select('id, code, name').eq('is_active', true).order('name'),
-          supabase.from('cost_centres').select('id, code, name, section_id, department_id').eq('is_active', true).order('code'),
-          supabase.from('expense_code_registry').select('id, full_expense_code, section_id').eq('is_active', true).order('full_expense_code'),
-          loadLookup('urgency_levels'),
-          loadLookup('procurement_methods'),
-          loadLookup('units_of_measure'),
-          loadLookup('suppliers', { order: 'supplier_name' }),
+          supabase.from("departments").select("id, code, name").eq("is_active", true).order("name"),
+          supabase.from("sections").select("id, code, name, department_id").eq("is_active", true).order("name"),
+          supabase.from("projects").select("id, code, name").eq("is_active", true).order("name"),
+          supabase.from("provinces").select("id, code, name").eq("is_active", true).order("name"),
+          supabase.from("funding_sources").select("id, code, name").eq("is_active", true).order("name"),
+          supabase.from("cost_centres").select("id, code, name, section_id, department_id").eq("is_active", true).order("code"),
+          supabase.from("expense_code_registry").select("id, full_expense_code, section_id").eq("is_active", true).order("full_expense_code"),
+          loadLookup("urgency_levels"),
+          loadLookup("procurement_methods"),
+          loadLookup("units_of_measure"),
+          loadLookup("suppliers", { order: "supplier_name" }),
         ])
 
         setDepartments(deptRes.data || [])
@@ -140,15 +166,15 @@ export default function NewFF3Page() {
         setSuppliers(supplierRows)
 
         const { data: approvedBudgetCodes } = await supabase
-          .from('v_budget_by_code')
-          .select('expense_code_registry_id, full_expense_code, section_id')
-          .eq('financial_year', activeFinancialYear)
+          .from("v_budget_by_code")
+          .select("expense_code_registry_id, full_expense_code, section_id")
+          .eq("financial_year", activeFinancialYear)
 
         const approvedCodes = (approvedBudgetCodes || [])
           .filter((code) => code.expense_code_registry_id)
           .map((code) => ({
             id: String(code.expense_code_registry_id),
-            full_expense_code: code.full_expense_code || '',
+            full_expense_code: code.full_expense_code || "",
             section_id: code.section_id || null,
           }))
 
@@ -159,16 +185,8 @@ export default function NewFF3Page() {
           procurement_method_id: current.procurement_method_id || methodRows.find((row) => row.code === current.procurement_method)?.id || "",
         }))
 
-        // Fetch budget info
-        const { data: releases } = await supabase
-          .from('quarterly_releases')
-          .select('released_amount')
-          .eq('financial_year', activeFinancialYear)
-
-        const { data: commitments } = await supabase
-          .from('ff3_commitments')
-          .select('committed_amount, paid_amount')
-          .eq('financial_year', activeFinancialYear)
+        const { data: releases } = await supabase.from("quarterly_releases").select("released_amount").eq("financial_year", activeFinancialYear)
+        const { data: commitments } = await supabase.from("ff3_commitments").select("committed_amount, paid_amount").eq("financial_year", activeFinancialYear)
 
         const quarterlyReleased = releases?.reduce((sum, r) => sum + (r.released_amount || 0), 0) || 0
         const committedAmount = commitments?.reduce((sum, c) => sum + ((c.committed_amount || 0) - (c.paid_amount || 0)), 0) || 0
@@ -178,9 +196,8 @@ export default function NewFF3Page() {
           quarterly_released: quarterlyReleased,
           available_balance: quarterlyReleased - committedAmount - actualExpenditure
         })
-
       } catch (err) {
-        console.error('Error fetching master data:', err)
+        console.error("Error fetching master data:", err)
       } finally {
         setLoading(false)
       }
@@ -189,23 +206,10 @@ export default function NewFF3Page() {
     fetchMasterData()
   }, [activeFinancialYear])
 
-  // Sections available for the selected department (derived state)
-  const filteredSections = useMemo(
-    () => formData.department_id ? sections.filter(s => s.department_id === formData.department_id) : [],
-    [formData.department_id, sections]
-  )
+  const filteredSections = useMemo(() => formData.department_id ? sections.filter(s => s.department_id === formData.department_id) : [], [formData.department_id, sections])
+  const filteredCostCentres = useMemo(() => costCentres.filter(c => (!formData.section_id || c.section_id === formData.section_id) && (!formData.department_id || c.department_id === formData.department_id)), [costCentres, formData.section_id, formData.department_id])
+  const filteredCodes = useMemo(() => expenseCodes.filter(c => !formData.section_id || c.section_id === formData.section_id || !c.section_id), [expenseCodes, formData.section_id])
 
-  const filteredCostCentres = useMemo(
-    () => costCentres.filter(c => (!formData.section_id || c.section_id === formData.section_id) && (!formData.department_id || c.department_id === formData.department_id)),
-    [costCentres, formData.section_id, formData.department_id]
-  )
-
-  const filteredCodes = useMemo(
-    () => expenseCodes.filter(c => !formData.section_id || c.section_id === formData.section_id || !c.section_id),
-    [expenseCodes, formData.section_id]
-  )
-
-  // Look up the budget position for the chosen expense code (or section) — spec §14
   useEffect(() => {
     let cancelled = false
     async function loadPosition() {
@@ -221,19 +225,7 @@ export default function NewFF3Page() {
           projectId: formData.project_id || null,
           amount: 0,
         })
-        if (!cancelled) setBudgetCheck({
-          budgetAllocationId: res.budgetAllocationId,
-          mappingStatus: res.mappingStatus,
-          allocationCount: res.allocationCount,
-          revised: res.revised,
-          released: res.released,
-          pending: res.pending,
-          committed: res.committed,
-          spent: res.spent,
-          available: res.available,
-          projectedAvailableAfterPending: res.projectedAvailableAfterPending,
-          hasAllocation: res.hasAllocation,
-        })
+        if (!cancelled) setBudgetCheck({ ...res })
       } catch {
         if (!cancelled) setBudgetCheck(null)
       }
@@ -243,21 +235,9 @@ export default function NewFF3Page() {
   }, [formData.expense_code_registry_id, formData.section_id, formData.department_id, formData.cost_centre_id, formData.funding_source_id, formData.project_id, formData.financial_year])
 
   const renumberItems = (rows: FF3ItemDraft[]) => rows.map((item, index) => ({ ...item, line_number: index + 1 }))
-
-  const addItem = () => {
-    setItems((current) => [...current, newItemLine(current.length + 1)])
-  }
-
-  const updateItem = (index: number, patch: Partial<FF3ItemDraft>) => {
-    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
-  }
-
-  const removeItem = (index: number) => {
-    setItems((current) => {
-      const next = current.filter((_, itemIndex) => itemIndex !== index)
-      return renumberItems(next.length ? next : [newItemLine(1)])
-    })
-  }
+  const addItem = () => setItems((current) => [...current, newItemLine(current.length + 1)])
+  const updateItem = (index: number, patch: Partial<FF3ItemDraft>) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
+  const removeItem = (index: number) => setItems((current) => renumberItems(current.filter((_, itemIndex) => itemIndex !== index).length ? current.filter((_, itemIndex) => itemIndex !== index) : [newItemLine(1)]))
 
   const resolveUnit = (value: string) => {
     const needle = value.trim().toLowerCase()
@@ -269,28 +249,20 @@ export default function NewFF3Page() {
     const text = event.clipboardData.getData("text")
     if (!text.includes("\t") && !text.includes("\n")) return
     event.preventDefault()
-    const parsedRows = text
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => line.split("\t"))
-      .filter((cols) => cols.some((col) => col.trim()))
-
-    const imported = parsedRows
-      .filter((cols) => !/description|item|service/i.test(cols[0] || ""))
-      .map((cols, index) => {
-        const unit = resolveUnit(cols[3] || "")
-        return {
-          ...newItemLine(index + 1),
-          item_description: (cols[0] || "").trim(),
-          specifications: (cols[1] || "").trim(),
-          quantity: Number(String(cols[2] || "0").replace(/,/g, "")) || 0,
-          unit_of_measure_id: unit?.id || "",
-          unit_of_measure: unit?.name || (cols[3] || "").trim(),
-          estimated_unit_price: Number(String(cols[4] || "0").replace(/,/g, "")) || 0,
-          line_notes: (cols[5] || "").trim(),
-        }
-      })
-
+    const parsedRows = text.trim().split(/\r?\n/).map((line) => line.split("\t")).filter((cols) => cols.some((col) => col.trim()))
+    const imported = parsedRows.filter((cols) => !/description|item|service/i.test(cols[0] || "")).map((cols, index) => {
+      const unit = resolveUnit(cols[3] || "")
+      return {
+        ...newItemLine(index + 1),
+        item_description: (cols[0] || "").trim(),
+        specifications: (cols[1] || "").trim(),
+        quantity: Number(String(cols[2] || "0").replace(/,/g, "")) || 0,
+        unit_of_measure_id: unit?.id || "",
+        unit_of_measure: unit?.name || (cols[3] || "").trim(),
+        estimated_unit_price: Number(String(cols[4] || "0").replace(/,/g, "")) || 0,
+        line_notes: (cols[5] || "").trim(),
+      }
+    })
     if (imported.length) setItems((current) => renumberItems([...current.filter((item) => !isBlankItem(item)), ...imported]))
   }
 
@@ -308,62 +280,119 @@ export default function NewFF3Page() {
     }, 0)
   }
 
-  const addQuotation = () => {
-    setQuotations([...quotations, {
-      supplier_id: "",
-      supplier_name: "",
-      quotation_number: "",
-      quotation_date: "",
-      quotation_amount: 0,
-      is_selected: false,
-      attachment_url: "",
-      attachment_name: ""
-    }])
+  const rowsFromMappedImport = (rows = importRows, map = importMap) => rows.map((row, index) => {
+    const unit = resolveUnit(row[map.unit_of_measure] || "")
+    return {
+      ...newItemLine(index + 1),
+      item_description: (row[map.item_description] || "").trim(),
+      specifications: (row[map.specifications] || "").trim(),
+      quantity: Number(String(row[map.quantity] || "0").replace(/,/g, "")) || 0,
+      unit_of_measure_id: unit?.id || "",
+      unit_of_measure: unit?.name || (row[map.unit_of_measure] || "").trim(),
+      estimated_unit_price: Number(String(row[map.estimated_unit_price] || "0").replace(/,/g, "")) || 0,
+      line_notes: (row[map.line_notes] || "").trim(),
+    }
+  })
+
+  const guessImportMap = (headers: string[]): ImportColumnMap => {
+    const find = (...needles: string[]) => headers.find((header) => needles.some((needle) => normalizeHeader(header).includes(needle))) || ""
+    return {
+      item_description: find("description", "item", "service"),
+      specifications: find("spec", "detail"),
+      quantity: find("qty", "quantity"),
+      unit_of_measure: find("uom", "unit"),
+      estimated_unit_price: find("unit_price", "price", "rate"),
+      line_notes: find("quote", "note", "ref"),
+    }
   }
 
-  // Handle quotation file upload
+  const handleLineImportFile = async (file: File) => {
+    const buffer = await file.arrayBuffer()
+    const workbook = XLSX.read(buffer, { type: "array" })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const matrix = XLSX.utils.sheet_to_json<Array<string | number | null>>(sheet, { header: 1, defval: "" })
+    const headerRow = (matrix[0] || []).map((cell) => String(cell || "").trim()).filter(Boolean)
+    const dataRows = matrix.slice(1).filter((row) => row.some((cell) => String(cell || "").trim()))
+    const rows = dataRows.map((row) => Object.fromEntries(headerRow.map((header, index) => [header, String(row[index] || "").trim()])))
+    setImportHeaders(headerRow)
+    setImportRows(rows)
+    setImportMap(guessImportMap(headerRow))
+    setImportStep("map")
+  }
+
+  const importMappedRowsToGrid = () => {
+    const imported = rowsFromMappedImport()
+    const invalid = imported.filter((row) => !isValidItem(row))
+    if (invalid.length > 0) {
+      setError(`${invalid.length} imported row(s) failed validation. Check column mapping, unit names, quantities and prices before import.`)
+      return
+    }
+    setItems((current) => renumberItems([...current.filter((item) => !isBlankItem(item)), ...imported]))
+    setImportStep("idle")
+    setImportHeaders([])
+    setImportRows([])
+    setImportMap(defaultImportMap)
+    setError("")
+  }
+
+  const addQuotation = () => setQuotations([...quotations, { supplier_id: "", supplier_name: "", quotation_number: "", quotation_date: "", quotation_amount: 0, is_selected: false, attachment_url: "", attachment_name: "" }])
+  const addQuotationLine = (quotationIndex: number) => setQuotationItems((current) => {
+    const lines = current[quotationIndex] || []
+    return { ...current, [quotationIndex]: [...lines, newItemLine(lines.length + 1)] }
+  })
+  const updateQuotationLine = (quotationIndex: number, lineIndex: number, patch: Partial<QuotationLineDraft>) => setQuotationItems((current) => {
+    const lines = current[quotationIndex] || []
+    return { ...current, [quotationIndex]: lines.map((line, index) => index === lineIndex ? { ...line, ...patch } : line) }
+  })
+  const removeQuotationLine = (quotationIndex: number, lineIndex: number) => setQuotationItems((current) => {
+    const lines = (current[quotationIndex] || []).filter((_, index) => index !== lineIndex)
+    return { ...current, [quotationIndex]: renumberItems(lines.length ? lines : [newItemLine(1)]) }
+  })
+  const importQuotationLinesToSectionC = (quotationIndex: number) => {
+    const lines = (quotationItems[quotationIndex] || []).filter((line) => !isBlankItem(line) && isValidItem(line))
+    if (!lines.length) {
+      setError("Enter and validate structured quotation lines before importing them into Section C.")
+      return
+    }
+    const quotation = quotations[quotationIndex]
+    setItems((current) => renumberItems([...current.filter((item) => !isBlankItem(item)), ...lines.map((line) => ({ ...line, source_quotation_id: "", source_quotation_line_id: "", line_notes: line.line_notes || quotation.quotation_number || `Quotation ${quotationIndex + 1}` }))]))
+    setError("")
+  }
+
   const handleQuotationUpload = async (index: number, file: File) => {
     if (!file) return
-
     setUploadingQuotation(index)
     try {
-      // Use a temporary ID until the FF3 is created
       const tempId = `temp-${Date.now()}`
       const uploaded = await uploadFile(BUCKETS.QUOTATIONS, tempId, file)
-
       const newQuots = [...quotations]
       newQuots[index].attachment_url = uploaded.url
       newQuots[index].attachment_name = uploaded.name
       setQuotations(newQuots)
     } catch (err) {
-      console.error('Upload error:', err)
-      setError('Failed to upload quotation file')
+      console.error("Upload error:", err)
+      setError("Failed to upload quotation file")
     } finally {
       setUploadingQuotation(null)
     }
   }
 
-  // Handle supporting document upload
   const handleDocUpload = async (file: File) => {
     if (!file) return
-
     setUploadingDoc(true)
     try {
       const tempId = `temp-${Date.now()}`
       const uploaded = await uploadFile(BUCKETS.FF3_ATTACHMENTS, tempId, file)
       setSupportingDocs(prev => [...prev, uploaded])
     } catch (err) {
-      console.error('Upload error:', err)
-      setError('Failed to upload supporting document')
+      console.error("Upload error:", err)
+      setError("Failed to upload supporting document")
     } finally {
       setUploadingDoc(false)
     }
   }
 
-  // Remove supporting document
-  const removeDoc = (index: number) => {
-    setSupportingDocs(prev => prev.filter((_, i) => i !== index))
-  }
+  const removeDoc = (index: number) => setSupportingDocs(prev => prev.filter((_, i) => i !== index))
 
   const validItems = items.filter((item) => !isBlankItem(item) && isValidItem(item))
   const invalidItems = items.filter((item) => !isBlankItem(item) && !isValidItem(item))
@@ -376,35 +405,25 @@ export default function NewFF3Page() {
   const supplierRequirementMet = formData.supplier_not_required ? supplierExceptionComplete : Boolean(selectedQuotation?.supplier_id)
   const canSubmit = (formData.supplier_not_required || quotationCount >= 3) && supplierRequirementMet && totalEstimate > 0 && formData.purpose && formData.justification && formData.department_id && formData.section_id
 
-  const handleSaveDraft = async () => {
-    await saveFF3('DRAFT')
-  }
-
-  const handleSubmit = async () => {
-    await saveFF3('SUBMITTED')
-  }
-
-  const saveFF3 = async (status: 'DRAFT' | 'SUBMITTED') => {
+  const saveFF3 = async (status: "DRAFT" | "SUBMITTED") => {
     setError("")
     setSuccess("")
     setSubmitting(true)
-
     try {
       const rowsToSave = items.filter((item) => !isBlankItem(item))
       const invalidRows = rowsToSave.filter((item) => !isValidItem(item))
       if (invalidRows.length > 0) {
-        setError('Complete every populated line item before saving: Description, Quantity greater than zero, Unit of Measure, and non-negative Unit Price are required.')
+        setError("Complete every populated line item before saving: Description, Quantity greater than zero, Unit of Measure, and non-negative Unit Price are required.")
         setSubmitting(false)
         return
       }
-      if (status === 'SUBMITTED' && rowsToSave.length === 0) {
-        setError('Add at least one valid requisition line item before submission.')
+      if (status === "SUBMITTED" && rowsToSave.length === 0) {
+        setError("Add at least one valid requisition line item before submission.")
         setSubmitting(false)
         return
       }
       let latestBudget = budgetCheck
-      // Check budget before submitting against the exact approved Excel budget allocation.
-      if (status === 'SUBMITTED') {
+      if (status === "SUBMITTED") {
         const checkedBudget = await checkBudgetAvailability({
           financialYear: formData.financial_year,
           expenseCodeId: formData.expense_code_registry_id || null,
@@ -415,23 +434,11 @@ export default function NewFF3Page() {
           projectId: formData.project_id || null,
           amount: totalEstimate,
         })
-        latestBudget = {
-          budgetAllocationId: checkedBudget.budgetAllocationId,
-          mappingStatus: checkedBudget.mappingStatus,
-          allocationCount: checkedBudget.allocationCount,
-          revised: checkedBudget.revised,
-          released: checkedBudget.released,
-          pending: checkedBudget.pending,
-          committed: checkedBudget.committed,
-          spent: checkedBudget.spent,
-          available: checkedBudget.available,
-          projectedAvailableAfterPending: checkedBudget.projectedAvailableAfterPending,
-          hasAllocation: checkedBudget.hasAllocation,
-        }
+        latestBudget = { ...checkedBudget }
         if (!checkedBudget.hasAllocation) {
-          setError(checkedBudget.mappingStatus === 'BUDGET_MAPPING_REQUIRED_AMBIGUOUS'
-            ? 'More than one budget allocation matches this FF3. Select a more specific department, section, cost centre, funding source, project and finance code.'
-            : 'No exact approved budget allocation was found for this FF3.')
+          setError(checkedBudget.mappingStatus === "BUDGET_MAPPING_REQUIRED_AMBIGUOUS"
+            ? "More than one budget allocation matches this FF3. Select a more specific department, section, cost centre, funding source, project and finance code."
+            : "No exact approved budget allocation was found for this FF3.")
           setSubmitting(false)
           return
         }
@@ -446,19 +453,18 @@ export default function NewFF3Page() {
 
       const selectedQuotation = quotations.find(q => q.is_selected)
       if (!formData.supplier_not_required && !selectedQuotation?.supplier_id) {
-        setError('Select or quick add a supplier for the selected quotation before submitting the FF3.')
+        setError("Select or quick add a supplier for the selected quotation before submitting the FF3.")
         setSubmitting(false)
         return
       }
       if (formData.supplier_not_required && (!formData.supplier_not_required_reason.trim() || !formData.supplier_not_required_expenditure_type.trim())) {
-        setError('Supplier-not-required FF3s need an expenditure type and authorized reason.')
+        setError("Supplier-not-required FF3s need an expenditure type and authorized reason.")
         setSubmitting(false)
         return
       }
 
-      // Insert FF3 header
       const { data: header, error: headerError } = await supabase
-        .from('ff3_headers')
+        .from("ff3_headers")
         .insert({
           financial_year: formData.financial_year,
           department_id: formData.department_id || null,
@@ -477,7 +483,7 @@ export default function NewFF3Page() {
           urgency_level_id: formData.urgency_level_id || null,
           procurement_method: formData.procurement_method,
           procurement_method_id: formData.procurement_method_id || null,
-          status: 'DRAFT',
+          status: "DRAFT",
           selected_supplier_id: formData.supplier_not_required ? null : selectedQuotation?.supplier_id || null,
           selected_supplier_name: formData.supplier_not_required ? null : selectedQuotation?.supplier_name || null,
           supplier_not_required: formData.supplier_not_required,
@@ -486,94 +492,97 @@ export default function NewFF3Page() {
           supplier_not_required_comments: formData.supplier_not_required ? formData.supplier_not_required_comments || null : null,
           total_estimated_amount: totalEstimate,
           is_within_budget: totalEstimate <= (latestBudget?.available ?? budgetInfo.available_balance),
-          submitted_date: status === 'SUBMITTED' ? new Date().toISOString() : null
+          submitted_date: status === "SUBMITTED" ? new Date().toISOString() : null
         })
         .select()
         .single()
 
       if (headerError) throw headerError
 
-      // Insert FF3 items
-      const itemsToInsert = items
-        .filter(item => !isBlankItem(item) && isValidItem(item))
-        .map((item, index) => ({
-          ff3_header_id: header.id,
-          line_number: index + 1,
-          item_code: item.item_code || null,
-          item_description: item.item_description,
-          specifications: item.specifications || null,
-          quantity: item.quantity,
-          unit_of_measure: item.unit_of_measure || null,
-          unit_of_measure_id: item.unit_of_measure_id || null,
-          estimated_unit_price: item.estimated_unit_price,
-          source_quotation_id: item.source_quotation_id || null,
-          source_quotation_line_id: item.source_quotation_line_id || null,
-          line_notes: item.line_notes || null
-        }))
+      const itemsToInsert = items.filter(item => !isBlankItem(item) && isValidItem(item)).map((item, index) => ({
+        ff3_header_id: header.id,
+        line_number: index + 1,
+        item_code: item.item_code || null,
+        item_description: item.item_description,
+        specifications: item.specifications || null,
+        quantity: item.quantity,
+        unit_of_measure: item.unit_of_measure || null,
+        unit_of_measure_id: item.unit_of_measure_id || null,
+        estimated_unit_price: item.estimated_unit_price,
+        source_quotation_id: item.source_quotation_id || null,
+        source_quotation_line_id: item.source_quotation_line_id || null,
+        line_notes: item.line_notes || null
+      }))
 
       if (itemsToInsert.length > 0) {
-        const { error: itemsError } = await supabase
-          .from('ff3_items')
-          .insert(itemsToInsert)
-
+        const { error: itemsError } = await supabase.from("ff3_items").insert(itemsToInsert)
         if (itemsError) throw itemsError
       }
 
-      // Insert FF3 quotations
-      const quotsToInsert = quotations
-        .filter(q => q.supplier_name && q.quotation_amount > 0)
-        .map(q => ({
-          ff3_header_id: header.id,
-          supplier_id: q.supplier_id || null,
-          supplier_name: q.supplier_name,
-          quotation_number: q.quotation_number || null,
-          quotation_date: q.quotation_date || null,
-          quotation_amount: q.quotation_amount,
-          attachment_url: q.attachment_url || null,
-          attachment_name: q.attachment_name || null,
-          is_selected: q.is_selected
-        }))
+      const quotsToInsert = quotations.filter(q => q.supplier_name && q.quotation_amount > 0).map(q => ({
+        ff3_header_id: header.id,
+        supplier_id: q.supplier_id || null,
+        supplier_name: q.supplier_name,
+        quotation_number: q.quotation_number || null,
+        quotation_date: q.quotation_date || null,
+        quotation_amount: q.quotation_amount,
+        attachment_url: q.attachment_url || null,
+        attachment_name: q.attachment_name || null,
+        is_selected: q.is_selected
+      }))
 
       if (quotsToInsert.length > 0) {
-        const { error: quotsError } = await supabase
-          .from('ff3_quotations')
-          .insert(quotsToInsert)
-
+        const { data: insertedQuotations, error: quotsError } = await supabase.from("ff3_quotations").insert(quotsToInsert).select("id, quotation_number")
         if (quotsError) throw quotsError
+
+        const structuredQuotationLines = (insertedQuotations || []).flatMap((quotation, insertedIndex) => {
+          const originalIndex = quotations.findIndex((q) => q.quotation_number === quotation.quotation_number && q.supplier_name && q.quotation_amount > 0)
+          const quotationIndex = originalIndex >= 0 ? originalIndex : insertedIndex
+          return (quotationItems[quotationIndex] || [])
+            .filter((line) => !isBlankItem(line) && isValidItem(line))
+            .map((line, lineIndex) => ({
+              quotation_id: quotation.id,
+              line_number: lineIndex + 1,
+              item_code: line.item_code || null,
+              item_description: line.item_description,
+              specifications: line.specifications || null,
+              quantity: line.quantity,
+              unit_of_measure_id: line.unit_of_measure_id || null,
+              quoted_unit_price: line.estimated_unit_price,
+              notes: line.line_notes || null,
+            }))
+        })
+
+        if (structuredQuotationLines.length > 0) {
+          const { error: quoteItemsError } = await supabase.from("ff3_quotation_items").insert(structuredQuotationLines)
+          if (quoteItemsError) throw quoteItemsError
+        }
       }
 
-      // Use the controlled database workflow for submission so pending state is budget-checked atomically.
-      if (status === 'SUBMITTED') {
-        await approveFF3(header.id, 'SUBMIT', 'Submitted from FF3 creation screen')
+      if (status === "SUBMITTED") {
+        await approveFF3(header.id, "SUBMIT", "Submitted from FF3 creation screen")
         await notifyFF3Submitted(header.ff3_number, header.id, totalEstimate)
       }
 
-      setSuccess(`FF3 ${header.ff3_number} ${status === 'DRAFT' ? 'saved as draft' : 'submitted for approval'}!`)
-
-      // Redirect after short delay
-      setTimeout(() => {
-        router.push('/dashboard/ff3')
-      }, 1500)
-
+      setSuccess(`FF3 ${header.ff3_number} ${status === "DRAFT" ? "saved as draft" : "submitted for approval"}!`)
+      setTimeout(() => router.push("/dashboard/ff3"), 1500)
     } catch (err: unknown) {
-      console.error('Error saving FF3:', err)
-      setError(err instanceof Error ? err.message : 'Failed to save FF3. Please try again.')
+      console.error("Error saving FF3:", err)
+      setError(err instanceof Error ? err.message : "Failed to save FF3. Please try again.")
     } finally {
       setSubmitting(false)
     }
   }
 
+  const handleSaveDraft = async () => { await saveFF3("DRAFT") }
+  const handleSubmit = async () => { await saveFF3("SUBMITTED") }
+
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-png-red" />
-      </div>
-    )
+    return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-png-red" /></div>
   }
 
   return (
     <div className="space-y-6 pb-24">
-      {/* Page Header */}
       <div className="flex items-center gap-4">
         <Link href="/dashboard/ff3" className="p-2 hover:bg-slate-100 rounded-lg">
           <ArrowLeft className="h-5 w-5 text-slate-600" />
@@ -584,190 +593,37 @@ export default function NewFF3Page() {
         </div>
       </div>
 
-      {/* Error/Success Messages */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
-          <div>
-            <p className="font-medium text-red-900">Error</p>
-            <p className="text-sm text-red-700 mt-1">{error}</p>
-          </div>
-        </div>
-      )}
+      {error && <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3"><AlertCircle className="h-5 w-5 text-red-600 mt-0.5" /><div><p className="font-medium text-red-900">Error</p><p className="text-sm text-red-700 mt-1">{error}</p></div></div>}
+      {success && <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3"><CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5" /><div><p className="font-medium text-green-900">Success</p><p className="text-sm text-green-700 mt-1">{success}</p></div></div>}
+      {quotationCount < 3 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3"><AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" /><div><p className="font-medium text-amber-900">Minimum 3 Quotations Required</p><p className="text-sm text-amber-700 mt-1">You have {quotationCount} valid quotation(s). Add {3 - quotationCount} more to submit.</p></div></div>}
 
-      {success && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
-          <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5" />
-          <div>
-            <p className="font-medium text-green-900">Success</p>
-            <p className="text-sm text-green-700 mt-1">{success}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Validation Alert */}
-      {quotationCount < 3 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
-          <div>
-            <p className="font-medium text-amber-900">Minimum 3 Quotations Required</p>
-            <p className="text-sm text-amber-700 mt-1">
-              You have {quotationCount} valid quotation(s). Add {3 - quotationCount} more to submit.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Section A: Requisition Header */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Section A: Requisition Header</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Financial Year</label>
-            <input
-              type="number"
-              value={formData.financial_year}
-              onChange={(e) => setFormData({ ...formData, financial_year: parseInt(e.target.value) })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Department <span className="text-red-500">*</span></label>
-            <select
-              value={formData.department_id}
-              onChange={(e) => setFormData({ ...formData, department_id: e.target.value, section_id: "" })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-            >
-              <option value="">Select Department</option>
-              {departments.map(dept => (
-                <option key={dept.id} value={dept.id}>{dept.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Section <span className="text-red-500">*</span></label>
-            <select
-              value={formData.section_id}
-              onChange={(e) => setFormData({ ...formData, section_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-              disabled={!formData.department_id}
-            >
-              <option value="">Select Section</option>
-              {filteredSections.map(sec => (
-                <option key={sec.id} value={sec.id}>{sec.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Project / Portfolio</label>
-            <select
-              value={formData.project_id}
-              onChange={(e) => setFormData({ ...formData, project_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-            >
-              <option value="">Select Project</option>
-              {projects.map(proj => (
-                <option key={proj.id} value={proj.id}>{proj.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Province</label>
-            <select
-              value={formData.province_id}
-              onChange={(e) => setFormData({ ...formData, province_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-            >
-              <option value="">Select Province</option>
-              {provinces.map(prov => (
-                <option key={prov.id} value={prov.id}>{prov.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Funding Source</label>
-            <select
-              value={formData.funding_source_id}
-              onChange={(e) => setFormData({ ...formData, funding_source_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-            >
-              <option value="">Select Funding Source</option>
-              {fundingSources.map(fs => (
-                <option key={fs.id} value={fs.id}>{fs.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Cost Centre</label>
-            <select
-              value={formData.cost_centre_id}
-              onChange={(e) => setFormData({ ...formData, cost_centre_id: e.target.value })}
-              disabled={!formData.department_id}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
-            >
-              <option value="">Select Cost Centre</option>
-              {filteredCostCentres.map(cc => (
-                <option key={cc.id} value={cc.id}>{cc.code} — {cc.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Expense Code <span className="text-slate-400 text-xs">(approved budget line)</span></label>
-            <select
-              value={formData.expense_code_registry_id}
-              onChange={(e) => setFormData({ ...formData, expense_code_registry_id: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red font-mono text-sm"
-            >
-              <option value="">Select Expense Code</option>
-              {filteredCodes.map(c => (
-                <option key={c.id} value={c.id}>{c.full_expense_code}</option>
-              ))}
-            </select>
-          </div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Financial Year</label><input type="number" value={formData.financial_year} onChange={(e) => setFormData({ ...formData, financial_year: parseInt(e.target.value) })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" /></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Department <span className="text-red-500">*</span></label><select value={formData.department_id} onChange={(e) => setFormData({ ...formData, department_id: e.target.value, section_id: "" })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select Department</option>{departments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}</select></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Section <span className="text-red-500">*</span></label><select value={formData.section_id} onChange={(e) => setFormData({ ...formData, section_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" disabled={!formData.department_id}><option value="">Select Section</option>{filteredSections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}</select></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Project / Portfolio</label><select value={formData.project_id} onChange={(e) => setFormData({ ...formData, project_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select Project</option>{projects.map(proj => <option key={proj.id} value={proj.id}>{proj.name}</option>)}</select></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Province</label><select value={formData.province_id} onChange={(e) => setFormData({ ...formData, province_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select Province</option>{provinces.map(prov => <option key={prov.id} value={prov.id}>{prov.name}</option>)}</select></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Funding Source</label><select value={formData.funding_source_id} onChange={(e) => setFormData({ ...formData, funding_source_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select Funding Source</option>{fundingSources.map(fs => <option key={fs.id} value={fs.id}>{fs.name}</option>)}</select></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Cost Centre</label><select value={formData.cost_centre_id} onChange={(e) => setFormData({ ...formData, cost_centre_id: e.target.value })} disabled={!formData.department_id} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"><option value="">Select Cost Centre</option>{filteredCostCentres.map(cc => <option key={cc.id} value={cc.id}>{cc.code} — {cc.name}</option>)}</select></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Expense Code <span className="text-slate-400 text-xs">(approved budget line)</span></label><select value={formData.expense_code_registry_id} onChange={(e) => setFormData({ ...formData, expense_code_registry_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red font-mono text-sm"><option value="">Select Expense Code</option>{filteredCodes.map(c => <option key={c.id} value={c.id}>{c.full_expense_code}</option>)}</select></div>
         </div>
       </div>
 
-      {/* Section B: Request Details */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Section B: Request Details</h2>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Purpose of Expenditure <span className="text-red-500">*</span></label>
-            <textarea
-              value={formData.purpose}
-              onChange={(e) => setFormData({ ...formData, purpose: e.target.value })}
-              rows={3}
-              placeholder="Describe the purpose of this expenditure..."
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Justification <span className="text-red-500">*</span></label>
-            <textarea
-              value={formData.justification}
-              onChange={(e) => setFormData({ ...formData, justification: e.target.value })}
-              rows={3}
-              placeholder="Provide justification for this expenditure..."
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-            />
-          </div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Purpose of Expenditure <span className="text-red-500">*</span></label><textarea value={formData.purpose} onChange={(e) => setFormData({ ...formData, purpose: e.target.value })} rows={3} placeholder="Describe the purpose of this expenditure..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" /></div>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Justification <span className="text-red-500">*</span></label><textarea value={formData.justification} onChange={(e) => setFormData({ ...formData, justification: e.target.value })} rows={3} placeholder="Provide justification for this expenditure..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" /></div>
           <div className="grid md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Required By Date</label>
-              <input
-                type="date"
-                value={formData.required_by_date}
-                onChange={(e) => setFormData({ ...formData, required_by_date: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-              />
-            </div>
+            <div><label className="block text-sm font-medium text-slate-700 mb-1">Required By Date</label><input type="date" value={formData.required_by_date} onChange={(e) => setFormData({ ...formData, required_by_date: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" /></div>
             <LookupSelect label="Urgency Level" value={formData.urgency_level_id} options={urgencyLevels} placeholder="Select urgency" onChange={(value, option) => setFormData({ ...formData, urgency_level_id: value, urgency_level: option?.code || "" })} />
-            <LookupSelect label="Procurement Method" value={formData.procurement_method_id} options={procurementMethods} placeholder="Select method" canAdd addTable="procurement_methods" addLabel="+ Add Procurement Method" onRefresh={async () => setProcurementMethods(await loadLookup('procurement_methods'))} onChange={(value, option) => setFormData({ ...formData, procurement_method_id: value, procurement_method: option?.code || "" })} />
+            <LookupSelect label="Procurement Method" value={formData.procurement_method_id} options={procurementMethods} placeholder="Select method" canAdd addTable="procurement_methods" addLabel="+ Add Procurement Method" onRefresh={async () => setProcurementMethods(await loadLookup("procurement_methods"))} onChange={(value, option) => setFormData({ ...formData, procurement_method_id: value, procurement_method: option?.code || "" })} />
           </div>
         </div>
       </div>
 
-      {/* Section C: Requisition Line Items */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 sm:p-6">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -775,21 +631,53 @@ export default function NewFF3Page() {
             <p className="mt-1 text-sm text-slate-600">Enter one database line per quoted item or service. Units are loaded from the controlled units register.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={addItem} className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2">
-              <Plus className="h-4 w-4" /> Add Line Item
-            </button>
-            <button type="button" onClick={() => setError('Structured quotation-line import will be available when quotation lines have been entered into ff3_quotation_items. Uploaded PDFs/images are not parsed automatically.')} className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
-              Import from Quotation
-            </button>
-            <button type="button" onClick={() => setError('Excel/CSV import requires Upload → Map Columns → Preview → Validate → Import. Paste rows from Excel into the grid for this release.')} className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+            <button type="button" onClick={addItem} className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2"><Plus className="h-4 w-4" /> Add Line Item</button>
+            <button type="button" onClick={() => setError("Structured quotation-line import will be available when quotation lines have been entered into ff3_quotation_items. Uploaded PDFs/images are not parsed automatically.")} className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Import from Quotation</button>
+            <label className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 cursor-pointer">
               Import Excel/CSV
-            </button>
+              <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(event) => event.target.files?.[0] && handleLineImportFile(event.target.files[0])} />
+            </label>
           </div>
         </div>
 
-        {invalidItems.length > 0 && (
-          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            {invalidItems.length} populated line item(s) need Description, Quantity, Unit of Measure and Unit Price before saving or submitting.
+        {invalidItems.length > 0 && <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{invalidItems.length} populated line item(s) need Description, Quantity, Unit of Measure and Unit Price before saving or submitting.</div>}
+
+        {importStep !== "idle" && (
+          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-900">Import Line Items</h3>
+                <p className="text-sm text-slate-600">Upload → Map Columns → Preview → Validate → Import. Nothing is saved until the FF3 is saved.</p>
+              </div>
+              <button type="button" onClick={() => setImportStep("idle")} className="text-sm font-semibold text-slate-600 hover:text-slate-900">Cancel</button>
+            </div>
+            {importStep === "map" && (
+              <div className="grid gap-3 md:grid-cols-3">
+                {Object.keys(defaultImportMap).map((key) => (
+                  <label key={key} className="text-sm font-medium text-slate-700">
+                    {key.replace(/_/g, " ")}
+                    <select value={importMap[key as keyof ImportColumnMap]} onChange={(event) => setImportMap((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2">
+                      <option value="">Not mapped</option>
+                      {importHeaders.map((header) => <option key={header} value={header}>{header}</option>)}
+                    </select>
+                  </label>
+                ))}
+                <div className="md:col-span-3 flex justify-end">
+                  <button type="button" onClick={() => setImportStep("preview")} className="px-4 py-2 rounded-lg bg-png-red text-white font-semibold">Preview & Validate</button>
+                </div>
+              </div>
+            )}
+            {importStep === "preview" && (
+              <div className="space-y-3">
+                <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white">
+                  <table className="min-w-[900px] w-full text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-2 py-2 text-left">Description</th><th className="px-2 py-2 text-left">Specs</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-left">Unit</th><th className="px-2 py-2 text-right">Price</th><th className="px-2 py-2 text-left">Status</th></tr></thead>
+                    <tbody>{rowsFromMappedImport().slice(0, 50).map((row, index) => <tr key={index} className={isValidItem(row) ? "" : "bg-amber-50"}><td className="border-t px-2 py-1">{row.item_description}</td><td className="border-t px-2 py-1">{row.specifications}</td><td className="border-t px-2 py-1 text-right">{row.quantity}</td><td className="border-t px-2 py-1">{row.unit_of_measure}</td><td className="border-t px-2 py-1 text-right">{money(row.estimated_unit_price)}</td><td className="border-t px-2 py-1">{isValidItem(row) ? "Valid" : "Check mapping/unit"}</td></tr>)}</tbody>
+                  </table>
+                </div>
+                <div className="flex justify-between text-sm text-slate-600"><span>{importRows.length} row(s) loaded. Preview shows first 50 rows.</span><button type="button" onClick={importMappedRowsToGrid} className="px-4 py-2 rounded-lg bg-png-red text-white font-semibold">Import Validated Rows</button></div>
+              </div>
+            )}
           </div>
         )}
 
@@ -812,124 +700,53 @@ export default function NewFF3Page() {
               {items.map((item, index) => {
                 const invalid = !isBlankItem(item) && !isValidItem(item)
                 return (
-                  <tr key={index} className={`${invalid ? 'bg-amber-50' : index % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'} align-top`}>
+                  <tr key={index} className={`${invalid ? "bg-amber-50" : index % 2 === 0 ? "bg-white" : "bg-slate-50/60"} align-top`}>
                     <td className="border-b border-slate-100 px-2 py-2 text-right font-semibold text-slate-600">{index + 1}</td>
-                    <td className="border-b border-slate-100 px-2 py-1.5">
-                      <input data-item-cell={`${index}-description`} value={item.item_description} onChange={(e) => updateItem(index, { item_description: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Description" />
-                    </td>
-                    <td className="border-b border-slate-100 px-2 py-1.5">
-                      <input value={item.specifications} onChange={(e) => updateItem(index, { specifications: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Technical requirement" />
-                    </td>
-                    <td className="border-b border-slate-100 px-2 py-1.5">
-                      <input type="number" min="0" step="0.01" value={item.quantity || ""} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) || 0 })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-right focus:outline-none focus:ring-2 focus:ring-png-red" />
-                    </td>
-                    <td className="border-b border-slate-100 px-2 py-1.5">
-                      <select value={item.unit_of_measure_id} onChange={(e) => {
-                        const unit = units.find((row) => row.id === e.target.value)
-                        updateItem(index, { unit_of_measure_id: e.target.value, unit_of_measure: unit?.name || "" })
-                      }} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red">
-                        <option value="">Select unit</option>
-                        {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code ? `${unit.code} — ${unit.name}` : unit.name}</option>)}
-                      </select>
-                    </td>
-                    <td className="border-b border-slate-100 px-2 py-1.5">
-                      <input type="number" min="0" step="0.01" value={item.estimated_unit_price || ""} onChange={(e) => updateItem(index, { estimated_unit_price: Number(e.target.value) || 0 })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-right focus:outline-none focus:ring-2 focus:ring-png-red" />
-                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1.5"><input data-item-cell={`${index}-description`} value={item.item_description} onChange={(e) => updateItem(index, { item_description: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Description" /></td>
+                    <td className="border-b border-slate-100 px-2 py-1.5"><input value={item.specifications} onChange={(e) => updateItem(index, { specifications: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Technical requirement" /></td>
+                    <td className="border-b border-slate-100 px-2 py-1.5"><input type="number" min="0" step="0.01" value={item.quantity || ""} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) || 0 })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-right focus:outline-none focus:ring-2 focus:ring-png-red" /></td>
+                    <td className="border-b border-slate-100 px-2 py-1.5"><select value={item.unit_of_measure_id} onChange={(e) => { const unit = units.find((row) => row.id === e.target.value); updateItem(index, { unit_of_measure_id: e.target.value, unit_of_measure: unit?.name || "" }) }} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select unit</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code ? `${unit.code} — ${unit.name}` : unit.name}</option>)}</select></td>
+                    <td className="border-b border-slate-100 px-2 py-1.5"><input type="number" min="0" step="0.01" value={item.estimated_unit_price || ""} onChange={(e) => updateItem(index, { estimated_unit_price: Number(e.target.value) || 0 })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-right focus:outline-none focus:ring-2 focus:ring-png-red" /></td>
                     <td className="border-b border-slate-100 px-2 py-2 text-right font-semibold text-slate-900">{money(lineTotal(item))}</td>
-                    <td className="border-b border-slate-100 px-2 py-1.5">
-                      <input data-final-cell="true" data-row-index={index} value={item.line_notes} onChange={(e) => updateItem(index, { line_notes: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Q-001 / notes" />
-                    </td>
-                    <td className="border-b border-slate-100 px-2 py-1.5 text-center">
-                      <button type="button" onClick={() => removeItem(index)} className="inline-flex rounded-md p-2 text-red-600 hover:bg-red-50" aria-label={`Remove line ${index + 1}`}>
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1.5"><input data-final-cell="true" data-row-index={index} value={item.line_notes} onChange={(e) => updateItem(index, { line_notes: e.target.value })} className="w-full rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Q-001 / notes" /></td>
+                    <td className="border-b border-slate-100 px-2 py-1.5 text-center"><button type="button" onClick={() => removeItem(index)} className="inline-flex rounded-md p-2 text-red-600 hover:bg-red-50" aria-label={`Remove line ${index + 1}`}><Trash2 className="h-4 w-4" /></button></td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
         </div>
-        <div className="mt-4 flex flex-col gap-2 rounded-lg bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <span className="font-semibold text-slate-900">TOTAL ESTIMATED REQUISITION:</span>
-          <span className="text-xl font-bold text-slate-900">K {money(totalEstimate)}</span>
-        </div>
+        <div className="mt-4 flex flex-col gap-2 rounded-lg bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between"><span className="font-semibold text-slate-900">TOTAL ESTIMATED REQUISITION:</span><span className="text-xl font-bold text-slate-900">K {money(totalEstimate)}</span></div>
       </div>
 
-      {/* Section D: Supplier / Service Provider Control */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Section D: Supplier / Service Provider Control</h2>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
           <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={formData.supplier_not_required}
-              onChange={(event) => setFormData({ ...formData, supplier_not_required: event.target.checked })}
-              className="mt-1 h-4 w-4 rounded border-slate-300 text-png-red"
-            />
-            <span>
-              <span className="block text-sm font-semibold text-slate-900">Supplier not required for this expenditure</span>
-              <span className="block text-sm text-slate-600">Use only for legitimate non-supplier expenditure. Do not create fake GENERAL, N/A, or placeholder suppliers.</span>
-            </span>
+            <input type="checkbox" checked={formData.supplier_not_required} onChange={(event) => setFormData({ ...formData, supplier_not_required: event.target.checked })} className="mt-1 h-4 w-4 rounded border-slate-300 text-png-red" />
+            <span><span className="block text-sm font-semibold text-slate-900">Supplier not required for this expenditure</span><span className="block text-sm text-slate-600">Use only for legitimate non-supplier expenditure. Do not create fake GENERAL, N/A, or placeholder suppliers.</span></span>
           </label>
-          {formData.supplier_not_required && (
-            <div className="mt-4 grid md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Expenditure Type <span className="text-red-500">*</span></label>
-                <input value={formData.supplier_not_required_expenditure_type} onChange={(event) => setFormData({ ...formData, supplier_not_required_expenditure_type: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="e.g. Internal statutory charge" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Authorized Reason <span className="text-red-500">*</span></label>
-                <input value={formData.supplier_not_required_reason} onChange={(event) => setFormData({ ...formData, supplier_not_required_reason: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Why no supplier is required" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Comments</label>
-                <input value={formData.supplier_not_required_comments} onChange={(event) => setFormData({ ...formData, supplier_not_required_comments: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Optional approval notes" />
-              </div>
-            </div>
-          )}
+          {formData.supplier_not_required && <div className="mt-4 grid md:grid-cols-3 gap-3"><div><label className="block text-sm font-medium text-slate-700 mb-1">Expenditure Type <span className="text-red-500">*</span></label><input value={formData.supplier_not_required_expenditure_type} onChange={(event) => setFormData({ ...formData, supplier_not_required_expenditure_type: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="e.g. Internal statutory charge" /></div><div><label className="block text-sm font-medium text-slate-700 mb-1">Authorized Reason <span className="text-red-500">*</span></label><input value={formData.supplier_not_required_reason} onChange={(event) => setFormData({ ...formData, supplier_not_required_reason: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Why no supplier is required" /></div><div><label className="block text-sm font-medium text-slate-700 mb-1">Comments</label><input value={formData.supplier_not_required_comments} onChange={(event) => setFormData({ ...formData, supplier_not_required_comments: event.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" placeholder="Optional approval notes" /></div></div>}
         </div>
       </div>
 
-      {/* Section E: Quotations (Minimum 3 Required) */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Section E: Quotations <span className="text-red-500">*</span></h2>
             <p className="text-sm text-slate-600 mt-1">Minimum 3 quotations required for supplier-based expenditure. Select the quotation supplier to link this FF3 and later expenditure reporting.</p>
           </div>
-          <button
-            onClick={addQuotation}
-            className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Add Quotation
-          </button>
+          <button onClick={addQuotation} className="px-3 py-1.5 bg-png-red text-white rounded-lg text-sm font-medium hover:bg-png-maroon flex items-center gap-2"><Plus className="h-4 w-4" /> Add Quotation</button>
         </div>
         <div className="space-y-4">
           {quotations.map((quot, index) => (
-            <div key={index} className={`border rounded-lg p-4 ${quot.is_selected ? 'border-green-500 bg-green-50' : 'border-slate-200'}`}>
+            <div key={index} className={`border rounded-lg p-4 ${quot.is_selected ? "border-green-500 bg-green-50" : "border-slate-200"}`}>
               <div className="flex items-center justify-between mb-3">
                 <span className="font-medium text-slate-700">Quotation {index + 1}</span>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="selected_quotation"
-                    checked={quot.is_selected}
-                    onChange={() => {
-                      const newQuots = quotations.map((q, i) => ({
-                        ...q,
-                        is_selected: i === index
-                      }))
-                      setQuotations(newQuots)
-                    }}
-                    className="h-4 w-4 text-green-600"
-                  />
-                  <span className="text-sm text-slate-700">Select</span>
-                </label>
+                <label className="flex items-center gap-2"><input type="radio" name="selected_quotation" checked={quot.is_selected} onChange={() => setQuotations(quotations.map((q, i) => ({ ...q, is_selected: i === index })))} className="h-4 w-4 text-green-600" /><span className="text-sm text-slate-700">Select</span></label>
               </div>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-                <LookupSelect label="Supplier Name" required value={quot.supplier_id} options={suppliers} placeholder="Search supplier" canAdd addTable="suppliers" addLabel="+ Quick Add Supplier" emptyLabel="No active suppliers found. Quick add a supplier to continue." addFields={[{ name: 'legal_name', label: 'Supplier / Business Name', required: true }, { name: 'primary_contact_name', label: 'Contact Person' }, { name: 'phone', label: 'Phone' }, { name: 'email', label: 'Email' }, { name: 'physical_address', label: 'Address' }, { name: 'ipa_registration_number', label: 'IPA Registration' }, { name: 'tin', label: 'TIN' }]} createVia={async (form) => {
+                <LookupSelect label="Supplier Name" required value={quot.supplier_id} options={suppliers} placeholder="Search supplier" canAdd addTable="suppliers" addLabel="+ Quick Add Supplier" emptyLabel="No active suppliers found. Quick add a supplier to continue." addFields={[{ name: "legal_name", label: "Supplier / Business Name", required: true }, { name: "primary_contact_name", label: "Contact Person" }, { name: "phone", label: "Phone" }, { name: "email", label: "Email" }, { name: "physical_address", label: "Address" }, { name: "ipa_registration_number", label: "IPA Registration" }, { name: "tin", label: "TIN" }]} createVia={async (form) => {
                   const result = await createSupplier({
                     legal_name: form.legal_name,
                     ipa_registration_number: form.ipa_registration_number,
@@ -940,97 +757,46 @@ export default function NewFF3Page() {
                     physical_address: form.physical_address,
                     is_active: true,
                   })
-                  if (result.requires_review) throw new Error('Possible duplicate supplier found. Select the existing supplier or add it from the Supplier Register with duplicate override if genuinely different.')
-                  if (!result.supplier) throw new Error('Supplier registration did not return a supplier record.')
+                  if (result.requires_review) throw new Error("Possible duplicate supplier found. Select the existing supplier or add it from the Supplier Register with duplicate override if genuinely different.")
+                  if (!result.supplier) throw new Error("Supplier registration did not return a supplier record.")
                   return { ...result.supplier, id: result.supplier.id, code: result.supplier.supplier_code, name: result.supplier.supplier_name }
-                }} onRefresh={async () => setSuppliers(await loadLookup('suppliers', { order: 'supplier_name' }))} onChange={(value, option) => {
-                  const newQuots = [...quotations]
-                  newQuots[index].supplier_id = value
-                  newQuots[index].supplier_name = option?.name || ""
-                  setQuotations(newQuots)
-                }} />
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Quotation Number</label>
-                  <input
-                    type="text"
-                    value={quot.quotation_number}
-                    onChange={(e) => {
-                      const newQuots = [...quotations]
-                      newQuots[index].quotation_number = e.target.value
-                      setQuotations(newQuots)
-                    }}
-                    placeholder="Quote #"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Quote Date</label>
-                  <input
-                    type="date"
-                    value={quot.quotation_date}
-                    onChange={(e) => {
-                      const newQuots = [...quotations]
-                      newQuots[index].quotation_date = e.target.value
-                      setQuotations(newQuots)
-                    }}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Amount (K) <span className="text-red-500">*</span></label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={quot.quotation_amount || ""}
-                    onChange={(e) => {
-                      const newQuots = [...quotations]
-                      newQuots[index].quotation_amount = parseFloat(e.target.value) || 0
-                      setQuotations(newQuots)
-                    }}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"
-                  />
-                </div>
+                }} onRefresh={async () => setSuppliers(await loadLookup("suppliers", { order: "supplier_name" }))} onChange={(value, option) => { const newQuots = [...quotations]; newQuots[index].supplier_id = value; newQuots[index].supplier_name = option?.name || ""; setQuotations(newQuots) }} />
+                <div><label className="block text-sm font-medium text-slate-700 mb-1">Quotation Number</label><input type="text" value={quot.quotation_number} onChange={(e) => { const newQuots = [...quotations]; newQuots[index].quotation_number = e.target.value; setQuotations(newQuots) }} placeholder="Quote #" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" /></div>
+                <div><label className="block text-sm font-medium text-slate-700 mb-1">Quote Date</label><input type="date" value={quot.quotation_date} onChange={(e) => { const newQuots = [...quotations]; newQuots[index].quotation_date = e.target.value; setQuotations(newQuots) }} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" /></div>
+                <div><label className="block text-sm font-medium text-slate-700 mb-1">Amount (K) <span className="text-red-500">*</span></label><input type="number" step="0.01" value={quot.quotation_amount || ""} onChange={(e) => { const newQuots = [...quotations]; newQuots[index].quotation_amount = parseFloat(e.target.value) || 0; setQuotations(newQuots) }} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" /></div>
               </div>
-              {/* Quotation File Upload */}
               <div className="mt-3">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Quotation Document</label>
                 {quot.attachment_url ? (
-                  <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded-lg">
-                    <FileText className="h-4 w-4 text-green-600" />
-                    <a href={quot.attachment_url} target="_blank" rel="noopener noreferrer" className="text-sm text-green-700 hover:underline flex-1 truncate">
-                      {quot.attachment_name || 'View Attachment'}
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newQuots = [...quotations]
-                        newQuots[index].attachment_url = ""
-                        newQuots[index].attachment_name = ""
-                        setQuotations(newQuots)
-                      }}
-                      className="p-1 hover:bg-green-100 rounded"
-                    >
-                      <X className="h-4 w-4 text-green-600" />
-                    </button>
-                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded-lg"><FileText className="h-4 w-4 text-green-600" /><a href={quot.attachment_url} target="_blank" rel="noopener noreferrer" className="text-sm text-green-700 hover:underline flex-1 truncate">{quot.attachment_name || "View Attachment"}</a><button type="button" onClick={() => { const newQuots = [...quotations]; newQuots[index].attachment_url = ""; newQuots[index].attachment_name = ""; setQuotations(newQuots) }} className="p-1 hover:bg-green-100 rounded"><X className="h-4 w-4 text-green-600" /></button></div>
                 ) : (
                   <label className="flex items-center gap-2 p-2 border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-png-gold transition-colors">
-                    {uploadingQuotation === index ? (
-                      <Loader2 className="h-4 w-4 text-png-red animate-spin" />
-                    ) : (
-                      <Upload className="h-4 w-4 text-slate-400" />
-                    )}
-                    <span className="text-sm text-slate-600">
-                      {uploadingQuotation === index ? 'Uploading...' : 'Upload PDF or Image'}
-                    </span>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) => e.target.files?.[0] && handleQuotationUpload(index, e.target.files[0])}
-                      className="hidden"
-                      disabled={uploadingQuotation !== null}
-                    />
+                    {uploadingQuotation === index ? <Loader2 className="h-4 w-4 text-png-red animate-spin" /> : <Upload className="h-4 w-4 text-slate-400" />}
+                    <span className="text-sm text-slate-600">{uploadingQuotation === index ? "Uploading..." : "Upload PDF or Image"}</span>
+                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => e.target.files?.[0] && handleQuotationUpload(index, e.target.files[0])} className="hidden" disabled={uploadingQuotation !== null} />
                   </label>
+                )}
+              </div>
+
+              <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Structured quotation lines</p>
+                    <p className="text-xs text-slate-500">Optional. Enter supplier quote lines here, then import them into Section C. PDFs/images are not parsed automatically.</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setShowQuotationItems((current) => ({ ...current, [index]: !current[index] }))} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700">{showQuotationItems[index] ? "Hide lines" : "Show lines"}</button>
+                    <button type="button" onClick={() => addQuotationLine(index)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700">Add quote line</button>
+                    <button type="button" onClick={() => importQuotationLinesToSectionC(index)} className="rounded-lg bg-png-red px-3 py-1.5 text-xs font-semibold text-white">Import to Section C</button>
+                  </div>
+                </div>
+                {showQuotationItems[index] && (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="min-w-[980px] w-full text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-2 py-2 text-right">#</th><th className="px-2 py-2 text-left">Description</th><th className="px-2 py-2 text-left">Specifications</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-left">Unit</th><th className="px-2 py-2 text-right">Unit Price</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2 text-left">Notes</th><th className="px-2 py-2">Actions</th></tr></thead>
+                      <tbody>{(quotationItems[index] || [newItemLine(1)]).map((line, lineIndex) => <tr key={lineIndex}><td className="border-t px-2 py-1 text-right">{lineIndex + 1}</td><td className="border-t px-2 py-1"><input value={line.item_description} onChange={(event) => updateQuotationLine(index, lineIndex, { item_description: event.target.value })} className="w-full rounded border px-2 py-1" /></td><td className="border-t px-2 py-1"><input value={line.specifications} onChange={(event) => updateQuotationLine(index, lineIndex, { specifications: event.target.value })} className="w-full rounded border px-2 py-1" /></td><td className="border-t px-2 py-1"><input type="number" value={line.quantity || ""} onChange={(event) => updateQuotationLine(index, lineIndex, { quantity: Number(event.target.value) || 0 })} className="w-full rounded border px-2 py-1 text-right" /></td><td className="border-t px-2 py-1"><select value={line.unit_of_measure_id} onChange={(event) => { const unit = units.find((row) => row.id === event.target.value); updateQuotationLine(index, lineIndex, { unit_of_measure_id: event.target.value, unit_of_measure: unit?.name || "" }) }} className="w-full rounded border px-2 py-1"><option value="">Unit</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code ? `${unit.code} — ${unit.name}` : unit.name}</option>)}</select></td><td className="border-t px-2 py-1"><input type="number" value={line.estimated_unit_price || ""} onChange={(event) => updateQuotationLine(index, lineIndex, { estimated_unit_price: Number(event.target.value) || 0 })} className="w-full rounded border px-2 py-1 text-right" /></td><td className="border-t px-2 py-1 text-right font-semibold">{money(lineTotal(line))}</td><td className="border-t px-2 py-1"><input value={line.line_notes} onChange={(event) => updateQuotationLine(index, lineIndex, { line_notes: event.target.value })} className="w-full rounded border px-2 py-1" /></td><td className="border-t px-2 py-1 text-center"><button type="button" onClick={() => removeQuotationLine(index, lineIndex)} className="text-red-600"><Trash2 className="h-4 w-4" /></button></td></tr>)}</tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </div>
@@ -1038,133 +804,30 @@ export default function NewFF3Page() {
         </div>
       </div>
 
-      {/* Section E: Supporting Documents */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Section E: Supporting Documents</h2>
         <p className="text-sm text-slate-600 mb-4">Upload any supporting documents such as specifications, approvals, or other relevant files.</p>
-
-        {/* Upload Area */}
         <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-png-gold transition-colors">
-          {uploadingDoc ? (
-            <Loader2 className="h-8 w-8 text-png-red animate-spin mb-2" />
-          ) : (
-            <Upload className="h-8 w-8 text-slate-400 mb-2" />
-          )}
-          <span className="text-sm font-medium text-slate-700">
-            {uploadingDoc ? 'Uploading...' : 'Click to upload supporting documents'}
-          </span>
+          {uploadingDoc ? <Loader2 className="h-8 w-8 text-png-red animate-spin mb-2" /> : <Upload className="h-8 w-8 text-slate-400 mb-2" />}
+          <span className="text-sm font-medium text-slate-700">{uploadingDoc ? "Uploading..." : "Click to upload supporting documents"}</span>
           <span className="text-xs text-slate-500 mt-1">PDF, JPG, PNG up to 10MB</span>
-          <input
-            type="file"
-            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
-            onChange={(e) => e.target.files?.[0] && handleDocUpload(e.target.files[0])}
-            className="hidden"
-            disabled={uploadingDoc}
-          />
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={(e) => e.target.files?.[0] && handleDocUpload(e.target.files[0])} className="hidden" disabled={uploadingDoc} />
         </label>
-
-        {/* Uploaded Documents List */}
-        {supportingDocs.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <p className="text-sm font-medium text-slate-700">Uploaded Documents ({supportingDocs.length})</p>
-            {supportingDocs.map((doc, index) => (
-              <div key={doc.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                <FileText className="h-5 w-5 text-png-red" />
-                <div className="flex-1 min-w-0">
-                  <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-png-red hover:underline truncate block">
-                    {doc.name}
-                  </a>
-                  <p className="text-xs text-slate-500">{(doc.size / 1024).toFixed(1)} KB</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeDoc(index)}
-                  className="p-1 hover:bg-slate-200 rounded"
-                >
-                  <X className="h-4 w-4 text-slate-500" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        {supportingDocs.length > 0 && <div className="mt-4 space-y-2"><p className="text-sm font-medium text-slate-700">Uploaded Documents ({supportingDocs.length})</p>{supportingDocs.map((doc, index) => <div key={doc.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg"><FileText className="h-5 w-5 text-png-red" /><div className="flex-1 min-w-0"><a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-png-red hover:underline truncate block">{doc.name}</a><p className="text-xs text-slate-500">{(doc.size / 1024).toFixed(1)} KB</p></div><button type="button" onClick={() => removeDoc(index)} className="p-1 hover:bg-slate-200 rounded"><X className="h-4 w-4 text-slate-500" /></button></div>)}</div>}
       </div>
 
-      {/* Section F: Budget Validation */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">Section F: Budget Validation</h2>
-          {selectedCode && (
-            <span className="font-mono text-xs px-2 py-1 rounded-lg bg-png-red/5 text-png-red border border-png-gold/40">{selectedCode.full_expense_code}</span>
-          )}
-        </div>
-        {budgetCheck?.hasAllocation ? (
-          <div className="space-y-2">
-            <p className="text-xs text-slate-500 mb-1">{selectedCode ? "Position for the selected expense code" : "Position for the selected section"}</p>
-            <BudgetLine label="Approved Budget (Revised)" amount={budgetCheck.revised} />
-            <BudgetLine label="Released (cash available)" amount={budgetCheck.released} />
-            <BudgetLine label="Pending Requests" amount={budgetCheck.pending} />
-            <BudgetLine label="Committed" amount={budgetCheck.committed} />
-            <BudgetLine label="Actual Expenditure" amount={budgetCheck.spent} />
-            <BudgetLine label="Available Balance" amount={budgetCheck.available} isTotal />
-            <div className="border-t border-slate-200 pt-2 mt-2">
-              <BudgetLine label="This Request" amount={totalEstimate} highlight />
-              <BudgetLine label="Available After This Request" amount={budgetCheck.available - totalEstimate} />
-              <BudgetLine label="Projected Available After Pending" amount={budgetCheck.projectedAvailableAfterPending - totalEstimate} />
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {(formData.expense_code_registry_id || formData.section_id) && (
-              <div className="mb-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" /> Exact budget allocation is required. {budgetCheck?.mappingStatus === 'BUDGET_MAPPING_REQUIRED_AMBIGUOUS' ? 'Multiple allocations match this request.' : 'No confirmed budget allocation found yet.'}
-              </div>
-            )}
-            <BudgetLine label="Quarterly Released" amount={budgetInfo.quarterly_released} />
-            <BudgetLine label="Available Balance" amount={budgetInfo.available_balance} isTotal />
-            <div className="border-t border-slate-200 pt-2 mt-2">
-              <BudgetLine label="This Request" amount={totalEstimate} highlight />
-            </div>
-          </div>
-        )}
-        {totalEstimate > 0 && (
-          <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-sm ${
-            totalEstimate <= effectiveAvailable ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-          }`}>
-            {totalEstimate <= effectiveAvailable ? (
-              <><CheckCircle2 className="h-4 w-4" /><span className="font-medium">Within Budget — sufficient funds available (K {effectiveAvailable.toLocaleString()} remaining)</span></>
-            ) : (
-              <><AlertCircle className="h-4 w-4" /><span className="font-medium">Insufficient Funds — exceeds available balance of K {effectiveAvailable.toLocaleString()}</span></>
-            )}
-          </div>
-        )}
+        <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold text-slate-900">Section F: Budget Validation</h2>{selectedCode && <span className="font-mono text-xs px-2 py-1 rounded-lg bg-png-red/5 text-png-red border border-png-gold/40">{selectedCode.full_expense_code}</span>}</div>
+        {budgetCheck?.hasAllocation ? <div className="space-y-2"><p className="text-xs text-slate-500 mb-1">{selectedCode ? "Position for the selected expense code" : "Position for the selected section"}</p><BudgetLine label="Approved Budget (Revised)" amount={budgetCheck.revised} /><BudgetLine label="Released (cash available)" amount={budgetCheck.released} /><BudgetLine label="Pending Requests" amount={budgetCheck.pending} /><BudgetLine label="Committed" amount={budgetCheck.committed} /><BudgetLine label="Actual Expenditure" amount={budgetCheck.spent} /><BudgetLine label="Available Balance" amount={budgetCheck.available} isTotal /><div className="border-t border-slate-200 pt-2 mt-2"><BudgetLine label="This Request" amount={totalEstimate} highlight /><BudgetLine label="Available After This Request" amount={budgetCheck.available - totalEstimate} /><BudgetLine label="Projected Available After Pending" amount={budgetCheck.projectedAvailableAfterPending - totalEstimate} /></div></div> : <div className="space-y-2">{(formData.expense_code_registry_id || formData.section_id) && <div className="mb-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-2"><AlertCircle className="h-4 w-4" /> Exact budget allocation is required. {budgetCheck?.mappingStatus === "BUDGET_MAPPING_REQUIRED_AMBIGUOUS" ? "Multiple allocations match this request." : "No confirmed budget allocation found yet."}</div>}<BudgetLine label="Quarterly Released" amount={budgetInfo.quarterly_released} /><BudgetLine label="Available Balance" amount={budgetInfo.available_balance} isTotal /><div className="border-t border-slate-200 pt-2 mt-2"><BudgetLine label="This Request" amount={totalEstimate} highlight /></div></div>}
+        {totalEstimate > 0 && <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-sm ${totalEstimate <= effectiveAvailable ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{totalEstimate <= effectiveAvailable ? <><CheckCircle2 className="h-4 w-4" /><span className="font-medium">Within Budget — sufficient funds available (K {effectiveAvailable.toLocaleString()} remaining)</span></> : <><AlertCircle className="h-4 w-4" /><span className="font-medium">Insufficient Funds — exceeds available balance of K {effectiveAvailable.toLocaleString()}</span></>}</div>}
       </div>
 
-      {/* Action Buttons */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-10">
         <div className="max-w-[1600px] mx-auto flex items-center justify-between">
-          <Link
-            href="/dashboard/ff3"
-            className="px-4 py-2 border border-slate-300 rounded-lg font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Cancel
-          </Link>
+          <Link href="/dashboard/ff3" className="px-4 py-2 border border-slate-300 rounded-lg font-medium text-slate-700 hover:bg-slate-50">Cancel</Link>
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleSaveDraft}
-              disabled={submitting}
-              className="px-4 py-2 border border-slate-300 rounded-lg font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2"
-            >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save as Draft
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={!canSubmit || submitting}
-              className="px-6 py-2 bg-png-red text-white rounded-lg font-medium hover:bg-png-maroon disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Submit for Approval
-            </button>
+            <button onClick={handleSaveDraft} disabled={submitting} className="px-4 py-2 border border-slate-300 rounded-lg font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2">{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save as Draft</button>
+            <button onClick={handleSubmit} disabled={!canSubmit || submitting} className="px-6 py-2 bg-png-red text-white rounded-lg font-medium hover:bg-png-maroon disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Submit for Approval</button>
           </div>
         </div>
       </div>
@@ -1172,18 +835,12 @@ export default function NewFF3Page() {
   )
 }
 
-function BudgetLine({ label, amount, isNegative = false, isTotal = false, highlight = false }: {
-  label: string
-  amount: number
-  isNegative?: boolean
-  isTotal?: boolean
-  highlight?: boolean
-}) {
+function BudgetLine({ label, amount, isNegative = false, isTotal = false, highlight = false }: { label: string; amount: number; isNegative?: boolean; isTotal?: boolean; highlight?: boolean }) {
   return (
-    <div className={`flex items-center justify-between py-1 ${isTotal ? 'text-lg font-bold' : ''} ${highlight ? 'text-png-red font-semibold' : ''}`}>
-      <span className={isTotal ? 'text-slate-900' : 'text-slate-700'}>{label}</span>
-      <span className={`${isTotal ? 'text-green-700' : isNegative ? 'text-red-600' : 'text-slate-900'}`}>
-        K {amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+    <div className={`flex items-center justify-between py-1 ${isTotal ? "text-lg font-bold" : ""} ${highlight ? "text-png-red font-semibold" : ""}`}>
+      <span className={isTotal ? "text-slate-900" : "text-slate-700"}>{label}</span>
+      <span className={`${isTotal ? "text-green-700" : isNegative ? "text-red-600" : "text-slate-900"}`}>
+        K {amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </span>
     </div>
   )
