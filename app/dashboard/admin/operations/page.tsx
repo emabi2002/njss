@@ -268,7 +268,7 @@ export default function OperationsDashboardPage() {
       { label: "Storage Growth", value: fmtBytes(summary.capacity.storageLast30DaysBytes), sub: "Last 30 days", icon: HardDrive, tone: "slate" },
       { label: "Database Growth", value: fmtPercent(summary.capacity.databaseGrowthPercent), sub: `Size: ${fmtBytes(summary.capacity.databaseSizeBytes)}`, icon: Database, tone: "slate" },
       { label: "Active Users", value: fmtNumber(summary.users.active), sub: `${summary.users.inactive} inactive or disabled`, icon: Users, tone: "green" },
-      { label: "System Health", value: healthTone === "good" ? "Operational" : "Attention Required", sub: `DB ${summary.health.databaseConnectivity} • Storage ${summary.health.storageConnectivity}`, icon: HeartPulse, tone: healthTone === "good" ? "green" : "red" },
+      { label: "Systems Health", value: healthTone === "good" ? "Operational" : "Attention Required", sub: `DB ${summary.health.databaseConnectivity} • Storage ${summary.health.storageConnectivity}`, icon: HeartPulse, tone: healthTone === "good" ? "green" : "red" },
       { label: "Recent Errors", value: fmtNumber(summary.transactions.requiringAttention.recentErrors), sub: "Last 7 days", icon: AlertTriangle, tone: (summary.transactions.requiringAttention.recentErrors || 0) > 0 ? "red" : "green" },
     ]
   }, [summary, healthTone])
@@ -379,7 +379,7 @@ export default function OperationsDashboardPage() {
             </section>
 
             <section className="grid gap-4 xl:grid-cols-3">
-              <Panel title="System Health" icon={<HeartPulse className="h-5 w-5 text-green-700" />} className="xl:col-span-1">
+              <Panel title="Systems Health" icon={<HeartPulse className="h-5 w-5 text-green-700" />} className="xl:col-span-1">
                 <StatusRow label="Application" value={summary.health.applicationStatus} good={summary.health.applicationStatus === "Operational"} />
                 <StatusRow label="Database" value={summary.health.databaseConnectivity} good={summary.health.databaseConnectivity === "Connected"} />
                 <StatusRow label="Storage" value={summary.health.storageConnectivity} good={summary.health.storageConnectivity === "Connected"} />
@@ -684,7 +684,7 @@ export default function OperationsDashboardPage() {
             </section>
 
             <section className="grid gap-4 xl:grid-cols-3">
-              <Panel title="System Alerts" icon={<Bell className="h-5 w-5 text-png-red" />}>
+              <Panel title="Systems Alert" icon={<Bell className="h-5 w-5 text-png-red" />}>
                 <div className="space-y-3">
                   {summary.alerts.active.length ? (
                     summary.alerts.active.map((alert) => (

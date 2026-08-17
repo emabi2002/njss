@@ -333,6 +333,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           {group.items.map((item) => {
                             const Icon = ICONS[item.icon || "LayoutDashboard"] || LayoutDashboard
                             const active = isActive(item.href)
+                            if (item.href.startsWith("#")) {
+                              return (
+                                <div
+                                  key={item.code}
+                                  className="mt-2 px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[#D4A62A]"
+                                >
+                                  {item.label}
+                                </div>
+                              )
+                            }
                             return (
                               <Link
                                 key={item.code}
@@ -362,6 +372,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           {group.items.map((item) => {
                             const Icon = ICONS[item.icon || "LayoutDashboard"] || LayoutDashboard
                             const active = isActive(item.href)
+                            if (item.href.startsWith("#")) {
+                              return <div key={item.code} className="mx-auto my-2 h-px w-8 bg-[#D4A62A]/50" />
+                            }
                             return (
                               <Link
                                 key={item.code}

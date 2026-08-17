@@ -80,10 +80,23 @@ ON CONFLICT (code) DO UPDATE SET
 UPDATE menu_items SET is_active = false, updated_at = NOW()
 WHERE code IN ('administration.uat', 'systems_administration.users_access');
 
-UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Operations Dashboard', href = '/dashboard/admin/operations', icon = 'Gauge', sort_order = 10, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
+INSERT INTO menu_items (code, module_code, parent_code, label, href, icon, sort_order, required_permissions, is_active)
+VALUES ('systems_administration.systems_operations_heading', 'systems_administration', NULL, 'Systems Operations', '#systems-operations', 'Gauge', 5, ARRAY['operations.view','operations.manage','settings.manage'], true)
+ON CONFLICT (code) DO UPDATE SET
+  module_code = EXCLUDED.module_code,
+  parent_code = EXCLUDED.parent_code,
+  label = EXCLUDED.label,
+  href = EXCLUDED.href,
+  icon = EXCLUDED.icon,
+  sort_order = EXCLUDED.sort_order,
+  required_permissions = EXCLUDED.required_permissions,
+  is_active = true,
+  updated_at = NOW();
+
+UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Admin Dashboard', href = '/dashboard/admin/operations', icon = 'Gauge', sort_order = 10, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
 WHERE code = 'systems_administration.dashboard';
 
-UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'System Health', sort_order = 20, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
+UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Systems Health', sort_order = 20, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
 WHERE code = 'systems_administration.health';
 
 UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Transaction Monitor', sort_order = 30, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
@@ -95,7 +108,7 @@ WHERE code = 'systems_administration.storage_database';
 UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Operating Costs', sort_order = 50, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
 WHERE code = 'systems_administration.costs';
 
-UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'System Alerts', sort_order = 60, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
+UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Systems Alert', sort_order = 60, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
 WHERE code = 'systems_administration.alerts';
 
 UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Housekeeping', sort_order = 70, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()

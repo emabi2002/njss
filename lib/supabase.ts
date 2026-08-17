@@ -44,7 +44,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 // Server-side Supabase client (with service role for admin operations)
 export function createServerSupabaseClient() {
-  const serviceRoleKey = requireValue('SUPABASE_SERVICE_ROLE_KEY', process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const serviceRoleKey = requireValue(
+    'SUPABASE_SERVICE_ROLE_KEY',
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPBASE_SERVICE_ROLE_KEY
+  )
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
