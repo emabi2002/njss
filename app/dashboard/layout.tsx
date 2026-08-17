@@ -39,6 +39,18 @@ const COLLAPSIBLE_MODULES = new Set([
   "transactions",
 ])
 
+const HIDDEN_SUPPORT_MENU_CODES = new Set([
+  "systems_administration.health",
+  "systems_administration.transactions",
+  "systems_administration.storage_database",
+  "systems_administration.costs",
+  "systems_administration.alerts",
+])
+
+function moduleDisplayName(module: RbacModule) {
+  return module.code === "systems_administration" ? "Systems Operations" : module.name
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
@@ -91,7 +103,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   )
 
   const visibleNavigation: NavItem[] = useMemo(
-    () => menus.filter((item) => !item.parent_code).sort((a, b) => a.sort_order - b.sort_order),
+    () =>
+      menus
+        .filter((item) => !item.parent_code && !HIDDEN_SUPPORT_MENU_CODES.has(item.code))
+        .sort((a, b) => a.sort_order - b.sort_order),
     [menus],
   )
 
@@ -289,7 +304,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       {isSupportGroup && !sidebarCollapsed && (
                         <div className="mb-2 rounded-lg border border-[#D4A62A]/25 bg-[#0E2035] px-3 py-2 shadow-inner">
                           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#D4A62A]">
-                            System Support & Operations
+                            Systems Operations
                           </p>
                           <p className="mt-0.5 text-[10px] leading-tight text-slate-400">
                             Technical monitoring and support controls
@@ -305,7 +320,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                               ? "bg-[#1C3B5A] text-white"
                               : "text-[#CBD5E1] hover:bg-white/[0.07] hover:text-white"
                           } ${sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"}`}
-                          title={sidebarCollapsed ? group.module.name : undefined}
+                          title={sidebarCollapsed ? moduleDisplayName(group.module) : undefined}
                         >
                           <span
                             className={`h-5 w-1 rounded-full ${group.active ? "bg-[#D4A62A]" : "bg-transparent"} ${
@@ -317,14 +332,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           />
                           {!sidebarCollapsed && (
                             <>
-                              <span className="flex-1 text-left">{group.module.name}</span>
+                              <span className="flex-1 text-left">{moduleDisplayName(group.module)}</span>
                               {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                             </>
                           )}
                         </button>
                       ) : !sidebarCollapsed ? (
                         <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#94A3B8]">
-                          {group.module.name}
+                          {moduleDisplayName(group.module)}
                         </p>
                       ) : null}
 
