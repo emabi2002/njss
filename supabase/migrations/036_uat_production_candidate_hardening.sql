@@ -219,6 +219,13 @@ BEGIN
 END $$;
 
 -- 9) Classify target system status for operations reporting.
+-- Compatibility: older NJSS databases may not yet have these operational metadata columns.
+ALTER TABLE public.system_settings
+  ADD COLUMN IF NOT EXISTS is_public boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.system_settings
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
 INSERT INTO public.system_settings (setting_key, setting_value, description, is_public)
 VALUES
   ('release_readiness_status', 'UAT READY - PRODUCTION CANDIDATE', 'Target status after hardening; not a Production Ready declaration.', true),
@@ -227,6 +234,7 @@ VALUES
 ON CONFLICT (setting_key) DO UPDATE
 SET setting_value = EXCLUDED.setting_value,
     description = EXCLUDED.description,
+    is_public = EXCLUDED.is_public,
     updated_at = now();
 
 COMMIT;
