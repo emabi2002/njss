@@ -4,7 +4,7 @@ import { createRequestSupabaseClient, requirePermission } from '@/lib/rbac/serve
 import { createServerSupabaseClient } from '@/lib/supabase'
 import { loadLiveProviderCosts, type LiveCostProviderResult } from '@/lib/operations/live-costs'
 
-const ADMIN_PERMISSIONS = ['operations.view', 'operations.manage', 'settings.manage', 'users.manage', 'audit.view', 'all']
+const ADMIN_PERMISSIONS = ['dashboard.view', 'operations.view', 'operations.manage', 'settings.manage', 'users.manage', 'audit.view', 'all']
 const PENDING_FF3 = ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD', 'RETURNED']
 const PENDING_FF4 = ['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED']
 
@@ -312,11 +312,47 @@ function buildAlerts(input: {
   return alerts
 }
 
+function limitedSummary(now = new Date(), error: string | null = null) {
+  return NextResponse.json({
+    generatedAt: now.toISOString(),
+    health: {
+      applicationStatus: error ? 'Limited Operations View' : 'Operational',
+      databaseConnectivity: error ? 'Limited' : 'Connected',
+      storageConnectivity: 'Not Available',
+      environment: process.env.NEXT_PUBLIC_APP_ENV || process.env.NODE_ENV || 'unknown',
+      applicationVersion: process.env.NEXT_PUBLIC_APP_VERSION || packageJson.version || 'Not Available',
+      commitSha: process.env.NEXT_PUBLIC_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || 'Not Available',
+      latestDatabaseMigration: 'Not Available',
+      lastHealthCheck: now.toISOString(),
+      supabaseProjectRef: safeProjectRef(),
+      databaseError: error,
+      storageError: error,
+    },
+    capacity: { databaseSizeBytes: null, databaseGrowthPercent: null, tableStats: [], storageSizeBytes: null, storageLast30DaysBytes: null, storageFileCount: null, storageCapacityPercent: null, storageBuckets: [], monthlyDataGrowth: { database: 'Not Available', storageBytes: null } },
+    users: { total: 0, active: 0, inactive: 0, disabled: 0, recentLogins: 0, inactive30: 0, inactive60: 0, inactive90: 0, failedLoginOrActivityIndicators: 0, inactivePrivilegedUsers: 0, byRole: [], recentUsers: [] },
+    transactions: { ff3: { today: null, month: null }, commitments: { today: null, month: null }, ff4: { today: null, month: null }, payments: { today: null, month: null }, reconciliations: { today: null, month: null }, reports: { today: null, month: null }, auditEvents: { today: null, month: null }, requiringAttention: { longPendingFf3: null, longPendingFf4: null, unreconciledPayments: null, recentErrors: null } },
+    costs: { currentMonth: null, previousMonth: null, projectedMonthEndCost: null, percentageChange: null, averageMonthlyCost: null, projectedAnnualOperatingCost: null, baseCurrency: (process.env.OPERATIONS_BASE_CURRENCY || 'PGK').trim().toUpperCase(), liveTotalsByCurrency: [], currencyRatesConfigured: [], trend: [], liveProviders: [], totalProviders: 0, providersWithCurrentCost: 0, unavailableProviders: [], allProvidersSynced: false, lastSyncedAt: null, dataAvailabilityLabel: 'Billing Data Unavailable' },
+    alerts: { active: error ? [{ code: 'operations_limited_access', severity: 'info', title: 'Limited operations dashboard', detail: error }] : [], settings: [] },
+    housekeeping: { inactiveAccounts: 0, staleSessions: 'Not Available', orphanedUploads: null, storageGrowthBytes30Days: null, systemErrorsToReview: null, backupStatus: 'Not Available', databaseGrowthPercent: null, safeOpportunities: [], protectedDataNotice: 'Operations metrics are limited until the database grants and environment configuration are available.' },
+  })
+}
+
 export async function GET(request: NextRequest) {
   const guard = await requirePermission(request, ADMIN_PERMISSIONS)
   if (guard.response) return guard.response
 
-  const supabase = createServerSupabaseClient()
+  let supabase: ReturnType<typeof createServerSupabaseClient>
+  try {
+    supabase = createServerSupabaseClient()
+  } catch (error) {
+    const response = NextResponse.next()
+    supabase = createRequestSupabaseClient(request, response) as unknown as ReturnType<typeof createServerSupabaseClient>
+    const message = error instanceof Error ? error.message : 'Service role client unavailable; using limited user-session metrics.'
+    if (!guard.context?.permissions.includes('all') && !guard.context?.permissions.includes('operations.view') && !guard.context?.permissions.includes('operations.manage')) {
+      return limitedSummary(new Date(), message)
+    }
+  }
+
   const now = new Date()
   const thisMonth = monthStart(now)
   const prevMonth = previousMonthStart()

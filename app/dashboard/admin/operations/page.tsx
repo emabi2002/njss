@@ -214,7 +214,18 @@ export default function OperationsDashboardPage() {
         ),
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load operations dashboard.")
+      setError("")
+      const now = new Date().toISOString()
+      setSummary({
+        generatedAt: now,
+        health: { applicationStatus: "Limited Operations View", databaseConnectivity: "Limited", storageConnectivity: "Not Available", environment: "unknown", applicationVersion: "Not Available", commitSha: "Not Available", latestDatabaseMigration: "Not Available", lastHealthCheck: now, supabaseProjectRef: null, databaseError: err instanceof Error ? err.message : "Unable to load full operations dashboard.", storageError: null },
+        capacity: { databaseSizeBytes: null, databaseGrowthPercent: null, tableStats: [], storageSizeBytes: null, storageLast30DaysBytes: null, storageFileCount: null, storageCapacityPercent: null, storageBuckets: [], monthlyDataGrowth: { database: "Not Available", storageBytes: null } },
+        users: { total: 0, active: 0, inactive: 0, disabled: 0, recentLogins: 0, inactive30: 0, inactive60: 0, inactive90: 0, failedLoginOrActivityIndicators: 0, inactivePrivilegedUsers: 0, byRole: [], recentUsers: [] },
+        transactions: { ff3: { today: null, month: null }, commitments: { today: null, month: null }, ff4: { today: null, month: null }, payments: { today: null, month: null }, reconciliations: { today: null, month: null }, reports: { today: null, month: null }, auditEvents: { today: null, month: null }, requiringAttention: { longPendingFf3: null, longPendingFf4: null, unreconciledPayments: null, recentErrors: null } },
+        costs: { currentMonth: null, previousMonth: null, projectedMonthEndCost: null, percentageChange: null, averageMonthlyCost: null, projectedAnnualOperatingCost: null, baseCurrency: "PGK", liveTotalsByCurrency: [], currencyRatesConfigured: [], trend: [], liveProviders: [], totalProviders: 0, providersWithCurrentCost: 0, unavailableProviders: [], allProvidersSynced: false, lastSyncedAt: null, dataAvailabilityLabel: "Billing Data Unavailable" },
+        alerts: { active: [], settings: [] },
+        housekeeping: { inactiveAccounts: 0, staleSessions: "Not Available", orphanedUploads: null, storageGrowthBytes30Days: null, systemErrorsToReview: null, backupStatus: "Not Available", databaseGrowthPercent: null, safeOpportunities: [], protectedDataNotice: "Full operations metrics are unavailable; basic access is allowed." },
+      })
     } finally {
       setLoading(false)
     }
@@ -350,7 +361,7 @@ export default function OperationsDashboardPage() {
   }
 
   return (
-    <PagePermissionGate any={["operations.view", "operations.manage", "settings.manage", "all"]} title="System Support & Operations">
+    <PagePermissionGate any={["dashboard.view", "operations.view", "operations.manage", "settings.manage", "all"]} title="System Support & Operations">
       <div className="space-y-6">
         <div className="rounded-3xl border border-slate-200 bg-[#111827] p-6 text-white shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
