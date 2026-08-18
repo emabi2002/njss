@@ -390,6 +390,20 @@ export type FF4PDFData = {
   invoice_number?: string
   invoice_date?: string
   payment_description?: string
+  payment_lines?: Array<{
+    line_number: number
+    source: string
+    reference?: string
+    description: string
+    quantity: number
+    unit?: string
+    unit_price: number
+    gross_amount: number
+    tax_amount: number
+    deduction_amount: number
+    net_amount: number
+    notes?: string
+  }>
   gross_amount: number
   tax_amount: number
   deductions: number
@@ -481,8 +495,52 @@ export function generateFF4PDF(data: FF4PDFData, existingDoc?: jsPDF): jsPDF {
 
   y += 8
 
+  if (data.payment_lines?.length) {
+    if (y > doc.internal.pageSize.getHeight() - 85) {
+      doc.addPage()
+      y = 20
+    }
+
+    y = addSectionTitle(doc, y, 'D. PAYMENT / INVOICE LINES')
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Source', 'Reference', 'Description', 'Qty', 'Unit', 'Unit Price', 'Gross', 'Tax', 'Deduct.', 'Net']],
+      body: data.payment_lines.map((line) => [
+        String(line.line_number),
+        line.source.replace(/_/g, ' '),
+        line.reference || '-',
+        line.notes ? `${line.description}\n${line.notes}` : line.description,
+        String(line.quantity || 0),
+        line.unit || '-',
+        formatCurrency(line.unit_price || 0),
+        formatCurrency(line.gross_amount || 0),
+        formatCurrency(line.tax_amount || 0),
+        formatCurrency(line.deduction_amount || 0),
+        formatCurrency(line.net_amount || 0),
+      ]),
+      theme: 'striped',
+      headStyles: { fillColor: COLORS.primary, fontSize: FONTS.small - 1 },
+      styles: { fontSize: FONTS.small - 1, cellPadding: 1.5 },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'right' },
+        1: { cellWidth: 18 },
+        2: { cellWidth: 22 },
+        3: { cellWidth: 'auto' },
+        4: { cellWidth: 12, halign: 'right' },
+        5: { cellWidth: 14 },
+        6: { cellWidth: 20, halign: 'right' },
+        7: { cellWidth: 20, halign: 'right' },
+        8: { cellWidth: 18, halign: 'right' },
+        9: { cellWidth: 18, halign: 'right' },
+        10: { cellWidth: 20, halign: 'right' },
+      },
+      margin: { left: 12, right: 12 },
+    })
+    y = doc.lastAutoTable.finalY + 12
+  }
+
   // Section D: Payment Amount
-  y = addSectionTitle(doc, y, 'D. PAYMENT AMOUNT')
+  y = addSectionTitle(doc, y, data.payment_lines?.length ? 'E. PAYMENT AMOUNT' : 'D. PAYMENT AMOUNT')
 
   autoTable(doc, {
     startY: y,
@@ -510,7 +568,7 @@ export function generateFF4PDF(data: FF4PDFData, existingDoc?: jsPDF): jsPDF {
   y = doc.lastAutoTable.finalY + 15
 
   // Section E: Payment Details
-  y = addSectionTitle(doc, y, 'E. PAYMENT DETAILS')
+  y = addSectionTitle(doc, y, data.payment_lines?.length ? 'F. PAYMENT DETAILS' : 'E. PAYMENT DETAILS')
 
   y = addKeyValue(doc, y, 'Method', data.payment_method || '-', col1X)
   y = addKeyValue(doc, y, 'Reference', data.external_payment_reference || 'Pending', col1X)

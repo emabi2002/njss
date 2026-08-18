@@ -27,6 +27,15 @@ const ACTION_PERMISSION: Record<FF4WorkflowAction, string[]> = {
   CANCEL: ['ff4.reject'],
 }
 
+function createdFf4Id(data: unknown) {
+  if (!data || typeof data !== 'object') return null
+  const root = data as Record<string, unknown>
+  const header = root.header
+  if (!header || typeof header !== 'object') return null
+  const id = (header as Record<string, unknown>).id
+  return typeof id === 'string' ? id : null
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json()
   const action = String(body.action || '').toUpperCase() as FF4WorkflowAction
@@ -52,6 +61,24 @@ export async function POST(request: NextRequest) {
       console.error('FF4 create workflow failed:', error)
       return NextResponse.json({ error: toUserMessage(error) }, { status: 400 })
     }
+
+    const ff4Id = createdFf4Id(data)
+    const paymentLines = Array.isArray(body.payload?.payment_lines) ? body.payload.payment_lines : []
+    if (ff4Id && paymentLines.length > 0) {
+      const { error: lineError } = await supabase.rpc('njss_save_ff4_payment_lines', {
+        p_ff4_id: ff4Id,
+        p_lines: paymentLines,
+        p_user_email: userEmail,
+      })
+      if (lineError) {
+        console.error('FF4 payment line persistence failed:', lineError)
+        return NextResponse.json(
+          { error: toUserMessage(lineError, 'FF4 was created but payment lines could not be saved.') },
+          { status: 400 },
+        )
+      }
+    }
+
     return NextResponse.json({ data })
   }
 

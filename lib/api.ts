@@ -263,6 +263,20 @@ export type FF4CreatePayload = {
   cheque_number?: string | null
   remarks?: string | null
   is_partial_payment?: boolean
+  payment_lines?: Array<{
+    line_number: number
+    source: 'FF3_ITEM' | 'SELECTED_QUOTE' | 'INVOICE' | 'MANUAL'
+    reference?: string | null
+    description: string
+    quantity: number
+    unit?: string | null
+    unit_price: number
+    gross_amount: number
+    tax_amount?: number
+    deduction_amount?: number
+    net_amount: number
+    notes?: string | null
+  }>
   attachments?: Array<{ file_name?: string; name?: string; file_type?: string; type?: string; file_url?: string; url?: string; attachment_type?: string }>
   comments?: string | null
 }

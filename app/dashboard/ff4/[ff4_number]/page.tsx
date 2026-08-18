@@ -40,19 +40,36 @@ type FF4Header = {
   commitment: { commitment_number: string; committed_amount: number; paid_amount: number } | null
 }
 
+type FF4PaymentLine = {
+  id: string
+  line_number: number
+  source: string
+  reference: string | null
+  description: string
+  quantity: number
+  unit: string | null
+  unit_price: number
+  gross_amount: number
+  tax_amount: number
+  deduction_amount: number
+  net_amount: number
+  notes: string | null
+}
+
 export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number: string }> }) {
   const resolvedParams = use(params)
   const { can } = useAuth()
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [header, setHeader] = useState<FF4Header | null>(null)
+  const [paymentLines, setPaymentLines] = useState<FF4PaymentLine[]>([])
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [cancelComments, setCancelComments] = useState("")
   const [paymentReference, setPaymentReference] = useState("")
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0])
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0])
   const [paymentMethodConfirm, setPaymentMethodConfirm] = useState("")
   const [chequeNumber, setChequeNumber] = useState("")
   const [paymentComments, setPaymentComments] = useState("")
@@ -60,20 +77,28 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
   const fetchFF4Detail = useCallback(async () => {
     try {
       const { data, error: fetchError } = await supabase
-        .from('ff4_headers')
+        .from("ff4_headers")
         .select(`
           *,
           ff3:ff3_headers(ff3_number, purpose),
           commitment:ff3_commitments(commitment_number, committed_amount, paid_amount)
         `)
-        .eq('ff4_number', resolvedParams.ff4_number)
+        .eq("ff4_number", resolvedParams.ff4_number)
         .single()
 
       if (fetchError) throw fetchError
       setHeader(data)
+
+      const { data: lineRows, error: lineError } = await supabase
+        .from("ff4_payment_lines")
+        .select("*")
+        .eq("ff4_header_id", data.id)
+        .order("line_number")
+      if (lineError) throw lineError
+      setPaymentLines((lineRows || []) as FF4PaymentLine[])
     } catch (err) {
-      console.error('Error fetching FF4:', err)
-      setError('Failed to load FF4 details')
+      console.error("Error fetching FF4:", err)
+      setError("Failed to load FF4 details")
     } finally {
       setLoading(false)
     }
@@ -84,7 +109,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
     fetchFF4Detail()
   }, [fetchFF4Detail])
 
-  async function handleAction(action: 'VERIFY' | 'APPROVE' | 'PROCESS' | 'RECONCILE') {
+  async function handleAction(action: "VERIFY" | "APPROVE" | "PROCESS" | "RECONCILE") {
     if (!header) return
     setActionLoading(true)
     setError("")
@@ -93,16 +118,16 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
     try {
       await approveFF4(header.id, action)
       const actionLabels = {
-        'VERIFY': 'verified',
-        'APPROVE': 'approved',
-        'PROCESS': 'processed',
-        'RECONCILE': 'reconciled'
+        VERIFY: "verified",
+        APPROVE: "approved",
+        PROCESS: "processed",
+        RECONCILE: "reconciled",
       }
       setSuccess(`FF4 ${header.ff4_number} has been ${actionLabels[action]}!`)
       fetchFF4Detail()
     } catch (err) {
-      console.error('Error processing FF4:', err)
-      setError(err instanceof Error ? err.message : 'Failed to process action. Please try again.')
+      console.error("Error processing FF4:", err)
+      setError(err instanceof Error ? err.message : "Failed to process action. Please try again.")
     } finally {
       setActionLoading(false)
     }
@@ -115,7 +140,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
     setSuccess("")
 
     try {
-      await approveFF4(header.id, 'MARK_PAID', paymentReference, paymentComments, {
+      await approveFF4(header.id, "MARK_PAID", paymentReference, paymentComments, {
         paymentDate,
         paymentMethod: paymentMethodConfirm || header.payment_method || undefined,
         chequeNumber: chequeNumber || undefined,
@@ -127,8 +152,8 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
       setPaymentComments("")
       fetchFF4Detail()
     } catch (err) {
-      console.error('Error marking as paid:', err)
-      setError(err instanceof Error ? err.message : 'Failed to mark as paid. Please try again.')
+      console.error("Error marking as paid:", err)
+      setError(err instanceof Error ? err.message : "Failed to mark as paid. Please try again.")
     } finally {
       setActionLoading(false)
     }
@@ -141,14 +166,14 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
     setSuccess("")
 
     try {
-      await approveFF4(header.id, 'CANCEL', undefined, cancelComments)
+      await approveFF4(header.id, "CANCEL", undefined, cancelComments)
       setSuccess(`FF4 ${header.ff4_number} has been cancelled.`)
       setShowCancelModal(false)
       setCancelComments("")
       fetchFF4Detail()
     } catch (err) {
-      console.error('Error cancelling FF4:', err)
-      setError(err instanceof Error ? err.message : 'Failed to cancel. Please try again.')
+      console.error("Error cancelling FF4:", err)
+      setError(err instanceof Error ? err.message : "Failed to cancel. Please try again.")
     } finally {
       setActionLoading(false)
     }
@@ -175,16 +200,15 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
     )
   }
 
-  const canVerify = header.status === 'SUBMITTED' && can('ff4.verify')
-  const canApprove = header.status === 'VERIFIED' && can('ff4.approve')
-  const canProcess = header.status === 'APPROVED' && can('ff4.process')
-  const canMarkPaid = header.status === 'PROCESSED' && can('ff4.process')
-  const canReconcile = header.status === 'PAID' && can('ff4.process')
-  const canCancel = ['DRAFT', 'SUBMITTED', 'VERIFIED'].includes(header.status) && can('ff4.reject')
-  const isTerminal = ['RECONCILED', 'CANCELLED'].includes(header.status)
+  const canVerify = header.status === "SUBMITTED" && can("ff4.verify")
+  const canApprove = header.status === "VERIFIED" && can("ff4.approve")
+  const canProcess = header.status === "APPROVED" && can("ff4.process")
+  const canMarkPaid = header.status === "PROCESSED" && can("ff4.process")
+  const canReconcile = header.status === "PAID" && can("ff4.process")
+  const canCancel = ["DRAFT", "SUBMITTED", "VERIFIED"].includes(header.status) && can("ff4.reject")
+  const isTerminal = ["RECONCILED", "CANCELLED"].includes(header.status)
   const hasAnyAction = canVerify || canApprove || canProcess || canMarkPaid || canReconcile || canCancel
 
-  // Handle PDF export
   const handleExportPDF = () => {
     const pdfData: FF4PDFData = {
       ff4_number: header.ff4_number,
@@ -207,6 +231,20 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
       payment_method: header.payment_method || undefined,
       external_payment_reference: header.external_payment_reference || undefined,
       payment_date: header.payment_date || undefined,
+      payment_lines: paymentLines.map((line) => ({
+        line_number: line.line_number,
+        source: line.source,
+        reference: line.reference || undefined,
+        description: line.description,
+        quantity: line.quantity,
+        unit: line.unit || undefined,
+        unit_price: line.unit_price,
+        gross_amount: line.gross_amount,
+        tax_amount: line.tax_amount,
+        deduction_amount: line.deduction_amount,
+        net_amount: line.net_amount,
+        notes: line.notes || undefined,
+      })),
     }
 
     const doc = generateFF4PDF(pdfData)
@@ -215,7 +253,6 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
 
   return (
     <div className="space-y-6 pb-24">
-      {/* Page Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link href="/dashboard/ff4" className="p-2 hover:bg-slate-100 rounded-lg">
@@ -238,7 +275,6 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
         </button>
       </div>
 
-      {/* Messages */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
           <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
@@ -253,7 +289,6 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
         </div>
       )}
 
-      {/* Linked FF3/Commitment */}
       {header.ff3 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
           <h2 className="text-lg font-semibold text-blue-900 mb-4">Linked Requisition</h2>
@@ -286,25 +321,23 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
         </div>
       )}
 
-      {/* Payee Information */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Payee Information</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <InfoField icon={<Building2 className="h-4 w-4" />} label="Payee Type" value={header.payee_type || '-'} />
+          <InfoField icon={<Building2 className="h-4 w-4" />} label="Payee Type" value={header.payee_type || "-"} />
           <InfoField icon={<Building2 className="h-4 w-4" />} label="Payee Name" value={header.payee_name} />
-          <InfoField icon={<FileText className="h-4 w-4" />} label="Supplier Code" value={header.supplier_code || '-'} />
+          <InfoField icon={<FileText className="h-4 w-4" />} label="Supplier Code" value={header.supplier_code || "-"} />
           <InfoField icon={<Calendar className="h-4 w-4" />} label="Financial Year" value={header.financial_year.toString()} />
         </div>
       </div>
 
-      {/* Invoice Details */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Invoice Details</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <InfoField icon={<Receipt className="h-4 w-4" />} label="Invoice Number" value={header.invoice_number || '-'} />
-          <InfoField icon={<Calendar className="h-4 w-4" />} label="Invoice Date" value={header.invoice_date ? new Date(header.invoice_date).toLocaleDateString('en-GB') : '-'} />
-          <InfoField icon={<FileText className="h-4 w-4" />} label="Claim Reference" value={header.claim_reference || '-'} />
-          <InfoField icon={<Calendar className="h-4 w-4" />} label="Request Date" value={new Date(header.payment_request_date).toLocaleDateString('en-GB')} />
+          <InfoField icon={<Receipt className="h-4 w-4" />} label="Invoice Number" value={header.invoice_number || "-"} />
+          <InfoField icon={<Calendar className="h-4 w-4" />} label="Invoice Date" value={header.invoice_date ? new Date(header.invoice_date).toLocaleDateString("en-GB") : "-"} />
+          <InfoField icon={<FileText className="h-4 w-4" />} label="Claim Reference" value={header.claim_reference || "-"} />
+          <InfoField icon={<Calendar className="h-4 w-4" />} label="Request Date" value={new Date(header.payment_request_date).toLocaleDateString("en-GB")} />
         </div>
         {header.payment_description && (
           <div className="mt-4">
@@ -314,66 +347,108 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
         )}
       </div>
 
-      {/* Payment Amount */}
+      {paymentLines.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200 p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Payment / Invoice Lines</h2>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-[1100px] w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 text-right">#</th>
+                  <th className="px-3 py-2">Source</th>
+                  <th className="px-3 py-2">Reference</th>
+                  <th className="px-3 py-2">Description</th>
+                  <th className="px-3 py-2 text-right">Qty</th>
+                  <th className="px-3 py-2">Unit</th>
+                  <th className="px-3 py-2 text-right">Unit Price</th>
+                  <th className="px-3 py-2 text-right">Gross</th>
+                  <th className="px-3 py-2 text-right">Tax</th>
+                  <th className="px-3 py-2 text-right">Deductions</th>
+                  <th className="px-3 py-2 text-right">Net</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paymentLines.map((line) => (
+                  <tr key={line.id} className="align-top hover:bg-slate-50">
+                    <td className="px-3 py-2 text-right font-semibold text-slate-600">{line.line_number}</td>
+                    <td className="px-3 py-2 text-xs font-semibold text-green-700">{line.source.replace(/_/g, " ")}</td>
+                    <td className="px-3 py-2 text-slate-700">{line.reference || "-"}</td>
+                    <td className="px-3 py-2 text-slate-900">
+                      {line.description}
+                      {line.notes ? <p className="mt-1 text-xs text-slate-500">{line.notes}</p> : null}
+                    </td>
+                    <td className="px-3 py-2 text-right">{Number(line.quantity || 0).toLocaleString()}</td>
+                    <td className="px-3 py-2">{line.unit || "-"}</td>
+                    <td className="px-3 py-2 text-right">K {Number(line.unit_price || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-2 text-right">K {Number(line.gross_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-2 text-right text-red-600">K {Number(line.tax_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-2 text-right text-red-600">K {Number(line.deduction_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-green-700">K {Number(line.net_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Payment Amount</h2>
         <div className="space-y-3">
           <div className="flex items-center justify-between py-2">
             <span className="text-slate-700">Gross Amount</span>
-            <span className="text-slate-900 font-medium">K {(header.gross_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+            <span className="text-slate-900 font-medium">K {(header.gross_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
           </div>
           <div className="flex items-center justify-between py-2">
             <span className="text-slate-700">Less: Tax</span>
-            <span className="text-red-600">- K {(header.tax_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+            <span className="text-red-600">- K {(header.tax_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
           </div>
           <div className="flex items-center justify-between py-2">
             <span className="text-slate-700">Less: Deductions</span>
-            <span className="text-red-600">- K {(header.deductions || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+            <span className="text-red-600">- K {(header.deductions || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
           </div>
           <div className="border-t border-slate-200 pt-3">
             <div className="flex items-center justify-between">
               <span className="text-lg font-semibold text-slate-900">Net Amount Payable</span>
-              <span className="text-2xl font-bold text-green-700">K {(header.net_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+              <span className="text-2xl font-bold text-green-700">K {(header.net_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Payment Details */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Payment Details</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <InfoField icon={<CreditCard className="h-4 w-4" />} label="Payment Method" value={header.payment_method || '-'} />
-          <InfoField icon={<Banknote className="h-4 w-4" />} label="Payment Reference" value={header.external_payment_reference || 'Pending'} />
-          <InfoField icon={<Calendar className="h-4 w-4" />} label="Payment Date" value={header.payment_date ? new Date(header.payment_date).toLocaleDateString('en-GB') : 'Pending'} />
+          <InfoField icon={<CreditCard className="h-4 w-4" />} label="Payment Method" value={header.payment_method || "-"} />
+          <InfoField icon={<Banknote className="h-4 w-4" />} label="Payment Reference" value={header.external_payment_reference || "Pending"} />
+          <InfoField icon={<Calendar className="h-4 w-4" />} label="Payment Date" value={header.payment_date ? new Date(header.payment_date).toLocaleDateString("en-GB") : "Pending"} />
           <InfoField icon={<DollarSign className="h-4 w-4" />} label="Status" value={header.status} />
         </div>
       </div>
 
-      {/* Workflow Progress */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Workflow Progress</h2>
         <div className="flex items-center justify-between">
-          {['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED', 'PAID', 'RECONCILED'].map((step, index) => {
-            const stepIndex = ['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED', 'PAID', 'RECONCILED'].indexOf(header.status)
+          {["SUBMITTED", "VERIFIED", "APPROVED", "PROCESSED", "PAID", "RECONCILED"].map((step, index) => {
+            const stepIndex = ["SUBMITTED", "VERIFIED", "APPROVED", "PROCESSED", "PAID", "RECONCILED"].indexOf(header.status)
             const currentIndex = index
             const isCompleted = currentIndex <= stepIndex
             const isCurrent = step === header.status
 
             return (
               <div key={step} className="flex items-center">
-                <div className={`flex flex-col items-center ${index > 0 ? 'ml-4' : ''}`}>
+                <div className={`flex flex-col items-center ${index > 0 ? "ml-4" : ""}`}>
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    isCompleted ? 'bg-green-600 text-white' : 'bg-slate-200 text-slate-500'
-                  } ${isCurrent ? 'ring-4 ring-green-200' : ''}`}>
+                    isCompleted ? "bg-green-600 text-white" : "bg-slate-200 text-slate-500"
+                  } ${isCurrent ? "ring-4 ring-green-200" : ""}`}>
                     {isCompleted ? <CheckCircle2 className="h-5 w-5" /> : <span>{index + 1}</span>}
                   </div>
-                  <span className={`text-xs mt-2 ${isCompleted ? 'text-green-700 font-medium' : 'text-slate-500'}`}>
+                  <span className={`text-xs mt-2 ${isCompleted ? "text-green-700 font-medium" : "text-slate-500"}`}>
                     {step}
                   </span>
                 </div>
                 {index < 5 && (
-                  <div className={`w-12 h-1 mx-2 ${currentIndex < stepIndex ? 'bg-green-600' : 'bg-slate-200'}`} />
+                  <div className={`w-12 h-1 mx-2 ${currentIndex < stepIndex ? "bg-green-600" : "bg-slate-200"}`} />
                 )}
               </div>
             )
@@ -381,7 +456,6 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
         </div>
       </div>
 
-      {/* Action Buttons */}
       {!isTerminal && hasAnyAction && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-10">
           <div className="max-w-[1600px] mx-auto flex items-center justify-between">
@@ -406,7 +480,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
 
               {canVerify && (
                 <button
-                  onClick={() => handleAction('VERIFY')}
+                  onClick={() => handleAction("VERIFY")}
                   disabled={actionLoading}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
                 >
@@ -417,7 +491,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
 
               {canApprove && (
                 <button
-                  onClick={() => handleAction('APPROVE')}
+                  onClick={() => handleAction("APPROVE")}
                   disabled={actionLoading}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
                 >
@@ -428,7 +502,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
 
               {canProcess && (
                 <button
-                  onClick={() => handleAction('PROCESS')}
+                  onClick={() => handleAction("PROCESS")}
                   disabled={actionLoading}
                   className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
                 >
@@ -450,7 +524,7 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
 
               {canReconcile && (
                 <button
-                  onClick={() => handleAction('RECONCILE')}
+                  onClick={() => handleAction("RECONCILE")}
                   disabled={actionLoading}
                   className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
                 >
@@ -463,7 +537,6 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
         </div>
       )}
 
-      {/* Payment Reference Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
@@ -517,7 +590,6 @@ export default function FF4DetailPage({ params }: { params: Promise<{ ff4_number
         </div>
       )}
 
-      {/* Cancel Modal */}
       {showCancelModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
@@ -583,10 +655,10 @@ function StatusBadge({ status }: { status: FF4Status }) {
 
   return (
     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${config.classes}`}>
-      {status === 'PAID' && <CheckCircle2 className="h-4 w-4" />}
-      {status === 'RECONCILED' && <CheckCircle2 className="h-4 w-4" />}
-      {status === 'CANCELLED' && <XCircle className="h-4 w-4" />}
-      {['SUBMITTED', 'VERIFIED', 'PROCESSED'].includes(status) && <Clock className="h-4 w-4" />}
+      {status === "PAID" && <CheckCircle2 className="h-4 w-4" />}
+      {status === "RECONCILED" && <CheckCircle2 className="h-4 w-4" />}
+      {status === "CANCELLED" && <XCircle className="h-4 w-4" />}
+      {["SUBMITTED", "VERIFIED", "PROCESSED"].includes(status) && <Clock className="h-4 w-4" />}
       {config.label}
     </span>
   )
