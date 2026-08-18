@@ -37,6 +37,7 @@ type LookupSelectProps = {
   createVia?: (form: Record<string, string>) => Promise<LookupOption>
   onCreated?: (option: LookupOption) => void
   onRefresh?: () => Promise<void> | void
+  compact?: boolean
   className?: string
 }
 
@@ -65,6 +66,7 @@ export function LookupSelect({
   createVia,
   onCreated,
   onRefresh,
+  compact = false,
   className = "",
 }: LookupSelectProps) {
   const [query, setQuery] = useState("")
@@ -133,6 +135,45 @@ export function LookupSelect({
     }
   }
 
+  const listId = `${label || placeholder || "lookup"}-options`
+
+  if (compact) {
+    return (
+      <div className={`min-w-0 ${className}`}>
+        {label && <label className="sr-only">{label} {required && "required"}</label>}
+        <div className="flex min-w-0 items-center gap-1">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                if (!event.target.value) onChange("")
+              }}
+              disabled={disabled}
+              placeholder={options.length === 0 ? unauthorizedEmptyLabel : placeholder}
+              list={listId}
+              className="h-8 w-full rounded-md border border-slate-200 bg-white py-1 pl-7 pr-2 text-xs focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
+            />
+            <datalist id={listId}>{filtered.map((option) => <option key={option.id} value={optionLabel(option)} />)}</datalist>
+          </div>
+          <select
+            value={value}
+            onChange={(event) => {
+              const option = options.find((item) => item.id === event.target.value)
+              onChange(event.target.value, option)
+            }}
+            disabled={disabled || options.length === 0}
+            className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
+          >
+            <option value="">{options.length === 0 ? unauthorizedEmptyLabel : placeholder}</option>
+            {filtered.map((option) => <option key={option.id} value={option.id}>{optionLabel(option)}</option>)}
+          </select>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={`space-y-1 ${className}`}>
       {label && <label className="block text-sm font-medium text-slate-700">{label} {required && <span className="text-red-500">*</span>}</label>}
@@ -146,10 +187,10 @@ export function LookupSelect({
           }}
           disabled={disabled}
           placeholder={options.length === 0 ? (canAdd ? emptyLabel : unauthorizedEmptyLabel) : placeholder}
-          list={`${label || "lookup"}-options`}
+          list={listId}
           className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
         />
-        <datalist id={`${label || "lookup"}-options`}>
+        <datalist id={listId}>
           {filtered.map((option) => <option key={option.id} value={optionLabel(option)} />)}
         </datalist>
       </div>

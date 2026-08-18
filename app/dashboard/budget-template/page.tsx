@@ -21,7 +21,6 @@ import {
   MONTHS,
   createAuditEvent,
   createBudgetCycle,
-  createBudgetDivision,
   createDraftSubmission,
   deleteBudgetLine,
   getBudgetDashboard,
@@ -200,10 +199,7 @@ export default function BudgetTemplatePage() {
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [selectedRow, setSelectedRow] = useState("")
   const [divisionSearch, setDivisionSearch] = useState("")
-  const [showAddDivision, setShowAddDivision] = useState(false)
-  const [showAddCycle, setShowAddCycle] = useState(false)
   const [newCycle, setNewCycle] = useState({ budget_year: String(new Date().getFullYear() + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
-  const [newDivision, setNewDivision] = useState({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
   const [draftHeader, setDraftHeader] = useState({ cycle_id: "", division_id: "", budget_ceiling: "", submission_reference: "" })
 
   const canAdmin = can("masterdata.manage") || can("registry.manage") || can("users.manage") || can("budget.template.approve")
@@ -416,7 +412,6 @@ export default function BudgetTemplatePage() {
       })
       setDraftHeader((h) => ({ ...h, cycle_id: created.id, budget_ceiling: String(created.department_ceiling || "") }))
       setNewCycle({ budget_year: String(created.budget_year + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
-      setShowAddCycle(false)
       await loadDashboard()
       setMessage({ type: "ok", text: "Budget cycle added to the controlled budget cycle register." })
     } catch (err) {
@@ -426,33 +421,7 @@ export default function BudgetTemplatePage() {
     }
   }
 
-  const addDivision = async () => {
-    if (!canAdmin || !newDivision.code.trim() || !newDivision.name.trim()) return
-    setSaving(true)
-    try {
-      const created = await createBudgetDivision({
-        code: newDivision.code.trim().toUpperCase(),
-        name: newDivision.name.trim(),
-        cost_centre_code: newDivision.cost_centre_code.trim() || newDivision.code.trim().toUpperCase(),
-        cost_centre_name: newDivision.cost_centre_name.trim() || `${newDivision.name.trim()} Cost Centre`,
-      })
-      setDraftHeader((h) => ({ ...h, division_id: created.id }))
-      setDivisionSearch(`${created.code} — ${created.name}`)
-      setNewDivision({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
-      setShowAddDivision(false)
-      await loadDashboard()
-      setMessage({ type: "ok", text: "Division added to the controlled division register." })
-    } catch (err) {
-      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not add division." })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const addRow = () => {
-    setGridRows((rows) => [...rows, newRow(rows.length + 1)])
-  }
-
+  const addRow = () => setGridRows((rows) => [...rows, newRow(rows.length + 1)])
   const duplicateRow = () => {
     const source = gridRows.find((row) => row.clientId === selectedRow)
     if (!source) return
@@ -743,25 +712,18 @@ export default function BudgetTemplatePage() {
                   ))}
                 </select>
                 {canAdmin && (
-                  <div className="mt-2">
-                    <button type="button" onClick={() => setShowAddCycle((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">
-                      + Add missing budget cycle to database
+                  <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-[11px] text-amber-900">
+                      Controlled master data only. Add missing cycles in central Ledger / Reference Data, then refresh this selector.
+                    </p>
+                    <input className="input" placeholder="Financial year, e.g. 2026" type="number" value={newCycle.budget_year} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, budget_year: e.target.value }))} />
+                    <input className="input" placeholder="Cycle type, e.g. ANNUAL" value={newCycle.cycle_type} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, cycle_type: e.target.value }))} />
+                    <input className="input" placeholder="Cycle name" value={newCycle.name} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, name: e.target.value }))} />
+                    <input className="input" placeholder="Submission deadline" type="date" value={newCycle.submission_deadline} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, submission_deadline: e.target.value }))} />
+                    <input className="input text-right" placeholder="Default budget ceiling" type="number" value={newCycle.department_ceiling} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, department_ceiling: e.target.value }))} />
+                    <button type="button" onClick={addCycle} disabled={saving} className="btn-primary w-full justify-center">
+                      Create controlled budget cycle
                     </button>
-                    {showAddCycle && (
-                      <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                        <p className="text-[11px] text-amber-900">
-                          Creates a controlled row in <strong>budget_cycles</strong>. It will then appear in this dropdown from the database.
-                        </p>
-                        <input className="input" placeholder="Financial year, e.g. 2026" type="number" value={newCycle.budget_year} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, budget_year: e.target.value }))} />
-                        <input className="input" placeholder="Cycle type, e.g. ANNUAL" value={newCycle.cycle_type} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, cycle_type: e.target.value }))} />
-                        <input className="input" placeholder="Cycle name" value={newCycle.name} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, name: e.target.value }))} />
-                        <input className="input" placeholder="Submission deadline" type="date" value={newCycle.submission_deadline} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, submission_deadline: e.target.value }))} />
-                        <input className="input text-right" placeholder="Default budget ceiling" type="number" value={newCycle.department_ceiling} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, department_ceiling: e.target.value }))} />
-                        <button type="button" onClick={addCycle} disabled={saving} className="btn-primary w-full justify-center">
-                          Create controlled budget cycle
-                        </button>
-                      </div>
-                    )}
                   </div>
                 )}
               </Field>
@@ -778,30 +740,9 @@ export default function BudgetTemplatePage() {
                     </option>
                   ))}
                 </select>
-                {filteredDivisions.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No matching database record found. Use Add Division if you are authorised to create a controlled division/cost centre.</p>}
+                {filteredDivisions.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No matching database record found. Use central Reference Data maintenance if you are authorised.</p>}
                 {restrictedDivisionUser && <p className="mt-1 text-[11px] text-slate-500">Division list is restricted by your assigned profile where possible.</p>}
               </Field>
-              {canAdmin && (
-                <div>
-                  <button type="button" onClick={() => setShowAddDivision((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">
-                    + Add missing division/cost centre to database
-                  </button>
-                  {showAddDivision && (
-                    <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3">
-                      <p className="text-[11px] text-blue-900">
-                        Creates a controlled row in <strong>budget_divisions</strong>. It will then appear in this dropdown from the database.
-                      </p>
-                      <input className="input" placeholder="Division code" value={newDivision.code} onChange={(e) => setNewDivision((d) => ({ ...d, code: e.target.value }))} />
-                      <input className="input" placeholder="Division name" value={newDivision.name} onChange={(e) => setNewDivision((d) => ({ ...d, name: e.target.value }))} />
-                      <input className="input" placeholder="Cost centre code" value={newDivision.cost_centre_code} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_code: e.target.value }))} />
-                      <input className="input" placeholder="Cost centre name" value={newDivision.cost_centre_name} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_name: e.target.value }))} />
-                      <button type="button" onClick={addDivision} disabled={saving} className="btn-primary w-full justify-center">
-                        Create controlled division
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
               <Field label="Budget ceiling">
                 <input value={draftHeader.budget_ceiling} onChange={(e) => setDraftHeader((h) => ({ ...h, budget_ceiling: e.target.value }))} type="number" className="input text-right" />
               </Field>
@@ -946,26 +887,17 @@ export default function BudgetTemplatePage() {
                           </SheetTd>
                           <SheetTd sticky left={70}>
                             <LookupSelect
+                              compact
                               disabled={selectedLocked}
                               value={lookups.activityTemplates.find((activity) => activity.code === row.activity_reference)?.id || ""}
                               options={activityOptions}
                               placeholder="Select activity"
-                              canAdd={canAdmin}
-                              addTable="budget_activity_templates"
-                              addLabel="+ Add Activity Reference"
-                              addFields={[
-                                { name: "code", label: "Activity Code", required: true },
-                                { name: "name", label: "Activity Name", required: true },
-                                { name: "description", label: "Description" },
-                                { name: "default_line_item_description", label: "Default Line Description" },
-                                { name: "default_business_justification", label: "Default Justification" },
-                              ]}
-                              onRefresh={loadDashboard}
                               onChange={(value, option) => selectActivityTemplate(row.clientId, value, option)}
                             />
                           </SheetTd>
                           <SheetTd sticky left={200} required invalid={!isEmptyRow(row) && !row.expense_ledger_id}>
                             <LookupSelect
+                              compact
                               disabled={selectedLocked}
                               value={row.expense_ledger_id}
                               options={ledgerOptions}
@@ -1009,14 +941,11 @@ export default function BudgetTemplatePage() {
                           </SheetTd>
                           <SheetTd>
                             <LookupSelect
+                              compact
                               disabled={selectedLocked}
                               value={row.unit_of_measure_id}
                               options={units}
                               placeholder="Select unit"
-                              canAdd={canAdmin}
-                              addTable="units_of_measure"
-                              addLabel="+ Add Unit"
-                              onRefresh={loadDashboard}
                               onChange={(value, option) => updateRow(row.clientId, { unit_of_measure_id: value, unit_of_measure: option?.name || "" })}
                             />
                           </SheetTd>
@@ -1045,14 +974,11 @@ export default function BudgetTemplatePage() {
                           </SheetTd>
                           <SheetTd>
                             <LookupSelect
+                              compact
                               disabled={selectedLocked}
                               value={row.priority_level_id}
                               options={priorityLevels}
                               placeholder="Select priority"
-                              canAdd={canAdmin}
-                              addTable="priority_levels"
-                              addLabel="+ Add Priority"
-                              onRefresh={loadDashboard}
                               onChange={(value, option) => updateRow(row.clientId, { priority_level_id: value, priority: option?.code || "" })}
                             />
                           </SheetTd>
@@ -1068,19 +994,17 @@ export default function BudgetTemplatePage() {
                           </SheetTd>
                           <SheetTd>
                             <LookupSelect
+                              compact
                               disabled={selectedLocked}
                               value={row.procurement_method_id}
                               options={procurementMethods}
                               placeholder="Select method"
-                              canAdd={canAdmin}
-                              addTable="procurement_methods"
-                              addLabel="+ Add Procurement Method"
-                              onRefresh={loadDashboard}
                               onChange={(value, option) => updateRow(row.clientId, { procurement_method_id: value, procurement_method: option?.code || "" })}
                             />
                           </SheetTd>
                           <SheetTd>
                             <LookupSelect
+                              compact
                               disabled={selectedLocked}
                               value={row.responsible_officer_id}
                               options={officers}
@@ -1181,7 +1105,7 @@ export default function BudgetTemplatePage() {
         .budget-sheet thead th { position: sticky; top: 0; z-index: 10; }
         .budget-sheet .sticky-col { position: sticky; z-index: 12; }
         .budget-sheet thead .sticky-col { z-index: 18; }
-        .sheet-input { width: 100%; min-width: 0; border: 0; background: transparent; padding: .35rem .4rem; outline: none; }
+        .sheet-input { width: 100%; min-width: 0; border: 0; background: transparent; padding: .2rem .35rem; outline: none; font-size: 0.75rem; line-height: 1.2; }
         .sheet-input:focus { background: white; box-shadow: inset 0 0 0 2px #1f4e79; }
         .sheet-input:disabled { color: #475569; cursor: not-allowed; }
       `}</style>
@@ -1269,5 +1193,5 @@ function SheetNumber({ value, onChange, disabled }: { value: number; onChange: (
 }
 
 function ReadOnlyCell({ value, empty }: { value: string; empty: string }) {
-  return <div className={`px-2 py-2 ${value ? "text-slate-800" : "text-slate-400"}`}>{value || empty}</div>
+  return <div className={`truncate px-2 py-1.5 text-xs ${value ? "text-slate-800" : "text-slate-400"}`} title={value || empty}>{value || empty}</div>
 }
