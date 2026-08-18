@@ -30,6 +30,7 @@ import {
   saveBudgetLine,
   transitionSubmission,
   updateSubmissionHeader,
+  type BudgetActivityTemplate,
   type BudgetCycle,
   type BudgetDivision,
   type BudgetLine,
@@ -43,7 +44,13 @@ import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadActiveUsers, loadLookup } from "@/lib/lookups"
 
 type FundingSource = { id: string; code: string; name: string }
-type LookupState = { cycles: BudgetCycle[]; divisions: BudgetDivision[]; ledgers: ExpenseLedger[]; fundingSources: FundingSource[] }
+type LookupState = {
+  cycles: BudgetCycle[]
+  divisions: BudgetDivision[]
+  ledgers: ExpenseLedger[]
+  fundingSources: FundingSource[]
+  activityTemplates: BudgetActivityTemplate[]
+}
 type CashflowRow = { budget_year: number; division_code: string; division_name: string; month_number: number; month_name: string; amount: number }
 type WorkflowRow = { action: string; from_status: string | null; to_status: string; comments: string | null; created_at: string; changed_by_email: string | null }
 
@@ -82,7 +89,7 @@ type GridRow = {
   comments: string
 }
 
-const emptyLookups: LookupState = { cycles: [], divisions: [], ledgers: [], fundingSources: [] }
+const emptyLookups: LookupState = { cycles: [], divisions: [], ledgers: [], fundingSources: [], activityTemplates: [] }
 const money = (value: number) => `K ${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const clientId = () => `row-${Date.now()}-${Math.random().toString(36).slice(2)}`
 const blankMonths = () => Array.from({ length: 12 }, () => 0)
@@ -143,8 +150,8 @@ function rowFromBudgetLine(line: BudgetLine): GridRow {
     expense_ledger_id: line.expense_ledger_id || "",
     ledger_number: line.ledger?.ledger_number || "",
     standard_description: line.ledger?.standard_description || "",
-    budget_class: line.ledger?.budget_class || "",
-    expense_category: line.ledger?.expense_category || "",
+    budget_class: line.ledger?.budget_class_lookup?.name || line.ledger?.budget_class || "",
+    expense_category: line.ledger?.budget_expense_category_lookup?.name || line.ledger?.expense_category || "",
     line_item_description: line.line_item_description || "",
     business_justification: line.business_justification || "",
     location_destination_provider: line.location_destination_provider || "",
@@ -224,6 +231,30 @@ export default function BudgetTemplatePage() {
     })
   }, [assignedDivisions, divisionSearch])
 
+  const activityOptions = useMemo<LookupOption[]>(
+    () =>
+      lookups.activityTemplates.map((activity) => ({
+        ...activity,
+        id: activity.id,
+        code: activity.code,
+        name: activity.name,
+        description: activity.description,
+      })),
+    [lookups.activityTemplates]
+  )
+
+  const ledgerOptions = useMemo<LookupOption[]>(
+    () =>
+      lookups.ledgers.map((ledger) => ({
+        ...ledger,
+        id: ledger.id,
+        code: ledger.finance_code,
+        name: ledger.standard_description,
+        description: `${ledger.ledger_number || "No ledger number"} • ${ledger.budget_class_lookup?.name || ledger.budget_class || "No class"} • ${ledger.budget_expense_category_lookup?.name || ledger.expense_category || "No category"}`,
+      })),
+    [lookups.ledgers]
+  )
+
   const selectedCycle = lookups.cycles.find((cycle) => cycle.id === draftHeader.cycle_id)
   const selectedDivision = lookups.divisions.find((division) => division.id === draftHeader.division_id)
   const totalProposed = gridRows.filter((row) => !isEmptyRow(row)).reduce((sum, row) => sum + annualEstimate(row), 0)
@@ -239,9 +270,9 @@ export default function BudgetTemplatePage() {
       const [lookupData, dashboard, priorities, methods, unitRows, officerRows] = await Promise.all([
         getBudgetLookups(),
         getBudgetDashboard(),
-        loadLookup('priority_levels'),
-        loadLookup('procurement_methods'),
-        loadLookup('units_of_measure'),
+        loadLookup("priority_levels"),
+        loadLookup("procurement_methods"),
+        loadLookup("units_of_measure"),
         loadActiveUsers(),
       ])
       setLookups(lookupData as LookupState)
@@ -263,7 +294,9 @@ export default function BudgetTemplatePage() {
 
   const loadSubmission = useCallback(async (id: string) => {
     if (!id) {
-      setSelected(null); setGridRows([]); setHistory([])
+      setSelected(null)
+      setGridRows([])
+      setHistory([])
       return
     }
     setLoading(true)
@@ -292,28 +325,52 @@ export default function BudgetTemplatePage() {
   }, [selectedId, loadSubmission])
 
   const updateRow = (clientIdValue: string, patch: Partial<GridRow>) => {
-    setGridRows((rows) => rows.map((row) => row.clientId === clientIdValue ? { ...row, ...patch } : row))
+    setGridRows((rows) => rows.map((row) => (row.clientId === clientIdValue ? { ...row, ...patch } : row)))
   }
 
   const updateMonth = (clientIdValue: string, index: number, value: number) => {
-    setGridRows((rows) => rows.map((row) => {
-      if (row.clientId !== clientIdValue) return row
-      const months = [...row.months]
-      months[index] = Number(value || 0)
-      return { ...row, months }
-    }))
+    setGridRows((rows) =>
+      rows.map((row) => {
+        if (row.clientId !== clientIdValue) return row
+        const months = [...row.months]
+        months[index] = Number(value || 0)
+        return { ...row, months }
+      })
+    )
   }
 
   const selectFinanceCode = (clientIdValue: string, value: string) => {
     const ledger = lookups.ledgers.find((item) => item.finance_code === value || item.id === value)
-    updateRow(clientIdValue, ledger ? {
-      finance_code: ledger.finance_code,
-      expense_ledger_id: ledger.id,
-      ledger_number: ledger.ledger_number || "",
-      standard_description: ledger.standard_description || "",
-      budget_class: ledger.budget_class || "",
-      expense_category: ledger.expense_category || "",
-    } : { finance_code: value, expense_ledger_id: "", ledger_number: "", standard_description: "", budget_class: "", expense_category: "" })
+    updateRow(
+      clientIdValue,
+      ledger
+        ? {
+            finance_code: ledger.finance_code,
+            expense_ledger_id: ledger.id,
+            ledger_number: ledger.ledger_number || "",
+            standard_description: ledger.standard_description || "",
+            budget_class: ledger.budget_class_lookup?.name || ledger.budget_class || "",
+            expense_category: ledger.budget_expense_category_lookup?.name || ledger.expense_category || "",
+          }
+        : { finance_code: value, expense_ledger_id: "", ledger_number: "", standard_description: "", budget_class: "", expense_category: "" }
+    )
+  }
+
+  const selectActivityTemplate = (clientIdValue: string, value: string, option?: LookupOption) => {
+    const activity = lookups.activityTemplates.find((item) => item.id === value || item.code === value || item.name === value)
+    updateRow(
+      clientIdValue,
+      activity
+        ? {
+            activity_reference: activity.code,
+            line_item_description: (option?.default_line_item_description as string) || activity.default_line_item_description || activity.name,
+            business_justification: (option?.default_business_justification as string) || activity.default_business_justification || "",
+            unit_of_measure_id: activity.default_unit_of_measure_id || "",
+            priority_level_id: activity.default_priority_level_id || "",
+            priority: priorityLevels.find((priority) => priority.id === activity.default_priority_level_id)?.code || "",
+          }
+        : { activity_reference: value }
+    )
   }
 
   const createSubmission = async () => {
@@ -355,7 +412,7 @@ export default function BudgetTemplatePage() {
         name: newCycle.name,
         submission_deadline: newCycle.submission_deadline || null,
         department_ceiling: Number(newCycle.department_ceiling || 0),
-        instructions: 'Created from Budget Preparation controlled setup.',
+        instructions: "Created from Budget Preparation controlled setup.",
       })
       setDraftHeader((h) => ({ ...h, cycle_id: created.id, budget_ceiling: String(created.department_ceiling || "") }))
       setNewCycle({ budget_year: String(created.budget_year + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
@@ -526,8 +583,8 @@ export default function BudgetTemplatePage() {
           expense_ledger_id: ledger?.id || row.expense_ledger_id,
           ledger_number: ledger?.ledger_number || row.ledger_number,
           standard_description: ledger?.standard_description || row.standard_description,
-          budget_class: ledger?.budget_class || row.budget_class,
-          expense_category: ledger?.expense_category || row.expense_category,
+          budget_class: ledger?.budget_class_lookup?.name || ledger?.budget_class || row.budget_class,
+          expense_category: ledger?.budget_expense_category_lookup?.name || ledger?.expense_category || row.expense_category,
           line_item_description: cols[7] || row.line_item_description,
           business_justification: cols[8] || row.business_justification,
           location_destination_provider: cols[9] || row.location_destination_provider,
@@ -554,20 +611,6 @@ export default function BudgetTemplatePage() {
       return next.map((row, index) => ({ ...row, line_number: index + 1 }))
     })
     setMessage({ type: "ok", text: `${rows.length} pasted row(s) loaded into the grid. Review highlighted cells before saving.` })
-  }
-
-  const exportTemplate = (format: "excel" | "pdf") => {
-    if (!selected) return
-    const records = gridRows.filter((row) => !isEmptyRow(row)).map((row) => exportRecord(row))
-    if (records.length === 0) return
-    const filename = `${selected.submission_number || "budget_template"}_${new Date().toISOString().split("T")[0]}`
-    const title = `NJSS Standard Divisional Budget Template — ${selected.division?.name || "Division"}`
-    const subtitle = `FY${selected.budget_year} • ${selected.status}`
-    if (format === "excel") exportToExcel(filename, records, { title, subtitle, sheetName: "Budget Template" })
-    else {
-      const { columns, rows } = rowsToPdfTable(records)
-      exportToPDF({ title, subtitle, columns, rows, filename })
-    }
   }
 
   const exportRecord = (row: GridRow) => {
@@ -604,6 +647,20 @@ export default function BudgetTemplatePage() {
     }
   }
 
+  const exportTemplate = (format: "excel" | "pdf") => {
+    if (!selected) return
+    const records = gridRows.filter((row) => !isEmptyRow(row)).map((row) => exportRecord(row))
+    if (records.length === 0) return
+    const filename = `${selected.submission_number || "budget_template"}_${new Date().toISOString().split("T")[0]}`
+    const title = `NJSS Standard Divisional Budget Template — ${selected.division?.name || "Division"}`
+    const subtitle = `FY${selected.budget_year} • ${selected.status}`
+    if (format === "excel") exportToExcel(filename, records, { title, subtitle, sheetName: "Budget Template" })
+    else {
+      const { columns, rows } = rowsToPdfTable(records)
+      exportToPDF({ title, subtitle, columns, rows, filename })
+    }
+  }
+
   const cashflowChart = useMemo(() => {
     const activeYear = selected?.budget_year || selectedCycle?.budget_year || 2026
     return MONTHS.map((month, index) => ({
@@ -622,9 +679,19 @@ export default function BudgetTemplatePage() {
               <h1 className="text-xl font-bold">Budget Entry Sheet</h1>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={loadDashboard} className="sheet-action"><RefreshCw className="h-4 w-4" /> Refresh</button>
-              {selected && <button onClick={() => exportTemplate("excel")} className="sheet-action"><FileSpreadsheet className="h-4 w-4" /> Excel</button>}
-              {selected && <button onClick={() => exportTemplate("pdf")} className="sheet-action"><FileSpreadsheet className="h-4 w-4" /> PDF</button>}
+              <button onClick={loadDashboard} className="sheet-action">
+                <RefreshCw className="h-4 w-4" /> Refresh
+              </button>
+              {selected && (
+                <button onClick={() => exportTemplate("excel")} className="sheet-action">
+                  <FileSpreadsheet className="h-4 w-4" /> Excel
+                </button>
+              )}
+              {selected && (
+                <button onClick={() => exportTemplate("pdf")} className="sheet-action">
+                  <FileSpreadsheet className="h-4 w-4" /> PDF
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -652,7 +719,7 @@ export default function BudgetTemplatePage() {
       </div>
 
       {message && (
-        <div className={`rounded-lg border p-3 text-sm flex items-center gap-2 ${message.type === "ok" ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"}`}>
+        <div className={`flex items-center gap-2 rounded-lg border p-3 text-sm ${message.type === "ok" ? "border-green-200 bg-green-50 text-green-700" : "border-red-200 bg-red-50 text-red-700"}`}>
           {message.type === "ok" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />} {message.text}
         </div>
       )}
@@ -661,26 +728,38 @@ export default function BudgetTemplatePage() {
         <aside className="space-y-5">
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-              <h2 className="font-semibold text-slate-900 flex items-center gap-2"><Plus className="h-4 w-4 text-[#1f4e79]" /> Create draft sheet</h2>
+              <h2 className="flex items-center gap-2 font-semibold text-slate-900">
+                <Plus className="h-4 w-4 text-[#1f4e79]" /> Create draft sheet
+              </h2>
             </div>
             <div className="space-y-3 p-4">
               <Field label="Budget cycle">
                 <select value={draftHeader.cycle_id} onChange={(e) => setDraftHeader((h) => ({ ...h, cycle_id: e.target.value }))} className="input">
                   <option value="">Select cycle from database</option>
-                  {lookups.cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
+                  {lookups.cycles.map((cycle) => (
+                    <option key={cycle.id} value={cycle.id}>
+                      {cycle.name}
+                    </option>
+                  ))}
                 </select>
                 {canAdmin && (
                   <div className="mt-2">
-                    <button type="button" onClick={() => setShowAddCycle((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">+ Add missing budget cycle to database</button>
+                    <button type="button" onClick={() => setShowAddCycle((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">
+                      + Add missing budget cycle to database
+                    </button>
                     {showAddCycle && (
                       <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                        <p className="text-[11px] text-amber-900">Creates a controlled row in <strong>budget_cycles</strong>. It will then appear in this dropdown from the database.</p>
+                        <p className="text-[11px] text-amber-900">
+                          Creates a controlled row in <strong>budget_cycles</strong>. It will then appear in this dropdown from the database.
+                        </p>
                         <input className="input" placeholder="Financial year, e.g. 2026" type="number" value={newCycle.budget_year} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, budget_year: e.target.value }))} />
                         <input className="input" placeholder="Cycle type, e.g. ANNUAL" value={newCycle.cycle_type} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, cycle_type: e.target.value }))} />
                         <input className="input" placeholder="Cycle name" value={newCycle.name} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, name: e.target.value }))} />
                         <input className="input" placeholder="Submission deadline" type="date" value={newCycle.submission_deadline} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, submission_deadline: e.target.value }))} />
                         <input className="input text-right" placeholder="Default budget ceiling" type="number" value={newCycle.department_ceiling} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, department_ceiling: e.target.value }))} />
-                        <button type="button" onClick={addCycle} disabled={saving} className="btn-primary w-full justify-center">Create controlled budget cycle</button>
+                        <button type="button" onClick={addCycle} disabled={saving} className="btn-primary w-full justify-center">
+                          Create controlled budget cycle
+                        </button>
                       </div>
                     )}
                   </div>
@@ -693,55 +772,120 @@ export default function BudgetTemplatePage() {
                 </div>
                 <select value={draftHeader.division_id} onChange={(e) => setDraftHeader((h) => ({ ...h, division_id: e.target.value }))} className="input mt-2">
                   <option value="">Select active division from database</option>
-                  {filteredDivisions.map((division) => <option key={division.id} value={division.id}>{division.code} — {division.name} — {division.cost_centre_code || division.cost_centre_name || "No cost centre"}</option>)}
+                  {filteredDivisions.map((division) => (
+                    <option key={division.id} value={division.id}>
+                      {division.code} — {division.name} — {division.cost_centre_code || division.cost_centre_name || "No cost centre"}
+                    </option>
+                  ))}
                 </select>
                 {filteredDivisions.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No matching database record found. Use Add Division if you are authorised to create a controlled division/cost centre.</p>}
                 {restrictedDivisionUser && <p className="mt-1 text-[11px] text-slate-500">Division list is restricted by your assigned profile where possible.</p>}
               </Field>
               {canAdmin && (
                 <div>
-                  <button type="button" onClick={() => setShowAddDivision((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">+ Add missing division/cost centre to database</button>
-                  {showAddDivision && <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3"><p className="text-[11px] text-blue-900">Creates a controlled row in <strong>budget_divisions</strong>. It will then appear in this dropdown from the database.</p><input className="input" placeholder="Division code" value={newDivision.code} onChange={(e) => setNewDivision((d) => ({ ...d, code: e.target.value }))} /><input className="input" placeholder="Division name" value={newDivision.name} onChange={(e) => setNewDivision((d) => ({ ...d, name: e.target.value }))} /><input className="input" placeholder="Cost centre code" value={newDivision.cost_centre_code} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_code: e.target.value }))} /><input className="input" placeholder="Cost centre name" value={newDivision.cost_centre_name} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_name: e.target.value }))} /><button type="button" onClick={addDivision} disabled={saving} className="btn-primary w-full justify-center">Create controlled division</button></div>}
+                  <button type="button" onClick={() => setShowAddDivision((value) => !value)} className="text-xs font-semibold text-[#1f4e79] hover:underline">
+                    + Add missing division/cost centre to database
+                  </button>
+                  {showAddDivision && (
+                    <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3">
+                      <p className="text-[11px] text-blue-900">
+                        Creates a controlled row in <strong>budget_divisions</strong>. It will then appear in this dropdown from the database.
+                      </p>
+                      <input className="input" placeholder="Division code" value={newDivision.code} onChange={(e) => setNewDivision((d) => ({ ...d, code: e.target.value }))} />
+                      <input className="input" placeholder="Division name" value={newDivision.name} onChange={(e) => setNewDivision((d) => ({ ...d, name: e.target.value }))} />
+                      <input className="input" placeholder="Cost centre code" value={newDivision.cost_centre_code} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_code: e.target.value }))} />
+                      <input className="input" placeholder="Cost centre name" value={newDivision.cost_centre_name} onChange={(e) => setNewDivision((d) => ({ ...d, cost_centre_name: e.target.value }))} />
+                      <button type="button" onClick={addDivision} disabled={saving} className="btn-primary w-full justify-center">
+                        Create controlled division
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
-              <Field label="Budget ceiling"><input value={draftHeader.budget_ceiling} onChange={(e) => setDraftHeader((h) => ({ ...h, budget_ceiling: e.target.value }))} type="number" className="input text-right" /></Field>
-              <Field label="Submission reference"><input value={draftHeader.submission_reference} onChange={(e) => setDraftHeader((h) => ({ ...h, submission_reference: e.target.value }))} className="input" /></Field>
-              <button onClick={createSubmission} disabled={saving || !canEdit} className="btn-primary w-full justify-center"><ClipboardList className="h-4 w-4" /> Create Draft</button>
+              <Field label="Budget ceiling">
+                <input value={draftHeader.budget_ceiling} onChange={(e) => setDraftHeader((h) => ({ ...h, budget_ceiling: e.target.value }))} type="number" className="input text-right" />
+              </Field>
+              <Field label="Submission reference">
+                <input value={draftHeader.submission_reference} onChange={(e) => setDraftHeader((h) => ({ ...h, submission_reference: e.target.value }))} className="input" />
+              </Field>
+              <button onClick={createSubmission} disabled={saving || !canEdit} className="btn-primary w-full justify-center">
+                <ClipboardList className="h-4 w-4" /> Create Draft
+              </button>
             </div>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3"><h2 className="font-semibold text-slate-900">Submissions</h2></div>
-            <div className="max-h-[520px] overflow-y-auto divide-y divide-slate-100">
-              {submissions.length === 0 ? <Empty message="No budget templates yet." /> : submissions.map((submission) => (
-                <button key={submission.id} onClick={() => setSelectedId(submission.id)} className={`w-full p-4 text-left hover:bg-blue-50 ${selectedId === submission.id ? "bg-blue-50" : ""}`}>
-                  <div className="flex items-center justify-between gap-2"><span className="font-semibold text-slate-900">{submission.submission_number || "Draft"}</span><StatusBadge status={submission.status} /></div>
-                  <p className="mt-1 text-sm text-slate-600">{submission.division?.code} — {submission.division?.name}</p>
-                  <div className="mt-2 flex items-center justify-between text-xs text-slate-500"><span>FY{submission.budget_year}</span><span>{money(submission.total_proposed_budget || 0)}</span></div>
-                </button>
-              ))}
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+              <h2 className="font-semibold text-slate-900">Submissions</h2>
+            </div>
+            <div className="max-h-[520px] divide-y divide-slate-100 overflow-y-auto">
+              {submissions.length === 0 ? (
+                <Empty message="No budget templates yet." />
+              ) : (
+                submissions.map((submission) => (
+                  <button key={submission.id} onClick={() => setSelectedId(submission.id)} className={`w-full p-4 text-left hover:bg-blue-50 ${selectedId === submission.id ? "bg-blue-50" : ""}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-900">{submission.submission_number || "Draft"}</span>
+                      <StatusBadge status={submission.status} />
+                    </div>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {submission.division?.code} — {submission.division?.name}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                      <span>FY{submission.budget_year}</span>
+                      <span>{money(submission.total_proposed_budget || 0)}</span>
+                    </div>
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </aside>
 
-        <main className="space-y-5 min-w-0">
+        <main className="min-w-0 space-y-5">
           {!selected ? (
             <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Select or create a divisional budget sheet to begin.</div>
           ) : (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={addRow} disabled={selectedLocked} className="btn-light"><Plus className="h-4 w-4" /> Add Row</button>
-                  <button onClick={duplicateRow} disabled={selectedLocked || !selectedRow} className="btn-light"><Copy className="h-4 w-4" /> Duplicate Row</button>
-                  <button onClick={removeSelectedRow} disabled={selectedLocked || !selectedRow} className="btn-light text-red-700"><Trash2 className="h-4 w-4" /> Delete Row</button>
-                  <button onClick={allocateEvenly} disabled={selectedLocked || !selectedRow} className="btn-light">Allocate Evenly</button>
+                  <button onClick={addRow} disabled={selectedLocked} className="btn-light">
+                    <Plus className="h-4 w-4" /> Add Row
+                  </button>
+                  <button onClick={duplicateRow} disabled={selectedLocked || !selectedRow} className="btn-light">
+                    <Copy className="h-4 w-4" /> Duplicate Row
+                  </button>
+                  <button onClick={removeSelectedRow} disabled={selectedLocked || !selectedRow} className="btn-light text-red-700">
+                    <Trash2 className="h-4 w-4" /> Delete Row
+                  </button>
+                  <button onClick={allocateEvenly} disabled={selectedLocked || !selectedRow} className="btn-light">
+                    Allocate Evenly
+                  </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={saveGridDraft} disabled={saving || selectedLocked} className="btn-primary"><Save className="h-4 w-4" /> Save Draft</button>
-                  {(selected.status === "DRAFT" || selected.status === "RETURNED") && <button onClick={() => runAction(selected.status === "RETURNED" ? "RESUBMIT" : "SUBMIT")} disabled={saving} className="btn-primary"><Send className="h-4 w-4" /> Submit</button>}
-                  {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && <button onClick={() => runAction("REVIEW")} className="btn-primary"><ShieldCheck className="h-4 w-4" /> Review</button>}
-                  {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && <button onClick={() => runAction("RETURN")} className="btn-light"><Undo2 className="h-4 w-4" /> Return</button>}
-                  {canApprove && selected.status === "REVIEWED" && <button onClick={() => runAction("APPROVE")} className="btn-primary"><CheckCircle2 className="h-4 w-4" /> Approve</button>}
+                  <button onClick={saveGridDraft} disabled={saving || selectedLocked} className="btn-primary">
+                    <Save className="h-4 w-4" /> Save Draft
+                  </button>
+                  {(selected.status === "DRAFT" || selected.status === "RETURNED") && (
+                    <button onClick={() => runAction(selected.status === "RETURNED" ? "RESUBMIT" : "SUBMIT")} disabled={saving} className="btn-primary">
+                      <Send className="h-4 w-4" /> Submit
+                    </button>
+                  )}
+                  {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && (
+                    <button onClick={() => runAction("REVIEW")} className="btn-primary">
+                      <ShieldCheck className="h-4 w-4" /> Review
+                    </button>
+                  )}
+                  {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && (
+                    <button onClick={() => runAction("RETURN")} className="btn-light">
+                      <Undo2 className="h-4 w-4" /> Return
+                    </button>
+                  )}
+                  {canApprove && selected.status === "REVIEWED" && (
+                    <button onClick={() => runAction("APPROVE")} className="btn-primary">
+                      <CheckCircle2 className="h-4 w-4" /> Approve
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -749,9 +893,15 @@ export default function BudgetTemplatePage() {
                 <table className="budget-sheet min-w-[5200px] border-collapse text-xs">
                   <thead>
                     <tr>
-                      <SheetTh sticky left={0} width={70}>Line No.</SheetTh>
-                      <SheetTh sticky left={70} width={130}>Activity Ref.</SheetTh>
-                      <SheetTh sticky left={200} width={190}>Finance Code</SheetTh>
+                      <SheetTh sticky left={0} width={70}>
+                        Line No.
+                      </SheetTh>
+                      <SheetTh sticky left={70} width={130}>
+                        Activity Ref.
+                      </SheetTh>
+                      <SheetTh sticky left={200} width={190}>
+                        Finance Code
+                      </SheetTh>
                       <SheetTh width={110}>Ledger No.</SheetTh>
                       <SheetTh width={230}>Expense Description</SheetTh>
                       <SheetTh width={150}>Budget Class</SheetTh>
@@ -768,7 +918,11 @@ export default function BudgetTemplatePage() {
                       <SheetTh width={130}>Frequency / Periods</SheetTh>
                       <SheetTh width={120}>Other Costs (K)</SheetTh>
                       <SheetTh width={150}>Calculated Estimate (K)</SheetTh>
-                      {MONTHS.map((month) => <SheetTh key={month} width={115}>{month}</SheetTh>)}
+                      {MONTHS.map((month) => (
+                        <SheetTh key={month} width={115}>
+                          {month}
+                        </SheetTh>
+                      ))}
                       <SheetTh width={155}>Monthly Allocation Total</SheetTh>
                       <SheetTh width={120}>Variance (K)</SheetTh>
                       <SheetTh width={120}>Priority</SheetTh>
@@ -787,66 +941,218 @@ export default function BudgetTemplatePage() {
                       const rowTone = lineHasVariance ? "bg-red-50" : lineInvalid ? "bg-amber-50" : "odd:bg-[#eaf3f8] even:bg-white"
                       return (
                         <tr key={row.clientId} onClick={() => setSelectedRow(row.clientId)} className={`${rowTone} ${selectedRow === row.clientId ? "outline outline-2 outline-[#1f4e79]" : ""}`}>
-                          <SheetTd sticky left={0} readOnly>{row.line_number}</SheetTd>
-                          <SheetTd sticky left={70}><SheetInput disabled={selectedLocked} value={row.activity_reference} onChange={(v) => updateRow(row.clientId, { activity_reference: v })} /></SheetTd>
-                          <SheetTd sticky left={200} required invalid={!isEmptyRow(row) && !row.expense_ledger_id}>
-                            <input disabled={selectedLocked} list="finance-code-options" className="sheet-input font-mono" value={row.finance_code} onChange={(e) => selectFinanceCode(row.clientId, e.target.value)} placeholder="Search code" />
+                          <SheetTd sticky left={0} readOnly>
+                            {row.line_number}
                           </SheetTd>
-                          <SheetTd readOnly>{row.ledger_number}</SheetTd>
-                          <SheetTd readOnly>{row.standard_description}</SheetTd>
-                          <SheetTd readOnly>{row.budget_class}</SheetTd>
-                          <SheetTd readOnly>{row.expense_category}</SheetTd>
-                          <SheetTd required invalid={!isEmptyRow(row) && !row.line_item_description.trim()}><SheetInput disabled={selectedLocked} value={row.line_item_description} onChange={(v) => updateRow(row.clientId, { line_item_description: v })} /></SheetTd>
-                          <SheetTd required invalid={!isEmptyRow(row) && !row.business_justification.trim()}><SheetInput disabled={selectedLocked} value={row.business_justification} onChange={(v) => updateRow(row.clientId, { business_justification: v })} /></SheetTd>
-                          <SheetTd><SheetInput disabled={selectedLocked} value={row.location_destination_provider} onChange={(v) => updateRow(row.clientId, { location_destination_provider: v })} /></SheetTd>
-                          <SheetTd><SheetInput disabled={selectedLocked} value={row.beneficiary_custodian_officer} onChange={(v) => updateRow(row.clientId, { beneficiary_custodian_officer: v })} /></SheetTd>
-                          <SheetTd><SheetInput type="date" disabled={selectedLocked} value={row.start_date} onChange={(v) => updateRow(row.clientId, { start_date: v })} /></SheetTd>
-                          <SheetTd><SheetInput type="date" disabled={selectedLocked} value={row.end_date} onChange={(v) => updateRow(row.clientId, { end_date: v })} /></SheetTd>
-                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.quantity) <= 0}><SheetNumber disabled={selectedLocked} value={row.quantity} onChange={(v) => updateRow(row.clientId, { quantity: v })} /></SheetTd>
-                          <SheetTd><LookupSelect disabled={selectedLocked} value={row.unit_of_measure_id} options={units} placeholder="Select unit" canAdd={canAdmin} addTable="units_of_measure" addLabel="+ Add Unit" onRefresh={loadDashboard} onChange={(value, option) => updateRow(row.clientId, { unit_of_measure_id: value, unit_of_measure: option?.name || "" })} /></SheetTd>
-                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.unit_cost) < 0}><SheetNumber disabled={selectedLocked} value={row.unit_cost} onChange={(v) => updateRow(row.clientId, { unit_cost: v })} /></SheetTd>
-                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.frequency_periods) <= 0}><SheetNumber disabled={selectedLocked} value={row.frequency_periods} onChange={(v) => updateRow(row.clientId, { frequency_periods: v })} /></SheetTd>
-                          <SheetTd><SheetNumber disabled={selectedLocked} value={row.other_costs} onChange={(v) => updateRow(row.clientId, { other_costs: v })} /></SheetTd>
-                          <SheetTd readOnly align="right">{money(annualEstimate(row))}</SheetTd>
-                          {MONTHS.map((month, index) => <SheetTd key={month}><SheetNumber disabled={selectedLocked} value={row.months[index]} onChange={(v) => updateMonth(row.clientId, index, v)} /></SheetTd>)}
-                          <SheetTd readOnly align="right">{money(monthlyTotal(row))}</SheetTd>
-                          <SheetTd readOnly align="right" invalid={lineHasVariance}>{money(rowVariance)}</SheetTd>
-                          <SheetTd><LookupSelect disabled={selectedLocked} value={row.priority_level_id} options={priorityLevels} placeholder="Select priority" canAdd={canAdmin} addTable="priority_levels" addLabel="+ Add Priority" onRefresh={loadDashboard} onChange={(value, option) => updateRow(row.clientId, { priority_level_id: value, priority: option?.code || "" })} /></SheetTd>
-                          <SheetTd><select disabled={selectedLocked} className="sheet-input" value={row.funding_source_id} onChange={(e) => updateRow(row.clientId, { funding_source_id: e.target.value })}><option value="">Select</option>{lookups.fundingSources.map((source) => <option key={source.id} value={source.id}>{source.code} — {source.name}</option>)}</select></SheetTd>
-                          <SheetTd><LookupSelect disabled={selectedLocked} value={row.procurement_method_id} options={procurementMethods} placeholder="Select method" canAdd={canAdmin} addTable="procurement_methods" addLabel="+ Add Procurement Method" onRefresh={loadDashboard} onChange={(value, option) => updateRow(row.clientId, { procurement_method_id: value, procurement_method: option?.code || "" })} /></SheetTd>
-                          <SheetTd><LookupSelect disabled={selectedLocked} value={row.responsible_officer_id} options={officers} placeholder="Select officer" onChange={(value, option) => updateRow(row.clientId, { responsible_officer_id: value, responsible_officer: option?.name || "" })} /></SheetTd>
-                          <SheetTd><SheetInput disabled={selectedLocked} value={row.supporting_reference} onChange={(v) => updateRow(row.clientId, { supporting_reference: v })} /></SheetTd>
-                          <SheetTd><SheetInput disabled={selectedLocked} value={row.comments} onChange={(v) => updateRow(row.clientId, { comments: v })} /></SheetTd>
+                          <SheetTd sticky left={70}>
+                            <LookupSelect
+                              disabled={selectedLocked}
+                              value={lookups.activityTemplates.find((activity) => activity.code === row.activity_reference)?.id || ""}
+                              options={activityOptions}
+                              placeholder="Select activity"
+                              canAdd={canAdmin}
+                              addTable="budget_activity_templates"
+                              addLabel="+ Add Activity Reference"
+                              addFields={[
+                                { name: "code", label: "Activity Code", required: true },
+                                { name: "name", label: "Activity Name", required: true },
+                                { name: "description", label: "Description" },
+                                { name: "default_line_item_description", label: "Default Line Description" },
+                                { name: "default_business_justification", label: "Default Justification" },
+                              ]}
+                              onRefresh={loadDashboard}
+                              onChange={(value, option) => selectActivityTemplate(row.clientId, value, option)}
+                            />
+                          </SheetTd>
+                          <SheetTd sticky left={200} required invalid={!isEmptyRow(row) && !row.expense_ledger_id}>
+                            <LookupSelect
+                              disabled={selectedLocked}
+                              value={row.expense_ledger_id}
+                              options={ledgerOptions}
+                              placeholder="Search finance code"
+                              unauthorizedEmptyLabel="No active posting ledgers configured. Add finance ledger records first."
+                              onChange={(value) => selectFinanceCode(row.clientId, value)}
+                            />
+                          </SheetTd>
+                          <SheetTd readOnly>
+                            <ReadOnlyCell value={row.ledger_number} empty="Select Finance Code" />
+                          </SheetTd>
+                          <SheetTd readOnly>
+                            <ReadOnlyCell value={row.standard_description} empty="Select Finance Code" />
+                          </SheetTd>
+                          <SheetTd readOnly>
+                            <ReadOnlyCell value={row.budget_class} empty="Select Finance Code" />
+                          </SheetTd>
+                          <SheetTd readOnly>
+                            <ReadOnlyCell value={row.expense_category} empty="Select Finance Code" />
+                          </SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && !row.line_item_description.trim()}>
+                            <SheetInput disabled={selectedLocked} value={row.line_item_description} onChange={(v) => updateRow(row.clientId, { line_item_description: v })} />
+                          </SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && !row.business_justification.trim()}>
+                            <SheetInput disabled={selectedLocked} value={row.business_justification} onChange={(v) => updateRow(row.clientId, { business_justification: v })} />
+                          </SheetTd>
+                          <SheetTd>
+                            <SheetInput disabled={selectedLocked} value={row.location_destination_provider} onChange={(v) => updateRow(row.clientId, { location_destination_provider: v })} />
+                          </SheetTd>
+                          <SheetTd>
+                            <SheetInput disabled={selectedLocked} value={row.beneficiary_custodian_officer} onChange={(v) => updateRow(row.clientId, { beneficiary_custodian_officer: v })} />
+                          </SheetTd>
+                          <SheetTd>
+                            <SheetInput type="date" disabled={selectedLocked} value={row.start_date} onChange={(v) => updateRow(row.clientId, { start_date: v })} />
+                          </SheetTd>
+                          <SheetTd>
+                            <SheetInput type="date" disabled={selectedLocked} value={row.end_date} onChange={(v) => updateRow(row.clientId, { end_date: v })} />
+                          </SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.quantity) <= 0}>
+                            <SheetNumber disabled={selectedLocked} value={row.quantity} onChange={(v) => updateRow(row.clientId, { quantity: v })} />
+                          </SheetTd>
+                          <SheetTd>
+                            <LookupSelect
+                              disabled={selectedLocked}
+                              value={row.unit_of_measure_id}
+                              options={units}
+                              placeholder="Select unit"
+                              canAdd={canAdmin}
+                              addTable="units_of_measure"
+                              addLabel="+ Add Unit"
+                              onRefresh={loadDashboard}
+                              onChange={(value, option) => updateRow(row.clientId, { unit_of_measure_id: value, unit_of_measure: option?.name || "" })}
+                            />
+                          </SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.unit_cost) < 0}>
+                            <SheetNumber disabled={selectedLocked} value={row.unit_cost} onChange={(v) => updateRow(row.clientId, { unit_cost: v })} />
+                          </SheetTd>
+                          <SheetTd required invalid={!isEmptyRow(row) && Number(row.frequency_periods) <= 0}>
+                            <SheetNumber disabled={selectedLocked} value={row.frequency_periods} onChange={(v) => updateRow(row.clientId, { frequency_periods: v })} />
+                          </SheetTd>
+                          <SheetTd>
+                            <SheetNumber disabled={selectedLocked} value={row.other_costs} onChange={(v) => updateRow(row.clientId, { other_costs: v })} />
+                          </SheetTd>
+                          <SheetTd readOnly align="right">
+                            {money(annualEstimate(row))}
+                          </SheetTd>
+                          {MONTHS.map((month, index) => (
+                            <SheetTd key={month}>
+                              <SheetNumber disabled={selectedLocked} value={row.months[index]} onChange={(v) => updateMonth(row.clientId, index, v)} />
+                            </SheetTd>
+                          ))}
+                          <SheetTd readOnly align="right">
+                            {money(monthlyTotal(row))}
+                          </SheetTd>
+                          <SheetTd readOnly align="right" invalid={lineHasVariance}>
+                            {money(rowVariance)}
+                          </SheetTd>
+                          <SheetTd>
+                            <LookupSelect
+                              disabled={selectedLocked}
+                              value={row.priority_level_id}
+                              options={priorityLevels}
+                              placeholder="Select priority"
+                              canAdd={canAdmin}
+                              addTable="priority_levels"
+                              addLabel="+ Add Priority"
+                              onRefresh={loadDashboard}
+                              onChange={(value, option) => updateRow(row.clientId, { priority_level_id: value, priority: option?.code || "" })}
+                            />
+                          </SheetTd>
+                          <SheetTd>
+                            <select disabled={selectedLocked} className="sheet-input" value={row.funding_source_id} onChange={(e) => updateRow(row.clientId, { funding_source_id: e.target.value })}>
+                              <option value="">Select</option>
+                              {lookups.fundingSources.map((source) => (
+                                <option key={source.id} value={source.id}>
+                                  {source.code} — {source.name}
+                                </option>
+                              ))}
+                            </select>
+                          </SheetTd>
+                          <SheetTd>
+                            <LookupSelect
+                              disabled={selectedLocked}
+                              value={row.procurement_method_id}
+                              options={procurementMethods}
+                              placeholder="Select method"
+                              canAdd={canAdmin}
+                              addTable="procurement_methods"
+                              addLabel="+ Add Procurement Method"
+                              onRefresh={loadDashboard}
+                              onChange={(value, option) => updateRow(row.clientId, { procurement_method_id: value, procurement_method: option?.code || "" })}
+                            />
+                          </SheetTd>
+                          <SheetTd>
+                            <LookupSelect
+                              disabled={selectedLocked}
+                              value={row.responsible_officer_id}
+                              options={officers}
+                              placeholder="Select officer"
+                              onChange={(value, option) => updateRow(row.clientId, { responsible_officer_id: value, responsible_officer: option?.name || "" })}
+                            />
+                          </SheetTd>
+                          <SheetTd>
+                            <SheetInput disabled={selectedLocked} value={row.supporting_reference} onChange={(v) => updateRow(row.clientId, { supporting_reference: v })} />
+                          </SheetTd>
+                          <SheetTd>
+                            <SheetInput disabled={selectedLocked} value={row.comments} onChange={(v) => updateRow(row.clientId, { comments: v })} />
+                          </SheetTd>
                         </tr>
                       )
                     })}
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td className="sticky left-0 z-20 border border-[#9fbad0] bg-[#1f4e79] px-2 py-2 font-bold text-white" colSpan={3}>Totals</td>
-                      <td className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 font-bold text-right" colSpan={16}>{money(totalProposed)}</td>
-                      {MONTHS.map((month, index) => <td key={month} className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 text-right font-bold">{money(gridRows.reduce((sum, row) => sum + (row.months[index] || 0), 0))}</td>)}
+                      <td className="sticky left-0 z-20 border border-[#9fbad0] bg-[#1f4e79] px-2 py-2 font-bold text-white" colSpan={3}>
+                        Totals
+                      </td>
+                      <td className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 text-right font-bold" colSpan={16}>
+                        {money(totalProposed)}
+                      </td>
+                      {MONTHS.map((month, index) => (
+                        <td key={month} className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 text-right font-bold">
+                          {money(gridRows.reduce((sum, row) => sum + (row.months[index] || 0), 0))}
+                        </td>
+                      ))}
                       <td className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 text-right font-bold">{money(totalMonthly)}</td>
-                      <td className={`border border-[#9fbad0] px-2 py-2 text-right font-bold ${Math.abs(totalVariance) >= 0.01 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>{money(totalVariance)}</td>
+                      <td className={`border border-[#9fbad0] px-2 py-2 text-right font-bold ${Math.abs(totalVariance) >= 0.01 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
+                        {money(totalVariance)}
+                      </td>
                       <td className="border border-[#9fbad0] bg-[#d9eaf7]" colSpan={6}></td>
                     </tr>
                   </tfoot>
                 </table>
-                <datalist id="finance-code-options">
-                  {lookups.ledgers.map((ledger) => <option key={ledger.id} value={ledger.finance_code}>{ledger.finance_code} — {ledger.standard_description}</option>)}
-                </datalist>
               </div>
 
               <div className="grid gap-5 lg:grid-cols-2">
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                   <h3 className="font-semibold text-slate-900">Reviewed / approved consolidated cash-flow</h3>
                   <div className="mt-4 grid grid-cols-6 gap-2">
-                    {cashflowChart.map((row) => <div key={row.month} className="rounded-lg bg-blue-50 p-2 text-center"><p className="text-xs text-slate-500">{row.month}</p><p className="text-xs font-bold text-[#1f4e79]">{money(row.amount)}</p></div>)}
+                    {cashflowChart.map((row) => (
+                      <div key={row.month} className="rounded-lg bg-blue-50 p-2 text-center">
+                        <p className="text-xs text-slate-500">{row.month}</p>
+                        <p className="text-xs font-bold text-[#1f4e79]">{money(row.amount)}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                   <h3 className="font-semibold text-slate-900">Workflow history</h3>
-                  {history.length === 0 ? <p className="mt-4 text-sm text-slate-500">No workflow events yet.</p> : <div className="mt-4 max-h-72 space-y-3 overflow-y-auto">{history.map((item, index) => <div key={index} className="rounded-lg bg-slate-50 p-3 text-sm"><div className="flex justify-between"><b>{item.action}</b><span className="text-xs text-slate-500">{new Date(item.created_at).toLocaleString("en-GB")}</span></div><p className="text-slate-600">{item.from_status || "START"} → {item.to_status}</p>{item.comments && <p className="mt-1 text-slate-500">{item.comments}</p>}</div>)}</div>}
+                  {history.length === 0 ? (
+                    <p className="mt-4 text-sm text-slate-500">No workflow events yet.</p>
+                  ) : (
+                    <div className="mt-4 max-h-72 space-y-3 overflow-y-auto">
+                      {history.map((item, index) => (
+                        <div key={index} className="rounded-lg bg-slate-50 p-3 text-sm">
+                          <div className="flex justify-between">
+                            <b>{item.action}</b>
+                            <span className="text-xs text-slate-500">{new Date(item.created_at).toLocaleString("en-GB")}</span>
+                          </div>
+                          <p className="text-slate-600">
+                            {item.from_status || "START"} → {item.to_status}
+                          </p>
+                          {item.comments && <p className="mt-1 text-slate-500">{item.comments}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -854,7 +1160,11 @@ export default function BudgetTemplatePage() {
         </main>
       </div>
 
-      {loading && <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/40"><Loader2 className="h-8 w-8 animate-spin text-[#1f4e79]" /></div>}
+      {loading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/40">
+          <Loader2 className="h-8 w-8 animate-spin text-[#1f4e79]" />
+        </div>
+      )}
 
       <style jsx global>{`
         .input { width: 100%; border-radius: 0.375rem; border: 1px solid #cbd5e1; background: white; padding: 0.5rem 0.75rem; font-size: 0.875rem; outline: none; }
@@ -880,15 +1190,34 @@ export default function BudgetTemplatePage() {
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block text-xs font-semibold text-slate-600">{label}<div className="mt-1">{children}</div></label>
+  return (
+    <label className="block text-xs font-semibold text-slate-600">
+      {label}
+      <div className="mt-1">{children}</div>
+    </label>
+  )
 }
 
 function HeaderCell({ label, value, strong = false, alert = false }: { label: string; value: string; strong?: boolean; alert?: boolean }) {
-  return <div className={`${alert ? "bg-red-50" : "bg-white"} p-2`}><p className="text-[10px] font-bold uppercase tracking-wide text-[#1f4e79]">{label}</p><p className={`mt-0.5 truncate ${strong ? "font-bold text-slate-950" : "text-slate-700"} ${alert ? "text-red-700" : ""}`}>{value}</p></div>
+  return (
+    <div className={`${alert ? "bg-red-50" : "bg-white"} p-2`}>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-[#1f4e79]">{label}</p>
+      <p className={`mt-0.5 truncate ${strong ? "font-bold text-slate-950" : "text-slate-700"} ${alert ? "text-red-700" : ""}`}>{value}</p>
+    </div>
+  )
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const classes: Record<string, string> = { DRAFT: "bg-slate-100 text-slate-700", SUBMITTED: "bg-blue-100 text-blue-700", RESUBMITTED: "bg-blue-100 text-blue-700", RETURNED: "bg-orange-100 text-orange-700", REVIEWED: "bg-amber-100 text-amber-800", APPROVED: "bg-green-100 text-green-700", REJECTED: "bg-red-100 text-red-700", ARCHIVED: "bg-slate-200 text-slate-600" }
+  const classes: Record<string, string> = {
+    DRAFT: "bg-slate-100 text-slate-700",
+    SUBMITTED: "bg-blue-100 text-blue-700",
+    RESUBMITTED: "bg-blue-100 text-blue-700",
+    RETURNED: "bg-orange-100 text-orange-700",
+    REVIEWED: "bg-amber-100 text-amber-800",
+    APPROVED: "bg-green-100 text-green-700",
+    REJECTED: "bg-red-100 text-red-700",
+    ARCHIVED: "bg-slate-200 text-slate-600",
+  }
   return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${classes[status] || classes.DRAFT}`}>{status}</span>
 }
 
@@ -897,11 +1226,38 @@ function Empty({ message }: { message: string }) {
 }
 
 function SheetTh({ children, width, sticky = false, left = 0 }: { children: React.ReactNode; width: number; sticky?: boolean; left?: number }) {
-  return <th style={{ width, minWidth: width, left: sticky ? left : undefined }} className={`${sticky ? "sticky-col" : ""} border border-[#9fbad0] bg-[#1f4e79] px-2 py-2 text-left align-bottom font-bold text-white`}>{children}</th>
+  return (
+    <th style={{ width, minWidth: width, left: sticky ? left : undefined }} className={`${sticky ? "sticky-col" : ""} border border-[#9fbad0] bg-[#1f4e79] px-2 py-2 text-left align-bottom font-bold text-white`}>
+      {children}
+    </th>
+  )
 }
 
-function SheetTd({ children, sticky = false, left = 0, readOnly = false, invalid = false, required = false, align = "left" }: { children: React.ReactNode; sticky?: boolean; left?: number; readOnly?: boolean; invalid?: boolean; required?: boolean; align?: "left" | "right" }) {
-  return <td style={{ left: sticky ? left : undefined }} className={`${sticky ? "sticky-col bg-inherit" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""} ${invalid ? "bg-red-100" : required ? "bg-amber-50" : ""} border border-[#9fbad0] align-top text-${align}`}>{children}</td>
+function SheetTd({
+  children,
+  sticky = false,
+  left = 0,
+  readOnly = false,
+  invalid = false,
+  required = false,
+  align = "left",
+}: {
+  children: React.ReactNode
+  sticky?: boolean
+  left?: number
+  readOnly?: boolean
+  invalid?: boolean
+  required?: boolean
+  align?: "left" | "right"
+}) {
+  return (
+    <td
+      style={{ left: sticky ? left : undefined }}
+      className={`${sticky ? "sticky-col bg-inherit" : ""} ${readOnly ? "bg-slate-100 text-slate-600" : ""} ${invalid ? "bg-red-100" : required ? "bg-amber-50" : ""} border border-[#9fbad0] align-top text-${align}`}
+    >
+      {children}
+    </td>
+  )
 }
 
 function SheetInput({ value, onChange, disabled, type = "text" }: { value: string; onChange: (value: string) => void; disabled?: boolean; type?: string }) {
@@ -910,4 +1266,8 @@ function SheetInput({ value, onChange, disabled, type = "text" }: { value: strin
 
 function SheetNumber({ value, onChange, disabled }: { value: number; onChange: (value: number) => void; disabled?: boolean }) {
   return <input type="number" disabled={disabled} className="sheet-input text-right" value={Number.isFinite(value) ? value : 0} onChange={(event) => onChange(Number(event.target.value || 0))} />
+}
+
+function ReadOnlyCell({ value, empty }: { value: string; empty: string }) {
+  return <div className={`px-2 py-2 ${value ? "text-slate-800" : "text-slate-400"}`}>{value || empty}</div>
 }

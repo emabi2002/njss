@@ -29,6 +29,10 @@ export type ExpenseLedger = {
   parent_ledger_id: string | null
   source_description: string | null
   correction_notes: string | null
+  budget_class_id?: string | null
+  budget_class_lookup?: { id: string; code: string; name: string } | null
+  budget_expense_category_id?: string | null
+  budget_expense_category_lookup?: { id: string; code: string; name: string } | null
 }
 
 export type BudgetCycle = {
@@ -48,6 +52,18 @@ export type BudgetDivision = {
   cost_centre_code: string | null
   cost_centre_name: string | null
   department_id: string | null
+}
+
+export type BudgetActivityTemplate = {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  default_line_item_description: string | null
+  default_business_justification: string | null
+  default_output: string | null
+  default_unit_of_measure_id: string | null
+  default_priority_level_id: string | null
 }
 
 export type BudgetSubmission = {
@@ -151,23 +167,36 @@ export function validateLineDraft(line: Partial<BudgetLine>, allocations: Budget
 }
 
 export async function getBudgetLookups() {
-  const [cycles, divisions, ledgers, fundingSources] = await Promise.all([
+  const [cycles, divisions, ledgers, fundingSources, activityTemplates] = await Promise.all([
     supabase.from('budget_cycles').select('*').order('budget_year', { ascending: false }),
     supabase.from('budget_divisions').select('*').eq('is_active', true).order('name'),
-    supabase.from('expense_ledger').select('*').eq('is_active', true).eq('is_posting', true).order('finance_code'),
+    supabase
+      .from('expense_ledger')
+      .select('*, budget_class_lookup:budget_classes(id, code, name), budget_expense_category_lookup:budget_expense_categories(id, code, name)')
+      .eq('is_active', true)
+      .eq('is_posting', true)
+      .order('finance_code'),
     supabase.from('funding_sources').select('id, code, name').eq('is_active', true).order('name'),
+    supabase.from('budget_activity_templates').select('*').eq('is_active', true).order('sort_order'),
   ])
   if (cycles.error) throw cycles.error
   if (divisions.error) throw divisions.error
   if (ledgers.error) throw ledgers.error
   if (fundingSources.error) throw fundingSources.error
-  return { cycles: cycles.data || [], divisions: divisions.data || [], ledgers: ledgers.data || [], fundingSources: fundingSources.data || [] }
+  if (activityTemplates.error) throw activityTemplates.error
+  return {
+    cycles: cycles.data || [],
+    divisions: divisions.data || [],
+    ledgers: ledgers.data || [],
+    fundingSources: fundingSources.data || [],
+    activityTemplates: activityTemplates.data || [],
+  }
 }
 
 export async function getPostingLedgers(search = '') {
   let query = supabase
     .from('expense_ledger')
-    .select('*')
+    .select('*, budget_class_lookup:budget_classes(id, code, name), budget_expense_category_lookup:budget_expense_categories(id, code, name)')
     .eq('is_active', true)
     .eq('is_posting', true)
     .order('finance_code')
