@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "djag-frems",
+      "name": "njss-crems",
       "dependencies": {
         "@hookform/resolvers": "^5.2.2",
         "@supabase/auth-helpers-nextjs": "^0.15.0",
