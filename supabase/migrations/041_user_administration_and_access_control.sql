@@ -772,11 +772,19 @@ GRANT SELECT, INSERT ON audit_logs TO authenticated;
 CREATE OR REPLACE FUNCTION njss_audit_logs_immutable()
 RETURNS TRIGGER
 LANGUAGE plpgsql
-AS $$
+AS $func$
 BEGIN
-  RAISE EXCEPTION 'Access Audit records are immutable evidence and cannot be %.', LOWER(TG_OP);
+  RAISE EXCEPTION
+    'Access Audit records are immutable evidence and cannot be %.',
+    CASE TG_OP
+      WHEN 'UPDATE' THEN 'updated'
+      WHEN 'DELETE' THEN 'deleted'
+      WHEN 'TRUNCATE' THEN 'truncated'
+      ELSE LOWER(TG_OP)
+    END
+  USING HINT = 'Append a correcting entry instead. Existing evidence is never rewritten.';
 END;
-$$;
+$func$;
 
 CREATE TRIGGER trg_audit_logs_immutable
   BEFORE UPDATE OR DELETE ON audit_logs
