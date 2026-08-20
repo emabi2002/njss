@@ -72,15 +72,25 @@ function LoginContent() {
         throw new Error("Please enter both email and password")
       }
 
-      await withLoginTimeout(signIn(email, password))
+      const { session } = await withLoginTimeout(signIn(email, password))
+      if (!session?.access_token || !session.refresh_token) {
+        throw new Error("Sign in succeeded, but no session was created. Please try again.")
+      }
 
-      const auditResponse = await authFetch('/api/account/session', { method: 'POST' })
-      if (!auditResponse.ok) {
-        console.warn('Login succeeded, but the session audit could not be recorded.')
+      const sessionResponse = await authFetch('/api/account/session', {
+        method: 'POST',
+        body: JSON.stringify({
+          accessToken: session.access_token,
+          refreshToken: session.refresh_token,
+        }),
+      })
+      if (!sessionResponse.ok) {
+        const result = await sessionResponse.json().catch(() => ({}))
+        throw new Error(result.error || 'Unable to establish the dashboard session.')
       }
 
       setSuccess("Login successful! Redirecting...")
-      router.replace(redirectTo)
+      window.location.replace(redirectTo)
 
     } catch (err: unknown) {
       console.error("Login error:", err)

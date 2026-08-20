@@ -23,7 +23,10 @@ export function createRequestSupabaseClient(request: NextRequest, response: Next
     cookieOptions: {
       name: SUPABASE_AUTH_COOKIE,
       path: '/',
-      sameSite: 'lax',
+      sameSite: 'none',
+      secure: true,
+      httpOnly: true,
+      partitioned: true,
     },
     cookies: {
       getAll() {

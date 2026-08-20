@@ -1,8 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
-import { createBrowserClient } from '@supabase/ssr'
 
 const SUPABASE_REQUEST_TIMEOUT_MS = 8000
-const SUPABASE_AUTH_COOKIE = 'njss-crems-auth'
 
 function requireValue(name: string, value: string | undefined) {
   const trimmed = value?.trim()
@@ -32,9 +30,10 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
 
 export const activeSupabaseUrl = supabaseUrl
 
-// Browser auth uses SSR-compatible cookies so Next.js proxy/API requests can
-// authenticate the same session. The service-role client below remains server-only.
-export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey, {
+// Browser API calls use localStorage so authentication remains reliable inside
+// cross-site preview iframes. Explicit login also synchronizes a protected
+// server cookie through /api/account/session for the dashboard RBAC proxy.
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: {
     fetch: fetchWithTimeout,
   },
@@ -43,11 +42,9 @@ export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: isSupabaseNetworkEnabled,
     detectSessionInUrl: isSupabaseNetworkEnabled,
     flowType: 'pkce',
-  },
-  cookieOptions: {
-    name: SUPABASE_AUTH_COOKIE,
-    path: '/',
-    sameSite: 'lax',
+    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    storageKey: 'njss-crems-auth',
+    lock: undefined,
   },
 })
 
