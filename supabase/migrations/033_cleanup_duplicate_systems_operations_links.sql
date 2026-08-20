@@ -27,7 +27,7 @@ SET label = 'Systems Operations', sort_order = 5, is_active = true, updated_at =
 WHERE code = 'systems_administration.systems_operations_heading';
 
 UPDATE menu_items
-SET label = 'Admin Dashboard', sort_order = 10, is_active = true, updated_at = NOW()
+SET label = 'Admin Dashboard', sort_order = 10, is_active = false, updated_at = NOW()
 WHERE code = 'systems_administration.dashboard';
 
 UPDATE menu_items
