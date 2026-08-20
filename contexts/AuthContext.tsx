@@ -148,12 +148,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn('RBAC profile load failed:', error),
         )
         loadPasswordState().catch((error) => console.warn('Password state load failed:', error))
-        logAccessEvent({
-          userId: session.user.id,
-          userEmail: session.user.email,
-          action: 'LOGIN',
-          module: 'AUTH',
-        }).catch((error) => console.warn('Login audit failed:', error))
       } else {
         setUser(null)
         setProfile(null)
@@ -166,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     loadSession()
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!mounted) return
 
       if (session?.user) {
@@ -184,14 +178,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn('RBAC profile load failed:', error),
         )
         loadPasswordState().catch((error) => console.warn('Password state load failed:', error))
-        if (event === 'SIGNED_IN') {
-          logAccessEvent({
-            userId: session.user.id,
-            userEmail: session.user.email,
-            action: 'LOGIN',
-            module: 'AUTH',
-          }).catch((error) => console.warn('Login audit failed:', error))
-        }
       } else {
         setUser(null)
         setProfile(null)

@@ -7,6 +7,7 @@ import { Eye, EyeOff, Lock, Mail, AlertCircle, CheckCircle2, Loader2 } from "luc
 import { NJSSLogo } from "../components/NJSSLogo"
 import { signIn } from "@/lib/auth"
 import { useAuth } from "@/contexts/AuthContext"
+import { authFetch } from "@/lib/auth-fetch"
 
 const LOGIN_TIMEOUT_MS = 10000
 
@@ -72,6 +73,12 @@ function LoginContent() {
       }
 
       await withLoginTimeout(signIn(email, password))
+
+      const auditResponse = await authFetch('/api/account/session', { method: 'POST' })
+      if (!auditResponse.ok) {
+        console.warn('Login succeeded, but the session audit could not be recorded.')
+      }
+
       setSuccess("Login successful! Redirecting...")
 
       window.location.assign(redirectTo)

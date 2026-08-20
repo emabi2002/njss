@@ -102,7 +102,7 @@ export type AuditInput = {
 export async function recordAudit(client: SupabaseClient | null, input: AuditInput) {
   try {
     const supabase = client || createAdminClient()
-    await supabase.from('audit_logs').insert({
+    const { error } = await supabase.from('audit_logs').insert({
       user_id: input.actorContext?.userId || null,
       user_email: input.actorContext?.email || null,
       user_name: input.actorContext?.name || null,
@@ -117,9 +117,13 @@ export async function recordAudit(client: SupabaseClient | null, input: AuditInp
       user_agent: input.request?.headers.get('user-agent') || null,
       metadata: input.metadata ? redactSensitive(input.metadata) : null,
     })
+
+    if (error) throw error
+    return true
   } catch (error) {
     // Audit must never mask or fail the security decision it is describing.
     console.error('Access Audit write failed:', error)
+    return false
   }
 }
 
