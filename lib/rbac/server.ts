@@ -5,6 +5,7 @@ import type { DataScopeType, PermissionCode, RbacRole, UserAccessContext } from 
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+const SUPABASE_AUTH_COOKIE = 'njss-crems-auth'
 
 function bearerToken(request: NextRequest) {
   const header = request.headers.get('authorization') || ''
@@ -19,12 +20,21 @@ export function createRequestSupabaseClient(request: NextRequest, response: Next
           headers: { Authorization: `Bearer ${bearerToken(request)}` },
         }
       : undefined,
+    cookieOptions: {
+      name: SUPABASE_AUTH_COOKIE,
+      path: '/',
+      sameSite: 'none',
+      secure: true,
+      httpOnly: true,
+      partitioned: true,
+    },
     cookies: {
       getAll() {
         return request.cookies.getAll()
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet, headers) {
         cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options))
+        Object.entries(headers).forEach(([name, value]) => response.headers.set(name, value))
       },
     },
   })

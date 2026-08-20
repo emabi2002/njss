@@ -30,7 +30,9 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
 
 export const activeSupabaseUrl = supabaseUrl
 
-// Client-side Supabase client with proper auth config
+// Browser API calls use localStorage so authentication remains reliable inside
+// cross-site preview iframes. Explicit login also synchronizes a protected
+// server cookie through /api/account/session for the dashboard RBAC proxy.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: {
     fetch: fetchWithTimeout,

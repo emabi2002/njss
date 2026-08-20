@@ -28,7 +28,7 @@ type Notice = { type: "ok" | "err"; text: string } | null
 const AUTHORITY_TYPES = [
   "GOVERNMENT_APPROPRIATION",
   "WARRANT",
-  "DJAG_ALLOCATION",
+  "NJSS_ALLOCATION",
   "TREASURY_FINANCE_AUTHORITY",
   "SUPPLEMENTAL_ALLOCATION",
   "DONOR_GRANT",
@@ -160,7 +160,7 @@ function AuthoritiesPanel({ year, authorities, sources, canCreate, canSubmit, ca
   canReject: boolean
   onAction: (fn: () => Promise<unknown>, success: string) => Promise<void>
 }) {
-  const [form, setForm] = useState({ authority_type: "DJAG_ALLOCATION", funding_source_id: "", source_agency: "DJAG", approved_amount: "", effective_date: today(), description: "", supporting_document_name: "", supporting_document_url: "" })
+  const [form, setForm] = useState({ authority_type: "NJSS_ALLOCATION", funding_source_id: "", source_agency: "NJSS", approved_amount: "", effective_date: today(), description: "", supporting_document_name: "", supporting_document_url: "" })
 
   const submit = () => onAction(() => createFundingAuthority({
     financial_year: year,

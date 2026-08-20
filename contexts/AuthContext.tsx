@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { getUserProfile, type AuthUser } from '@/lib/auth'
+import { authFetch } from '@/lib/auth-fetch'
 import type { Permission } from '@/lib/permissions'
 import type { RbacDataScope, RbacMenuItem, RbacModule } from '@/lib/rbac/types'
 import {
@@ -36,6 +37,9 @@ type AuthContextType = {
   canAll: (perms: Permission[]) => boolean
   canOnRecord: (perm: Permission, record: Parameters<typeof canAccessRecord>[1]) => boolean
   loading: boolean
+  /** null while unknown, true when an administrator-issued password is still in force. */
+  mustChangePassword: boolean | null
+  refreshPasswordState: () => Promise<void>
   /** Deprecated compatibility flag; always false because placeholder login is disabled. */
   isTestingFallback: boolean
   signOut: () => Promise<void>
@@ -56,6 +60,8 @@ const AuthContext = createContext<AuthContextType>({
   canAll: () => false,
   canOnRecord: () => false,
   loading: true,
+  mustChangePassword: null,
+  refreshPasswordState: async () => {},
   isTestingFallback: false,
   signOut: async () => {},
   refreshProfile: async () => {},
@@ -69,11 +75,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [menus, setMenus] = useState<RbacMenuItem[]>([])
   const [modules, setModules] = useState<RbacModule[]>([])
   const [loading, setLoading] = useState(true)
+  const [mustChangePassword, setMustChangePassword] = useState<boolean | null>(null)
+
+  const loadPasswordState = async () => {
+    try {
+      const res = await authFetch('/api/account/password')
+      if (!res.ok) {
+        setMustChangePassword(false)
+        return
+      }
+      const json = await res.json()
+      setMustChangePassword(Boolean(json.mustChangePassword))
+    } catch {
+      // Never block the session on this check.
+      setMustChangePassword(false)
+    }
+  }
 
   useEffect(() => {
+    // Navigation metadata is authenticated-only (migrations 016/029 revoke anon
+    // access), so skip the round-trip entirely when there is no session and clear
+    // any menus left over from a previous one.
+    if (!user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMenus([])
+      setModules([])
+      return
+    }
     loadRbacNavigation(permissions).then(setMenus)
     loadRbacModules().then(setModules)
-  }, [permissions])
+  }, [permissions, user])
 
   useEffect(() => {
     let mounted = true
@@ -116,24 +147,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loadAccessContext(session.user, session.user.email || '').catch((error) =>
           console.warn('RBAC profile load failed:', error),
         )
-        logAccessEvent({
-          userId: session.user.id,
-          userEmail: session.user.email,
-          action: 'LOGIN',
-          module: 'AUTH',
-        }).catch((error) => console.warn('Login audit failed:', error))
+        loadPasswordState().catch((error) => console.warn('Password state load failed:', error))
       } else {
         setUser(null)
         setProfile(null)
         setPermissions([])
         setScopes([])
+        setMustChangePassword(null)
         setLoading(false)
       }
     }
 
     loadSession()
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!mounted) return
 
       if (session?.user) {
@@ -150,19 +177,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loadAccessContext(session.user, session.user.email || '').catch((error) =>
           console.warn('RBAC profile load failed:', error),
         )
-        if (event === 'SIGNED_IN') {
-          logAccessEvent({
-            userId: session.user.id,
-            userEmail: session.user.email,
-            action: 'LOGIN',
-            module: 'AUTH',
-          }).catch((error) => console.warn('Login audit failed:', error))
-        }
+        loadPasswordState().catch((error) => console.warn('Password state load failed:', error))
       } else {
         setUser(null)
         setProfile(null)
         setPermissions([])
         setScopes([])
+        setMustChangePassword(null)
       }
 
       setLoading(false)
@@ -210,6 +231,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(null)
       setPermissions([])
       setScopes([])
+      setMustChangePassword(null)
       if (typeof window !== 'undefined') window.location.href = '/login'
     }
   }
@@ -232,6 +254,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  const refreshPasswordState = async () => {
+    await loadPasswordState()
+  }
+
   return (
     <AuthContext.Provider
       value={{
@@ -248,6 +274,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         canAll,
         canOnRecord,
         loading,
+        mustChangePassword,
+        refreshPasswordState,
         isTestingFallback: false,
         signOut: handleSignOut,
         refreshProfile,

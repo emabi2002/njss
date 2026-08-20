@@ -61,11 +61,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const pathname = usePathname()
   const router = useRouter()
-  const { user, profile, role, loading, signOut, menus, modules } = useAuth()
+  const { user, profile, role, loading, signOut, menus, modules, mustChangePassword } = useAuth()
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login")
   }, [loading, user, router])
+
+  // An administrator-issued password must be replaced before any NJSS module
+  // becomes reachable, including by direct URL.
+  useEffect(() => {
+    if (!loading && user && mustChangePassword === true) router.replace("/set-password")
+  }, [loading, user, mustChangePassword, router])
 
   const [org, setOrg] = useState<OrganizationProfile>(DEFAULT_ORG)
   const [failedLogo, setFailedLogo] = useState("")
@@ -190,7 +196,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setExpandedGroups((current) => ({ ...current, [code]: !current[code] }))
   }
 
-  if (loading || !user) {
+  if (loading || !user || mustChangePassword === true) {
     return (
       <div className="min-h-screen bg-[#F6F8FB] flex items-center justify-center">
         <div className="text-center">

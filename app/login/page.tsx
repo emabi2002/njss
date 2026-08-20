@@ -7,6 +7,7 @@ import { Eye, EyeOff, Lock, Mail, AlertCircle, CheckCircle2, Loader2 } from "luc
 import { NJSSLogo } from "../components/NJSSLogo"
 import { signIn } from "@/lib/auth"
 import { useAuth } from "@/contexts/AuthContext"
+import { authFetch } from "@/lib/auth-fetch"
 
 const LOGIN_TIMEOUT_MS = 10000
 
@@ -55,10 +56,10 @@ function LoginContent() {
   // Redirect if already logged in with a REAL session (ignore the testing-mode
   // placeholder identity so the login page stays reachable to switch roles).
   useEffect(() => {
-    if (!authLoading && user && !isTestingFallback) {
-      router.push(redirectTo)
+    if (!authLoading && user && !isTestingFallback && !loading) {
+      router.replace(redirectTo)
     }
-  }, [user, authLoading, isTestingFallback, router, redirectTo])
+  }, [user, authLoading, isTestingFallback, loading, router, redirectTo])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -71,10 +72,26 @@ function LoginContent() {
         throw new Error("Please enter both email and password")
       }
 
-      await withLoginTimeout(signIn(email, password))
-      setSuccess("Login successful! Redirecting...")
+      const { session } = await withLoginTimeout(signIn(email, password))
+      if (!session?.access_token || !session.refresh_token) {
+        throw new Error("Sign in succeeded, but no session was created. Please try again.")
+      }
 
-      window.location.assign(redirectTo)
+      const sessionResponse = await authFetch('/api/account/session', {
+        method: 'POST',
+        body: JSON.stringify({
+          accessToken: session.access_token,
+          refreshToken: session.refresh_token,
+        }),
+      })
+      if (!sessionResponse.ok) {
+        const result = await sessionResponse.json().catch(() => ({}))
+        throw new Error(result.error || 'Unable to establish the dashboard session.')
+      }
+
+      setSuccess("Login successful! Redirecting...")
+      window.location.replace(redirectTo)
+
     } catch (err: unknown) {
       console.error("Login error:", err)
       if (err instanceof Error) {
