@@ -56,10 +56,10 @@ function LoginContent() {
   // Redirect if already logged in with a REAL session (ignore the testing-mode
   // placeholder identity so the login page stays reachable to switch roles).
   useEffect(() => {
-    if (!authLoading && user && !isTestingFallback) {
-      router.push(redirectTo)
+    if (!authLoading && user && !isTestingFallback && !loading) {
+      router.replace(redirectTo)
     }
-  }, [user, authLoading, isTestingFallback, router, redirectTo])
+  }, [user, authLoading, isTestingFallback, loading, router, redirectTo])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -80,8 +80,8 @@ function LoginContent() {
       }
 
       setSuccess("Login successful! Redirecting...")
+      router.replace(redirectTo)
 
-      window.location.assign(redirectTo)
     } catch (err: unknown) {
       console.error("Login error:", err)
       if (err instanceof Error) {
