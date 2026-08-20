@@ -65,7 +65,7 @@ UPDATE menu_items SET module_code = 'administration', parent_code = NULL, label 
 WHERE code = 'system.settings';
 
 INSERT INTO menu_items (code, module_code, parent_code, label, href, icon, sort_order, required_permissions, is_active)
-VALUES ('administration.users_access', 'administration', NULL, 'Users & Access', '/dashboard/users?tab=users', 'UserCog', 40, ARRAY['users.manage'], true)
+VALUES ('systems_administration.users_access', 'systems_administration', NULL, 'Users & Access', '/dashboard/users', 'UserCog', 15, ARRAY['users.manage'], true)
 ON CONFLICT (code) DO UPDATE SET
   module_code = EXCLUDED.module_code,
   parent_code = EXCLUDED.parent_code,
@@ -78,7 +78,19 @@ ON CONFLICT (code) DO UPDATE SET
   updated_at = NOW();
 
 UPDATE menu_items SET is_active = false, updated_at = NOW()
-WHERE code IN ('administration.uat', 'systems_administration.users_access');
+WHERE code IN ('administration.users', 'administration.users_access', 'administration.uat');
+
+UPDATE menu_items
+SET module_code = 'systems_administration',
+    parent_code = NULL,
+    label = 'Users & Access',
+    href = '/dashboard/users',
+    icon = 'UserCog',
+    sort_order = 15,
+    required_permissions = ARRAY['users.manage'],
+    is_active = true,
+    updated_at = NOW()
+WHERE code = 'systems_administration.users_access';
 
 INSERT INTO menu_items (code, module_code, parent_code, label, href, icon, sort_order, required_permissions, is_active)
 VALUES ('systems_administration.systems_operations_heading', 'systems_administration', NULL, 'Systems Operations', '#systems-operations', 'Gauge', 5, ARRAY['operations.view','operations.manage','settings.manage'], true)
@@ -93,7 +105,7 @@ ON CONFLICT (code) DO UPDATE SET
   is_active = true,
   updated_at = NOW();
 
-UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Admin Dashboard', href = '/dashboard/admin/operations', icon = 'Gauge', sort_order = 10, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
+UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Admin Dashboard', href = '/dashboard/admin/operations', icon = 'Gauge', sort_order = 10, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = false, updated_at = NOW()
 WHERE code = 'systems_administration.dashboard';
 
 UPDATE menu_items SET module_code = 'systems_administration', parent_code = NULL, label = 'Systems Health', sort_order = 20, required_permissions = ARRAY['operations.view','operations.manage','settings.manage'], is_active = true, updated_at = NOW()
