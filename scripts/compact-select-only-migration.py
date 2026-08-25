@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# One-off migration used to prove the approved compact select-only behavior.
 root = Path.cwd()
 component_path = root / "components/LookupSelect.tsx"
 page_path = root / "app/dashboard/budget-template/page.tsx"
