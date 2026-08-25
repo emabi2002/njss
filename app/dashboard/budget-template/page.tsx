@@ -21,6 +21,7 @@ import {
   MONTHS,
   createAuditEvent,
   createBudgetCycle,
+  createBudgetDivision,
   createDraftSubmission,
   deleteBudgetLine,
   getBudgetDashboard,
@@ -42,6 +43,7 @@ import { exportToExcel, exportToPDF, rowsToPdfTable } from "@/lib/export"
 import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadActiveUsers, loadLookup } from "@/lib/lookups"
 import { findDuplicateBudgetCycle, selectBudgetCycle } from "@/lib/budget-cycle-ui"
+import { findDuplicateBudgetDivision } from "@/lib/budget-division-ui"
 
 type FundingSource = { id: string; code: string; name: string }
 type LookupState = {
@@ -200,6 +202,8 @@ export default function BudgetTemplatePage() {
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [selectedRow, setSelectedRow] = useState("")
   const [divisionSearch, setDivisionSearch] = useState("")
+  const [showDivisionForm, setShowDivisionForm] = useState(false)
+  const [newDivision, setNewDivision] = useState({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
   const [showCycleForm, setShowCycleForm] = useState(false)
   const [newCycle, setNewCycle] = useState({ budget_year: String(new Date().getFullYear() + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
   const [draftHeader, setDraftHeader] = useState({ cycle_id: "", division_id: "", budget_ceiling: "", submission_reference: "" })
@@ -447,6 +451,54 @@ export default function BudgetTemplatePage() {
         setMessage({ type: "err", text: `An ${cycleType} budget cycle already exists for FY${budgetYear}. Refresh the list and select the existing cycle.` })
       } else {
         setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not add budget cycle." })
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addDivision = async () => {
+    setMessage(null)
+    if (!canAdmin) return
+
+    const divisionCode = newDivision.code.trim().toUpperCase()
+    const divisionName = newDivision.name.trim()
+    const costCentreCode = newDivision.cost_centre_code.trim().toUpperCase()
+    const costCentreName = newDivision.cost_centre_name.trim()
+
+    if (!divisionCode || !divisionName) {
+      setMessage({ type: "err", text: "Complete the division code and division name before creating a division / cost centre." })
+      return
+    }
+
+    const duplicate = findDuplicateBudgetDivision(lookups.divisions, divisionCode)
+    if (duplicate) {
+      setDivisionSearch("")
+      setDraftHeader((header) => ({ ...header, division_id: duplicate.id }))
+      setMessage({ type: "err", text: `Division code ${divisionCode} already exists: ${duplicate.name}. It has been selected from the list instead.` })
+      return
+    }
+
+    setSaving(true)
+    try {
+      const created = await createBudgetDivision({
+        code: divisionCode,
+        name: divisionName,
+        cost_centre_code: costCentreCode || null,
+        cost_centre_name: costCentreName || null,
+      })
+      await loadDashboard()
+      setDivisionSearch("")
+      setDraftHeader((header) => ({ ...header, division_id: created.id }))
+      setShowDivisionForm(false)
+      setNewDivision({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
+      setMessage({ type: "ok", text: "Division / cost centre added to the controlled register and selected for this draft." })
+    } catch (err) {
+      const errorCode = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code || "") : ""
+      if (errorCode === "23505") {
+        setMessage({ type: "err", text: `Division code ${divisionCode} already exists. Refresh the list and select the existing division.` })
+      } else {
+        setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not add division / cost centre." })
       }
     } finally {
       setSaving(false)
@@ -787,15 +839,52 @@ export default function BudgetTemplatePage() {
                   <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
                   <input value={divisionSearch} onChange={(e) => setDivisionSearch(e.target.value)} className="input pl-8" placeholder="Search division" />
                 </div>
-                <select value={draftHeader.division_id} onChange={(e) => setDraftHeader((h) => ({ ...h, division_id: e.target.value }))} className="input mt-2">
-                  <option value="">Select active division from database</option>
-                  {filteredDivisions.map((division) => (
-                    <option key={division.id} value={division.id}>
-                      {division.code} — {division.name} — {division.cost_centre_code || division.cost_centre_name || "No cost centre"}
-                    </option>
-                  ))}
-                </select>
-                {filteredDivisions.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No matching database record found. Use central Reference Data maintenance if you are authorised.</p>}
+                <div className="mt-2 flex items-center gap-2">
+                  <select value={draftHeader.division_id} onChange={(e) => setDraftHeader((h) => ({ ...h, division_id: e.target.value }))} className="input min-w-0 flex-1">
+                    <option value="">Select active division from database</option>
+                    {filteredDivisions.map((division) => (
+                      <option key={division.id} value={division.id}>
+                        {division.code} — {division.name} — {division.cost_centre_code || division.cost_centre_name || "No cost centre"}
+                      </option>
+                    ))}
+                  </select>
+                  {canAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDivisionForm((open) => !open)
+                        setMessage(null)
+                      }}
+                      aria-label={showDivisionForm ? "Close add division form" : "Add division / cost centre"}
+                      aria-expanded={showDivisionForm}
+                      title={showDivisionForm ? "Close add division form" : "Add division / cost centre"}
+                      className="inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                    >
+                      <Plus className={`h-5 w-5 transition-transform ${showDivisionForm ? "rotate-45" : ""}`} />
+                    </button>
+                  )}
+                </div>
+                {canAdmin && showDivisionForm && (
+                  <div className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-900">Add Division / Cost Centre</p>
+                      <p className="mt-0.5 text-[11px] text-emerald-800">Create a missing division in the controlled budget-division register.</p>
+                    </div>
+                    <input className="input" placeholder="Division code, e.g. ACC" value={newDivision.code} onChange={(e) => setNewDivision((division) => ({ ...division, code: e.target.value }))} />
+                    <input className="input" placeholder="Division name" value={newDivision.name} onChange={(e) => setNewDivision((division) => ({ ...division, name: e.target.value }))} />
+                    <input className="input" placeholder="Cost centre code" value={newDivision.cost_centre_code} onChange={(e) => setNewDivision((division) => ({ ...division, cost_centre_code: e.target.value }))} />
+                    <input className="input" placeholder="Cost centre name" value={newDivision.cost_centre_name} onChange={(e) => setNewDivision((division) => ({ ...division, cost_centre_name: e.target.value }))} />
+                    <div className="flex gap-2 pt-1">
+                      <button type="button" onClick={() => setShowDivisionForm(false)} disabled={saving} className="btn-light flex-1 justify-center">
+                        Cancel
+                      </button>
+                      <button type="button" onClick={addDivision} disabled={saving} className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                        <Plus className="h-4 w-4" /> {saving ? "Creating..." : "Create"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {filteredDivisions.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No matching database record found. Use the + button to add a division if you are authorised.</p>}
                 {restrictedDivisionUser && <p className="mt-1 text-[11px] text-slate-500">Division list is restricted by your assigned profile where possible.</p>}
               </Field>
               <Field label="Budget ceiling">
