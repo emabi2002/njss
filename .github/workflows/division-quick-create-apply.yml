@@ -1,0 +1,64 @@
+name: Division Quick Create Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/division-quick-create-migration.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+      NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED: "false"
+      NEXT_PUBLIC_RBAC_ENFORCED: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Read Next.js client component guide
+        shell: bash
+        run: |
+          set -euo pipefail
+          DOC="$(find node_modules/next/dist/docs -type f -name 'use-client.md' | head -n 1)"
+          test -n "$DOC"
+          sed -n '1,220p' "$DOC"
+
+      - name: Apply division quick-create migration
+        run: python3 scripts/division-quick-create-migration.py
+
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          bun test lib/budget-division-ui.test.js
+          bun run lint
+          bun run typecheck
+          bun run build
+
+      - name: Commit verified change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "OpenAI ChatGPT"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm scripts/division-quick-create-migration.py
+          git add app/dashboard/budget-template/page.tsx lib/budget-division-ui.ts lib/budget-division-ui.test.js
+          git diff --cached --check
+          git commit -m "feat: add division quick-create UI"
+          git push origin HEAD:main
