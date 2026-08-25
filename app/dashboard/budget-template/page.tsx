@@ -1122,6 +1122,7 @@ export default function BudgetTemplatePage() {
                           <SheetTd>
                             <LookupSelect
                               compact
+                              compactSelectOnly
                               disabled={selectedLocked}
                               value={row.priority_level_id}
                               options={priorityLevels}
@@ -1142,6 +1143,7 @@ export default function BudgetTemplatePage() {
                           <SheetTd>
                             <LookupSelect
                               compact
+                              compactSelectOnly
                               disabled={selectedLocked}
                               value={row.procurement_method_id}
                               options={procurementMethods}
@@ -1152,6 +1154,7 @@ export default function BudgetTemplatePage() {
                           <SheetTd>
                             <LookupSelect
                               compact
+                              compactSelectOnly
                               disabled={selectedLocked}
                               value={row.responsible_officer_id}
                               options={officers}
