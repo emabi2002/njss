@@ -41,6 +41,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { exportToExcel, exportToPDF, rowsToPdfTable } from "@/lib/export"
 import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadActiveUsers, loadLookup } from "@/lib/lookups"
+import { findDuplicateBudgetCycle, selectBudgetCycle } from "@/lib/budget-cycle-ui"
 
 type FundingSource = { id: string; code: string; name: string }
 type LookupState = {
@@ -199,6 +200,7 @@ export default function BudgetTemplatePage() {
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [selectedRow, setSelectedRow] = useState("")
   const [divisionSearch, setDivisionSearch] = useState("")
+  const [showCycleForm, setShowCycleForm] = useState(false)
   const [newCycle, setNewCycle] = useState({ budget_year: String(new Date().getFullYear() + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
   const [draftHeader, setDraftHeader] = useState({ cycle_id: "", division_id: "", budget_ceiling: "", submission_reference: "" })
 
@@ -278,15 +280,17 @@ export default function BudgetTemplatePage() {
       setOfficers(officerRows)
       setSubmissions((dashboard.submissions || []) as BudgetSubmission[])
       setCashflow((dashboard.cashflow || []) as CashflowRow[])
-      if (!draftHeader.cycle_id && lookupData.cycles?.[0]) {
-        setDraftHeader((h) => ({ ...h, cycle_id: lookupData.cycles[0].id, budget_ceiling: String(lookupData.cycles[0].department_ceiling || "") }))
-      }
+      setDraftHeader((header) => {
+        if (header.cycle_id || !lookupData.cycles?.[0]) return header
+        const defaultCycle = lookupData.cycles[0]
+        return { ...header, cycle_id: defaultCycle.id, budget_ceiling: String(defaultCycle.department_ceiling ?? "") }
+      })
     } catch (err) {
       setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not load the budget template workspace." })
     } finally {
       setLoading(false)
     }
-  }, [draftHeader.cycle_id])
+  }, [])
 
   const loadSubmission = useCallback(async (id: string) => {
     if (!id) {
@@ -369,6 +373,10 @@ export default function BudgetTemplatePage() {
     )
   }
 
+  const selectCycle = (cycleId: string) => {
+    setDraftHeader((header) => ({ ...header, ...selectBudgetCycle(lookups.cycles, cycleId) }))
+  }
+
   const createSubmission = async () => {
     setMessage(null)
     if (!selectedCycle || !selectedDivision) {
@@ -399,23 +407,47 @@ export default function BudgetTemplatePage() {
   }
 
   const addCycle = async () => {
-    if (!canAdmin || !newCycle.budget_year.trim() || !newCycle.cycle_type.trim() || !newCycle.name.trim()) return
+    setMessage(null)
+    if (!canAdmin) return
+
+    const budgetYear = Number(newCycle.budget_year)
+    const cycleType = newCycle.cycle_type.trim().toUpperCase()
+    const cycleName = newCycle.name.trim()
+
+    if (!Number.isInteger(budgetYear) || budgetYear < 2000 || !cycleType || !cycleName) {
+      setMessage({ type: "err", text: "Complete the financial year, cycle type and cycle name before creating a budget cycle." })
+      return
+    }
+
+    const duplicate = findDuplicateBudgetCycle(lookups.cycles, budgetYear, cycleType)
+    if (duplicate) {
+      setDraftHeader((header) => ({ ...header, ...selectBudgetCycle(lookups.cycles, duplicate.id) }))
+      setMessage({ type: "err", text: `An ${cycleType} budget cycle already exists for FY${budgetYear}: ${duplicate.name}. It has been selected from the list instead.` })
+      return
+    }
+
     setSaving(true)
     try {
       const created = await createBudgetCycle({
-        budget_year: Number(newCycle.budget_year),
-        cycle_type: newCycle.cycle_type,
-        name: newCycle.name,
+        budget_year: budgetYear,
+        cycle_type: cycleType,
+        name: cycleName,
         submission_deadline: newCycle.submission_deadline || null,
         department_ceiling: Number(newCycle.department_ceiling || 0),
         instructions: "Created from Budget Preparation controlled setup.",
       })
-      setDraftHeader((h) => ({ ...h, cycle_id: created.id, budget_ceiling: String(created.department_ceiling || "") }))
-      setNewCycle({ budget_year: String(created.budget_year + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
       await loadDashboard()
-      setMessage({ type: "ok", text: "Budget cycle added to the controlled budget cycle register." })
+      setDraftHeader((header) => ({ ...header, cycle_id: created.id, budget_ceiling: String(created.department_ceiling ?? "") }))
+      setShowCycleForm(false)
+      setNewCycle({ budget_year: String(created.budget_year + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
+      setMessage({ type: "ok", text: "Budget cycle added to the controlled register and selected for this draft." })
     } catch (err) {
-      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not add budget cycle." })
+      const errorCode = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code || "") : ""
+      if (errorCode === "23505") {
+        setMessage({ type: "err", text: `An ${cycleType} budget cycle already exists for FY${budgetYear}. Refresh the list and select the existing cycle.` })
+      } else {
+        setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not add budget cycle." })
+      }
     } finally {
       setSaving(false)
     }
@@ -703,27 +735,50 @@ export default function BudgetTemplatePage() {
             </div>
             <div className="space-y-3 p-4">
               <Field label="Budget cycle">
-                <select value={draftHeader.cycle_id} onChange={(e) => setDraftHeader((h) => ({ ...h, cycle_id: e.target.value }))} className="input">
-                  <option value="">Select cycle from database</option>
-                  {lookups.cycles.map((cycle) => (
-                    <option key={cycle.id} value={cycle.id}>
-                      {cycle.name}
-                    </option>
-                  ))}
-                </select>
-                {canAdmin && (
-                  <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                    <p className="text-[11px] text-amber-900">
-                      Controlled master data only. Add missing cycles in central Ledger / Reference Data, then refresh this selector.
-                    </p>
-                    <input className="input" placeholder="Financial year, e.g. 2026" type="number" value={newCycle.budget_year} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, budget_year: e.target.value }))} />
+                <div className="flex items-center gap-2">
+                  <select value={draftHeader.cycle_id} onChange={(e) => selectCycle(e.target.value)} className="input min-w-0 flex-1">
+                    <option value="">Select cycle from database</option>
+                    {lookups.cycles.map((cycle) => (
+                      <option key={cycle.id} value={cycle.id}>
+                        {cycle.name}
+                      </option>
+                    ))}
+                  </select>
+                  {canAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCycleForm((open) => !open)
+                        setMessage(null)
+                      }}
+                      aria-label={showCycleForm ? "Close add budget cycle form" : "Add budget cycle"}
+                      aria-expanded={showCycleForm}
+                      title={showCycleForm ? "Close add budget cycle form" : "Add budget cycle"}
+                      className="inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                    >
+                      <Plus className={`h-5 w-5 transition-transform ${showCycleForm ? "rotate-45" : ""}`} />
+                    </button>
+                  )}
+                </div>
+                {canAdmin && showCycleForm && (
+                  <div className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-900">Add Budget Cycle</p>
+                      <p className="mt-0.5 text-[11px] text-emerald-800">Create a missing cycle in the controlled budget-cycle register.</p>
+                    </div>
+                    <input className="input" placeholder="Financial year, e.g. 2027" type="number" value={newCycle.budget_year} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, budget_year: e.target.value }))} />
                     <input className="input" placeholder="Cycle type, e.g. ANNUAL" value={newCycle.cycle_type} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, cycle_type: e.target.value }))} />
                     <input className="input" placeholder="Cycle name" value={newCycle.name} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, name: e.target.value }))} />
                     <input className="input" placeholder="Submission deadline" type="date" value={newCycle.submission_deadline} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, submission_deadline: e.target.value }))} />
-                    <input className="input text-right" placeholder="Default budget ceiling" type="number" value={newCycle.department_ceiling} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, department_ceiling: e.target.value }))} />
-                    <button type="button" onClick={addCycle} disabled={saving} className="btn-primary w-full justify-center">
-                      Create controlled budget cycle
-                    </button>
+                    <input className="input text-right" placeholder="Default budget ceiling" type="number" min="0" value={newCycle.department_ceiling} onChange={(e) => setNewCycle((cycle) => ({ ...cycle, department_ceiling: e.target.value }))} />
+                    <div className="flex gap-2 pt-1">
+                      <button type="button" onClick={() => setShowCycleForm(false)} disabled={saving} className="btn-light flex-1 justify-center">
+                        Cancel
+                      </button>
+                      <button type="button" onClick={addCycle} disabled={saving} className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                        <Plus className="h-4 w-4" /> {saving ? "Creating..." : "Create"}
+                      </button>
+                    </div>
                   </div>
                 )}
               </Field>
