@@ -107,7 +107,7 @@ jobs:
           git config user.name "OpenAI ChatGPT"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm scripts/budget-cycle-ui-migration.py
-          git add app/dashboard/budget-template/page.tsx lib/budget-cycle-ui.ts lib/budget-cycle-ui.test.js .github/workflows/ci.yml
+          git add app/dashboard/budget-template/page.tsx lib/budget-cycle-ui.ts lib/budget-cycle-ui.test.js
           git diff --cached --check
           git commit -m "feat: add budget cycle quick-create UI"
           git push origin HEAD:main
