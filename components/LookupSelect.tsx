@@ -38,6 +38,7 @@ type LookupSelectProps = {
   onCreated?: (option: LookupOption) => void
   onRefresh?: () => Promise<void> | void
   compact?: boolean
+  compactSelectOnly?: boolean
   className?: string
 }
 
@@ -67,6 +68,7 @@ export function LookupSelect({
   onCreated,
   onRefresh,
   compact = false,
+  compactSelectOnly = false,
   className = "",
 }: LookupSelectProps) {
   const [query, setQuery] = useState("")
@@ -142,21 +144,23 @@ export function LookupSelect({
       <div className={`min-w-0 ${className}`}>
         {label && <label className="sr-only">{label} {required && "required"}</label>}
         <div className="flex min-w-0 items-center gap-1">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value)
-                if (!event.target.value) onChange("")
-              }}
-              disabled={disabled}
-              placeholder={options.length === 0 ? unauthorizedEmptyLabel : placeholder}
-              list={listId}
-              className="h-8 w-full rounded-md border border-slate-200 bg-white py-1 pl-7 pr-2 text-xs focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
-            />
-            <datalist id={listId}>{filtered.map((option) => <option key={option.id} value={optionLabel(option)} />)}</datalist>
-          </div>
+          {!compactSelectOnly && (
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  if (!event.target.value) onChange("")
+                }}
+                disabled={disabled}
+                placeholder={options.length === 0 ? unauthorizedEmptyLabel : placeholder}
+                list={listId}
+                className="h-8 w-full rounded-md border border-slate-200 bg-white py-1 pl-7 pr-2 text-xs focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
+              />
+              <datalist id={listId}>{filtered.map((option) => <option key={option.id} value={optionLabel(option)} />)}</datalist>
+            </div>
+          )}
           <select
             value={value}
             onChange={(event) => {

@@ -1032,6 +1032,7 @@ export default function BudgetTemplatePage() {
                           <SheetTd sticky left={70}>
                             <LookupSelect
                               compact
+                              compactSelectOnly
                               disabled={selectedLocked}
                               value={lookups.activityTemplates.find((activity) => activity.code === row.activity_reference)?.id || ""}
                               options={activityOptions}
@@ -1042,6 +1043,7 @@ export default function BudgetTemplatePage() {
                           <SheetTd sticky left={200} required invalid={!isEmptyRow(row) && !row.expense_ledger_id}>
                             <LookupSelect
                               compact
+                              compactSelectOnly
                               disabled={selectedLocked}
                               value={row.expense_ledger_id}
                               options={ledgerOptions}
@@ -1086,6 +1088,7 @@ export default function BudgetTemplatePage() {
                           <SheetTd>
                             <LookupSelect
                               compact
+                              compactSelectOnly
                               disabled={selectedLocked}
                               value={row.unit_of_measure_id}
                               options={units}
