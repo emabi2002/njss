@@ -1,0 +1,32 @@
+name: Compact Select Only Check
+
+on:
+  push:
+    branches: [cleanup-three-lookup-columns]
+    paths:
+      - 'components/LookupSelect.tsx'
+      - 'app/dashboard/budget-template/page.tsx'
+      - 'lib/lookup-select-compact.test.js'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+      NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED: "false"
+      NEXT_PUBLIC_RBAC_ENFORCED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Regression test
+        run: bun test lib/lookup-select-compact.test.js
+      - name: Full validation
+        run: |
+          bun run lint
+          bun run typecheck
+          bun run build
