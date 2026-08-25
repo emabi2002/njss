@@ -523,6 +523,7 @@ export default function NewFF4Page() {
         <div className="grid md:grid-cols-2 gap-4">
           <LookupSelect
             label="Payee Type"
+            selectOnly
             value={formData.payee_type_id}
             options={payeeTypes}
             placeholder="Select payee type"
@@ -543,6 +544,7 @@ export default function NewFF4Page() {
             <LookupSelect
               label="Payee / Supplier"
               required
+              selectOnly
               value={formData.supplier_id}
               options={suppliers}
               placeholder="Search supplier/payee"
