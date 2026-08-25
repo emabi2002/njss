@@ -1,0 +1,62 @@
+name: Apply Funding Lookup Actions
+
+on:
+  push:
+    branches: [feature/funding-lookup-add-actions]
+    paths:
+      - scripts/apply_funding_lookup_add_actions.py
+      - .github/workflows/apply-funding-lookup-actions.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+      NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED: "false"
+      NEXT_PUBLIC_RBAC_ENFORCED: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: feature/funding-lookup-add-actions
+          fetch-depth: 0
+
+      - name: Apply feature
+        run: python scripts/apply_funding_lookup_add_actions.py
+
+      - name: Run funding lookup regression
+        run: node --test scripts/funding-lookup-add-actions.test.mjs
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build
+        run: bun run build
+
+      - name: Commit feature
+        run: |
+          if git diff --quiet -- app/dashboard/budget/funding/page.tsx lib/api.ts; then
+            echo "No production changes to commit."
+            exit 0
+          fi
+          git config user.name "emabi2002"
+          git config user.email "emabi2002@gmail.com"
+          git add app/dashboard/budget/funding/page.tsx lib/api.ts
+          git commit -m "feat: add governed funding lookup actions"
+          git push origin HEAD:feature/funding-lookup-add-actions
