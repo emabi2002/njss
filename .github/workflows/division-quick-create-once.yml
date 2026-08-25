@@ -1,0 +1,310 @@
+name: Division Quick Create One-Off
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/division-quick-create-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+      NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED: "false"
+      NEXT_PUBLIC_RBAC_ENFORCED: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Read relevant Next.js client-component guide
+        shell: bash
+        run: |
+          set -euo pipefail
+          DOC="$(find node_modules/next/dist/docs -type f \( -name 'use-client.md' -o -name 'use-client.mdx' \) | head -n 1 || true)"
+          if [ -z "$DOC" ]; then
+            DOC="$(grep -RIl --include='*.md' --include='*.mdx' "'use client'" node_modules/next/dist/docs | head -n 1 || true)"
+          fi
+          if [ -z "$DOC" ]; then
+            echo "Could not locate a relevant Next.js client-component guide."
+            exit 1
+          fi
+          echo "Reading $DOC before implementation"
+          sed -n '1,220p' "$DOC"
+
+      - name: Apply test-driven division quick-create change
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          root = Path.cwd()
+          page = root / "app/dashboard/budget-template/page.tsx"
+          helper = root / "lib/budget-division-ui.ts"
+          test = root / "lib/budget-division-ui.test.js"
+
+          test_content = '''import { expect, test } from "bun:test"
+          import { readFile } from "node:fs/promises"
+
+          async function loadSubject() {
+            try {
+              return await import("./budget-division-ui.ts")
+            } catch {
+              return {}
+            }
+          }
+
+          const divisions = [
+            { id: "division-acc", code: "ACC", name: "Accounts Section", cost_centre_code: "CC-01", cost_centre_name: "Accounts" },
+            { id: "division-hr", code: "HR", name: "Human Resources", cost_centre_code: null, cost_centre_name: null },
+          ]
+
+          test("detects an existing division code regardless of case and whitespace", async () => {
+            const subject = await loadSubject()
+            expect(typeof subject.findDuplicateBudgetDivision).toBe("function")
+            expect(subject.findDuplicateBudgetDivision(divisions, " acc ")?.id).toBe("division-acc")
+          })
+
+          test("budget preparation exposes an administrator division quick-add control", async () => {
+            const source = await readFile(new URL("../app/dashboard/budget-template/page.tsx", import.meta.url), "utf8")
+            expect(source).toContain("const [showDivisionForm, setShowDivisionForm] = useState(false)")
+            expect(source).toContain('aria-label={showDivisionForm ? "Close add division form" : "Add division / cost centre"}')
+            expect(source).toContain("{canAdmin && showDivisionForm && (")
+            expect(source).toContain("onClick={addDivision}")
+          })
+          '''
+
+          helper_content = '''export type BudgetDivisionOption = {
+            id: string
+            code: string
+            name: string
+            cost_centre_code?: string | null
+            cost_centre_name?: string | null
+          }
+
+          const normalizeDivisionCode = (value: string) => value.trim().toUpperCase()
+
+          export function findDuplicateBudgetDivision<T extends BudgetDivisionOption>(divisions: T[], code: string): T | undefined {
+            const normalizedCode = normalizeDivisionCode(code)
+            return divisions.find((division) => normalizeDivisionCode(division.code) === normalizedCode)
+          }
+          '''
+
+          def run(command, expect_failure=False):
+              print("+", " ".join(command), flush=True)
+              result = subprocess.run(command, cwd=root)
+              if expect_failure:
+                  if result.returncode == 0:
+                      raise RuntimeError("Expected RED test failure before implementation, but the test passed")
+                  print("RED confirmed: division quick-create behavior is absent before implementation.", flush=True)
+                  return
+              if result.returncode != 0:
+                  raise subprocess.CalledProcessError(result.returncode, command)
+
+          def replace_once(source, old, new, label):
+              count = source.count(old)
+              if count != 1:
+                  raise RuntimeError(f"Expected exactly one {label} block, found {count}")
+              return source.replace(old, new, 1)
+
+          # RED: test first and confirm failure for the missing feature.
+          test.write_text(test_content)
+          run(["bun", "test", "lib/budget-division-ui.test.js"], expect_failure=True)
+
+          # GREEN: implement only the approved division quick-create behavior.
+          helper.write_text(helper_content)
+          source = page.read_text()
+
+          source = replace_once(
+              source,
+              '  createBudgetCycle,\n  createDraftSubmission,\n',
+              '  createBudgetCycle,\n  createBudgetDivision,\n  createDraftSubmission,\n',
+              "createBudgetDivision import",
+          )
+
+          source = replace_once(
+              source,
+              'import { findDuplicateBudgetCycle, selectBudgetCycle } from "@/lib/budget-cycle-ui"\n',
+              'import { findDuplicateBudgetCycle, selectBudgetCycle } from "@/lib/budget-cycle-ui"\nimport { findDuplicateBudgetDivision } from "@/lib/budget-division-ui"\n',
+              "division helper import",
+          )
+
+          source = replace_once(
+              source,
+              '  const [divisionSearch, setDivisionSearch] = useState("")\n  const [showCycleForm, setShowCycleForm] = useState(false)\n',
+              '  const [divisionSearch, setDivisionSearch] = useState("")\n  const [showDivisionForm, setShowDivisionForm] = useState(false)\n  const [newDivision, setNewDivision] = useState({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })\n  const [showCycleForm, setShowCycleForm] = useState(false)\n',
+              "division quick-create state",
+          )
+
+          source = replace_once(
+              source,
+              '  const addRow = () => setGridRows((rows) => [...rows, newRow(rows.length + 1)])\n',
+              '''  const addDivision = async () => {
+            setMessage(null)
+            if (!canAdmin) return
+
+            const divisionCode = newDivision.code.trim().toUpperCase()
+            const divisionName = newDivision.name.trim()
+            const costCentreCode = newDivision.cost_centre_code.trim().toUpperCase()
+            const costCentreName = newDivision.cost_centre_name.trim()
+
+            if (!divisionCode || !divisionName) {
+              setMessage({ type: "err", text: "Complete the division code and division name before creating a division / cost centre." })
+              return
+            }
+
+            const duplicate = findDuplicateBudgetDivision(lookups.divisions, divisionCode)
+            if (duplicate) {
+              setDivisionSearch("")
+              setDraftHeader((header) => ({ ...header, division_id: duplicate.id }))
+              setMessage({ type: "err", text: `Division code ${divisionCode} already exists: ${duplicate.name}. It has been selected from the list instead.` })
+              return
+            }
+
+            setSaving(true)
+            try {
+              const created = await createBudgetDivision({
+                code: divisionCode,
+                name: divisionName,
+                cost_centre_code: costCentreCode || null,
+                cost_centre_name: costCentreName || null,
+              })
+              await loadDashboard()
+              setDivisionSearch("")
+              setDraftHeader((header) => ({ ...header, division_id: created.id }))
+              setShowDivisionForm(false)
+              setNewDivision({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
+              setMessage({ type: "ok", text: "Division / cost centre added to the controlled register and selected for this draft." })
+            } catch (err) {
+              const errorCode = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code || "") : ""
+              if (errorCode === "23505") {
+                setMessage({ type: "err", text: `Division code ${divisionCode} already exists. Refresh the list and select the existing division.` })
+              } else {
+                setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not add division / cost centre." })
+              }
+            } finally {
+              setSaving(false)
+            }
+          }
+
+          const addRow = () => setGridRows((rows) => [...rows, newRow(rows.length + 1)])
+          ''',
+              "addDivision implementation",
+          )
+
+          old_ui = '''              <Field label="Division / cost centre">
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
+                  <input value={divisionSearch} onChange={(e) => setDivisionSearch(e.target.value)} className="input pl-8" placeholder="Search division" />
+                </div>
+                <select value={draftHeader.division_id} onChange={(e) => setDraftHeader((h) => ({ ...h, division_id: e.target.value }))} className="input mt-2">
+                  <option value="">Select active division from database</option>
+                  {filteredDivisions.map((division) => (
+                    <option key={division.id} value={division.id}>
+                      {division.code} — {division.name} — {division.cost_centre_code || division.cost_centre_name || "No cost centre"}
+                    </option>
+                  ))}
+                </select>
+                {filteredDivisions.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No matching database record found. Use central Reference Data maintenance if you are authorised.</p>}
+                {restrictedDivisionUser && <p className="mt-1 text-[11px] text-slate-500">Division list is restricted by your assigned profile where possible.</p>}
+              </Field>
+          '''
+
+          new_ui = '''              <Field label="Division / cost centre">
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
+                  <input value={divisionSearch} onChange={(e) => setDivisionSearch(e.target.value)} className="input pl-8" placeholder="Search division" />
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <select value={draftHeader.division_id} onChange={(e) => setDraftHeader((h) => ({ ...h, division_id: e.target.value }))} className="input min-w-0 flex-1">
+                    <option value="">Select active division from database</option>
+                    {filteredDivisions.map((division) => (
+                      <option key={division.id} value={division.id}>
+                        {division.code} — {division.name} — {division.cost_centre_code || division.cost_centre_name || "No cost centre"}
+                      </option>
+                    ))}
+                  </select>
+                  {canAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDivisionForm((open) => !open)
+                        setMessage(null)
+                      }}
+                      aria-label={showDivisionForm ? "Close add division form" : "Add division / cost centre"}
+                      aria-expanded={showDivisionForm}
+                      title={showDivisionForm ? "Close add division form" : "Add division / cost centre"}
+                      className="inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                    >
+                      <Plus className={`h-5 w-5 transition-transform ${showDivisionForm ? "rotate-45" : ""}`} />
+                    </button>
+                  )}
+                </div>
+                {canAdmin && showDivisionForm && (
+                  <div className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-900">Add Division / Cost Centre</p>
+                      <p className="mt-0.5 text-[11px] text-emerald-800">Create a missing division in the controlled budget-division register.</p>
+                    </div>
+                    <input className="input" placeholder="Division code, e.g. ACC" value={newDivision.code} onChange={(e) => setNewDivision((division) => ({ ...division, code: e.target.value }))} />
+                    <input className="input" placeholder="Division name" value={newDivision.name} onChange={(e) => setNewDivision((division) => ({ ...division, name: e.target.value }))} />
+                    <input className="input" placeholder="Cost centre code" value={newDivision.cost_centre_code} onChange={(e) => setNewDivision((division) => ({ ...division, cost_centre_code: e.target.value }))} />
+                    <input className="input" placeholder="Cost centre name" value={newDivision.cost_centre_name} onChange={(e) => setNewDivision((division) => ({ ...division, cost_centre_name: e.target.value }))} />
+                    <div className="flex gap-2 pt-1">
+                      <button type="button" onClick={() => setShowDivisionForm(false)} disabled={saving} className="btn-light flex-1 justify-center">
+                        Cancel
+                      </button>
+                      <button type="button" onClick={addDivision} disabled={saving} className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                        <Plus className="h-4 w-4" /> {saving ? "Creating..." : "Create"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {filteredDivisions.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No matching database record found. Use the + button to add a division if you are authorised.</p>}
+                {restrictedDivisionUser && <p className="mt-1 text-[11px] text-slate-500">Division list is restricted by your assigned profile where possible.</p>}
+              </Field>
+          '''
+
+          source = replace_once(source, old_ui, new_ui, "division field UI")
+          page.write_text(source)
+
+          run(["bun", "test", "lib/budget-division-ui.test.js"])
+          print("GREEN confirmed: division quick-create regression tests pass.", flush=True)
+          PY
+
+      - name: Validate full application
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          bun test lib/budget-division-ui.test.js
+          bun run lint
+          bun run typecheck
+          bun run build
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "OpenAI ChatGPT"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard/budget-template/page.tsx lib/budget-division-ui.ts lib/budget-division-ui.test.js
+          git diff --cached --check
+          git commit -m "feat: add division quick-create UI"
+          git push origin HEAD:main
