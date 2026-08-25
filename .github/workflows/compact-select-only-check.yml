@@ -4,9 +4,10 @@ on:
   push:
     branches: [cleanup-three-lookup-columns]
     paths:
-      - 'components/LookupSelect.tsx'
-      - 'app/dashboard/budget-template/page.tsx'
-      - 'lib/lookup-select-compact.test.js'
+      - 'scripts/compact-select-only-migration.py'
+
+permissions:
+  contents: write
 
 jobs:
   test:
@@ -23,10 +24,21 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      - name: Apply approved cleanup
+        run: python3 scripts/compact-select-only-migration.py
       - name: Regression test
         run: bun test lib/lookup-select-compact.test.js
       - name: Full validation
         run: |
+          git diff --check
           bun run lint
           bun run typecheck
           bun run build
+      - name: Commit verified implementation
+        run: |
+          git config user.name "OpenAI ChatGPT"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/LookupSelect.tsx app/dashboard/budget-template/page.tsx
+          git diff --cached --check
+          git commit -m "feat: remove duplicate compact lookup controls"
+          git push origin HEAD:cleanup-three-lookup-columns
