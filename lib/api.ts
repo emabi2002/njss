@@ -404,6 +404,32 @@ export async function getFundingSources() {
   return data as FundingSource[]
 }
 
+export async function createFundingSource(input: { code: string; name: string; source_type?: string | null; is_active?: boolean }) {
+  const code = input.code.trim().toUpperCase()
+  const name = input.name.trim()
+  if (!code || !name) throw new Error('Funding source code and name are required')
+
+  const { data: existing, error: existingError } = await supabase
+    .from('funding_sources')
+    .select('*')
+    .ilike('code', code)
+    .limit(1)
+    .maybeSingle()
+  if (existingError) throw existingError
+  if (existing) {
+    if (!existing.is_active) throw new Error(`Funding source ${code} already exists but is inactive. Reactivate it in master data before using it.`)
+    return existing as FundingSource
+  }
+
+  const { data, error } = await supabase
+    .from('funding_sources')
+    .insert({ code, name, source_type: input.source_type?.trim() || null, is_active: input.is_active ?? true })
+    .select('*')
+    .single()
+  if (error) throw error
+  return data as FundingSource
+}
+
 export async function getChartOfAccounts() {
   const { data, error } = await supabase
     .from('chart_of_accounts')

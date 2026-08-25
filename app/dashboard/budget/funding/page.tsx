@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertCircle, Banknote, CheckCircle2, FileCheck, Layers, Loader2, Plus, ReceiptText, RefreshCw, ShieldCheck, Wallet } from "lucide-react"
+import { useRouter } from "next/navigation"
 import {
   allocateFunding,
   approveFundingAllocation,
   createFundingAuthority,
   createFundingReceipt,
+  createFundingSource,
   getAllocationsForRelease,
   getFundingAllocations,
   getFundingAuthorities,
@@ -44,6 +46,7 @@ const clean = (value: string) => value.trim() || null
 
 export default function FundingManagementPage() {
   const { can } = useAuth()
+  const router = useRouter()
   const [tab, setTab] = useState<Tab>("authorities")
   const [year, setYear] = useState(new Date().getFullYear())
   const [loading, setLoading] = useState(true)
@@ -53,6 +56,9 @@ export default function FundingManagementPage() {
   const [allocations, setAllocations] = useState<FundingAllocationRow[]>([])
   const [budgetLines, setBudgetLines] = useState<ReleaseAllocation[]>([])
   const [sources, setSources] = useState<FundingSource[]>([])
+  const canCreateFunding = can("funding.create")
+  const canManageFundingSources = can("masterdata.manage") || can("registry.manage") || can("users.manage")
+  const canCreateBudgetLine = can("budget.template.create") || can("budget.template.edit") || can("budget.template.submit") || can("budget.template")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -139,21 +145,22 @@ export default function FundingManagementPage() {
       {loading ? (
         <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-png-red" /></div>
       ) : tab === "authorities" ? (
-        <AuthoritiesPanel year={year} authorities={authorities} sources={sources} canCreate={can("funding.create")} canSubmit={can("funding.submit")} canVerify={can("funding.verify")} canApprove={can("funding.approve")} canReject={can("funding.reject")} onAction={onAction} />
+        <AuthoritiesPanel year={year} authorities={authorities} sources={sources} canCreate={canCreateFunding} canManageSources={canManageFundingSources} canSubmit={can("funding.submit")} canVerify={can("funding.verify")} canApprove={can("funding.approve")} canReject={can("funding.reject")} onAction={onAction} />
       ) : tab === "receipts" ? (
-        <ReceiptsPanel authorities={authorities} receipts={receipts} canCreate={can("funding.create")} canSubmit={can("funding.submit")} canVerify={can("funding.verify")} canApprove={can("funding.approve")} canReject={can("funding.reject")} onAction={onAction} />
+        <ReceiptsPanel authorities={authorities} receipts={receipts} canCreate={canCreateFunding} canSubmit={can("funding.submit")} canVerify={can("funding.verify")} canApprove={can("funding.approve")} canReject={can("funding.reject")} onCreateAuthority={() => setTab("authorities")} onAction={onAction} />
       ) : (
-        <AllocationsPanel receipts={receipts} allocations={allocations} budgetLines={budgetLines} canAllocate={can("funding.allocate")} canApprove={can("funding.allocation.approve")} onAction={onAction} />
+        <AllocationsPanel receipts={receipts} allocations={allocations} budgetLines={budgetLines} canAllocate={can("funding.allocate")} canApprove={can("funding.allocation.approve")} onCreateReceipt={canCreateFunding ? () => setTab("receipts") : undefined} onCreateBudgetLine={canCreateBudgetLine ? () => router.push("/dashboard/budget-template") : undefined} onAction={onAction} />
       )}
     </div>
   )
 }
 
-function AuthoritiesPanel({ year, authorities, sources, canCreate, canSubmit, canVerify, canApprove, canReject, onAction }: {
+function AuthoritiesPanel({ year, authorities, sources, canCreate, canManageSources, canSubmit, canVerify, canApprove, canReject, onAction }: {
   year: number
   authorities: FundingAuthorityRow[]
   sources: FundingSource[]
   canCreate: boolean
+  canManageSources: boolean
   canSubmit: boolean
   canVerify: boolean
   canApprove: boolean
@@ -161,6 +168,15 @@ function AuthoritiesPanel({ year, authorities, sources, canCreate, canSubmit, ca
   onAction: (fn: () => Promise<unknown>, success: string) => Promise<void>
 }) {
   const [form, setForm] = useState({ authority_type: "NJSS_ALLOCATION", funding_source_id: "", source_agency: "NJSS", approved_amount: "", effective_date: today(), description: "", supporting_document_name: "", supporting_document_url: "" })
+  const [showSourceForm, setShowSourceForm] = useState(false)
+  const [newSource, setNewSource] = useState({ code: "", name: "", source_type: "" })
+
+  const addFundingSource = () => onAction(async () => {
+    const created = await createFundingSource({ code: newSource.code, name: newSource.name, source_type: clean(newSource.source_type), is_active: true })
+    setForm((current) => ({ ...current, funding_source_id: created.id }))
+    setNewSource({ code: "", name: "", source_type: "" })
+    setShowSourceForm(false)
+  }, "Funding source added and selected.")
 
   const submit = () => onAction(() => createFundingAuthority({
     financial_year: year,
@@ -180,7 +196,7 @@ function AuthoritiesPanel({ year, authorities, sources, canCreate, canSubmit, ca
         <h2 className="font-semibold text-slate-900 flex items-center gap-2 mb-4"><Plus className="h-4 w-4 text-png-red" /> Create Funding Authority</h2>
         <div className="grid md:grid-cols-12 gap-3">
           <Select label="Type" value={form.authority_type} onChange={(v) => setForm({ ...form, authority_type: v })} options={AUTHORITY_TYPES.map((v) => ({ value: v, label: v.replaceAll("_", " ") }))} className="md:col-span-3" />
-          <Select label="Funding Source" value={form.funding_source_id} onChange={(v) => setForm({ ...form, funding_source_id: v })} options={[{ value: "", label: "Not restricted" }, ...sources.map((s) => ({ value: s.id, label: `${s.code} — ${s.name}` }))]} className="md:col-span-3" />
+          <Select label="Funding Source" value={form.funding_source_id} onChange={(v) => setForm({ ...form, funding_source_id: v })} options={[{ value: "", label: "Not restricted" }, ...sources.map((s) => ({ value: s.id, label: `${s.code} — ${s.name}` }))]} onAdd={canManageSources ? () => setShowSourceForm((open) => !open) : undefined} addTitle="Add funding source" className="md:col-span-3" />
           <Field label="Source Agency" value={form.source_agency} onChange={(v) => setForm({ ...form, source_agency: v })} className="md:col-span-2" />
           <Field label="Amount (K)" type="number" value={form.approved_amount} onChange={(v) => setForm({ ...form, approved_amount: v })} className="md:col-span-2" />
           <Field label="Effective Date" type="date" value={form.effective_date} onChange={(v) => setForm({ ...form, effective_date: v })} className="md:col-span-2" />
@@ -189,6 +205,19 @@ function AuthoritiesPanel({ year, authorities, sources, canCreate, canSubmit, ca
           <Field label="Document URL" value={form.supporting_document_url} onChange={(v) => setForm({ ...form, supporting_document_url: v })} className="md:col-span-3" />
           <button onClick={submit} disabled={!form.approved_amount} className="md:col-span-1 px-3 py-2 mt-5 rounded-lg bg-png-red text-white text-sm font-medium disabled:opacity-50"><Plus className="h-4 w-4 mx-auto" /></button>
         </div>
+        {showSourceForm && canManageSources && <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h3 className="text-sm font-semibold text-emerald-900">Create Funding Source</h3>
+            <button type="button" onClick={() => setShowSourceForm(false)} className="text-xs font-medium text-slate-600 hover:text-slate-900">Cancel</button>
+          </div>
+          <div className="grid md:grid-cols-12 gap-3">
+            <Field label="Source Code" value={newSource.code} onChange={(v) => setNewSource({ ...newSource, code: v })} className="md:col-span-3" />
+            <Field label="Source Name" value={newSource.name} onChange={(v) => setNewSource({ ...newSource, name: v })} className="md:col-span-4" />
+            <Field label="Source Type" value={newSource.source_type} onChange={(v) => setNewSource({ ...newSource, source_type: v })} className="md:col-span-3" />
+            <div className="md:col-span-1 mt-5 flex items-center justify-center rounded-lg border border-emerald-200 bg-white px-2 py-2 text-xs font-medium text-emerald-700">Active</div>
+            <button type="button" onClick={addFundingSource} disabled={!newSource.code.trim() || !newSource.name.trim()} className="md:col-span-1 mt-5 rounded-lg bg-emerald-600 px-3 py-2 text-white disabled:opacity-50" title="Save funding source"><Plus className="h-4 w-4 mx-auto" /></button>
+          </div>
+        </div>}
       </div>}
       <DataCard title="Funding Authority Register" empty="No funding authorities yet.">
         <table className="w-full min-w-[980px]"><thead><tr className="text-xs uppercase text-slate-500 bg-slate-50"><Th>Authority</Th><Th>Type</Th><Th>Source</Th><Th>Status</Th><Th right>Approved</Th><Th right>Receipts</Th><Th right>Remaining</Th><Th>Actions</Th></tr></thead><tbody className="divide-y divide-slate-100">
@@ -199,7 +228,7 @@ function AuthoritiesPanel({ year, authorities, sources, canCreate, canSubmit, ca
   )
 }
 
-function ReceiptsPanel({ authorities, receipts, canCreate, canSubmit, canVerify, canApprove, canReject, onAction }: {
+function ReceiptsPanel({ authorities, receipts, canCreate, canSubmit, canVerify, canApprove, canReject, onCreateAuthority, onAction }: {
   authorities: FundingAuthorityRow[]
   receipts: FundingReceiptRow[]
   canCreate: boolean
@@ -207,6 +236,7 @@ function ReceiptsPanel({ authorities, receipts, canCreate, canSubmit, canVerify,
   canVerify: boolean
   canApprove: boolean
   canReject: boolean
+  onCreateAuthority: () => void
   onAction: (fn: () => Promise<unknown>, success: string) => Promise<void>
 }) {
   const approvedAuthorities = authorities.filter((a) => a.status === "APPROVED")
@@ -225,7 +255,7 @@ function ReceiptsPanel({ authorities, receipts, canCreate, canSubmit, canVerify,
     {canCreate && <div className="bg-white rounded-lg border border-png-gold/40 p-5">
       <h2 className="font-semibold text-slate-900 flex items-center gap-2 mb-4"><ReceiptText className="h-4 w-4 text-png-red" /> Create Funding Receipt</h2>
       <div className="grid md:grid-cols-12 gap-3">
-        <Select label="Approved Authority" value={form.funding_authority_id} onChange={(v) => setForm({ ...form, funding_authority_id: v })} options={[{ value: "", label: "Select authority" }, ...approvedAuthorities.map((a) => ({ value: a.id, label: `${a.authority_number} · ${fmt(a.approved_amount)} · balance ${fmt(a.authority_remaining)}` }))]} className="md:col-span-5" />
+        <Select label="Approved Authority" value={form.funding_authority_id} onChange={(v) => setForm({ ...form, funding_authority_id: v })} options={[{ value: "", label: "Select authority" }, ...approvedAuthorities.map((a) => ({ value: a.id, label: `${a.authority_number} · ${fmt(a.approved_amount)} · balance ${fmt(a.authority_remaining)}` }))]} onAdd={onCreateAuthority} addTitle="Create funding authority" className="md:col-span-5" />
         <Field label="Receipt Amount (K)" type="number" value={form.amount_received} onChange={(v) => setForm({ ...form, amount_received: v })} className="md:col-span-2" />
         <Field label="Receipt Date" type="date" value={form.receipt_date} onChange={(v) => setForm({ ...form, receipt_date: v })} className="md:col-span-2" />
         <Field label="Finance/IFMS Ref" value={form.finance_ifms_reference} onChange={(v) => setForm({ ...form, finance_ifms_reference: v })} className="md:col-span-2" />
@@ -241,12 +271,14 @@ function ReceiptsPanel({ authorities, receipts, canCreate, canSubmit, canVerify,
   </div>
 }
 
-function AllocationsPanel({ receipts, allocations, budgetLines, canAllocate, canApprove, onAction }: {
+function AllocationsPanel({ receipts, allocations, budgetLines, canAllocate, canApprove, onCreateReceipt, onCreateBudgetLine, onAction }: {
   receipts: FundingReceiptRow[]
   allocations: FundingAllocationRow[]
   budgetLines: ReleaseAllocation[]
   canAllocate: boolean
   canApprove: boolean
+  onCreateReceipt?: () => void
+  onCreateBudgetLine?: () => void
   onAction: (fn: () => Promise<unknown>, success: string) => Promise<void>
 }) {
   const availableReceipts = receipts.filter((r) => r.status === "APPROVED" && (r.receipt_unallocated_balance || 0) > 0)
@@ -266,8 +298,8 @@ function AllocationsPanel({ receipts, allocations, budgetLines, canAllocate, can
     {canAllocate && <div className="bg-white rounded-lg border border-png-gold/40 p-5">
       <h2 className="font-semibold text-slate-900 flex items-center gap-2 mb-4"><Layers className="h-4 w-4 text-png-red" /> Allocate Actual Funding to Approved Budget</h2>
       <div className="grid md:grid-cols-12 gap-3">
-        <Select label="Available Receipt" value={form.funding_receipt_id} onChange={(v) => setForm({ ...form, funding_receipt_id: v })} options={[{ value: "", label: "Select receipt" }, ...availableReceipts.map((r) => ({ value: r.id, label: `${r.receipt_number} · available ${fmt(r.receipt_unallocated_balance)}` }))]} className="md:col-span-4" />
-        <Select label="Approved Budget Line" value={form.budget_allocation_id} onChange={(v) => setForm({ ...form, budget_allocation_id: v })} options={[{ value: "", label: "Select budget line" }, ...budgetLines.map((b) => ({ value: b.id, label: `${b.full_expense_code || b.cost_centre_code || "Budget"} · approved ${fmt(b.revised_budget)} · funded ${fmt(b.funded)}` }))]} className="md:col-span-4" />
+        <Select label="Available Receipt" value={form.funding_receipt_id} onChange={(v) => setForm({ ...form, funding_receipt_id: v })} options={[{ value: "", label: "Select receipt" }, ...availableReceipts.map((r) => ({ value: r.id, label: `${r.receipt_number} · available ${fmt(r.receipt_unallocated_balance)}` }))]} onAdd={onCreateReceipt} addTitle="Create funding receipt" className="md:col-span-4" />
+        <Select label="Approved Budget Line" value={form.budget_allocation_id} onChange={(v) => setForm({ ...form, budget_allocation_id: v })} options={[{ value: "", label: "Select budget line" }, ...budgetLines.map((b) => ({ value: b.id, label: `${b.full_expense_code || b.cost_centre_code || "Budget"} · approved ${fmt(b.revised_budget)} · funded ${fmt(b.funded)}` }))]} onAdd={onCreateBudgetLine} addTitle="Create approved budget line" className="md:col-span-4" />
         <Field label="Amount (K)" type="number" value={form.allocated_amount} onChange={(v) => setForm({ ...form, allocated_amount: v })} className="md:col-span-2" />
         <Field label="Date" type="date" value={form.allocation_date} onChange={(v) => setForm({ ...form, allocation_date: v })} className="md:col-span-1" />
         <button onClick={submit} disabled={!form.funding_receipt_id || !form.budget_allocation_id || !form.allocated_amount} className="md:col-span-1 px-3 py-2 mt-5 rounded-lg bg-png-red text-white text-sm font-medium disabled:opacity-50"><Plus className="h-4 w-4 mx-auto" /></button>
@@ -313,8 +345,8 @@ function Field({ label, value, onChange, type = "text", className = "" }: { labe
   return <label className={className}><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span><input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red" /></label>
 }
 
-function Select({ label, value, onChange, options, className = "" }: { label: string; value: string; onChange: (value: string) => void; options: { value: string; label: string }[]; className?: string }) {
-  return <label className={className}><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
+function Select({ label, value, onChange, options, onAdd, addTitle, className = "" }: { label: string; value: string; onChange: (value: string) => void; options: { value: string; label: string }[]; onAdd?: () => void; addTitle?: string; className?: string }) {
+  return <div className={className}><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span><div className="flex items-center gap-2"><select value={value} onChange={(e) => onChange(e.target.value)} className="min-w-0 flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-png-red">{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>{onAdd && <button type="button" onClick={onAdd} title={addTitle || `Add ${label}`} aria-label={addTitle || `Add ${label}`} className="shrink-0 rounded-lg border border-emerald-600 bg-emerald-600 p-2 text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"><Plus className="h-4 w-4" /></button>}</div></div>
 }
 
 function Status({ status }: { status: string }) {
