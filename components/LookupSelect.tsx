@@ -17,6 +17,9 @@ export type AddField = {
   label: string
   required?: boolean
   placeholder?: string
+  type?: "text" | "select"
+  options?: LookupOption[]
+  dependsOn?: string
 }
 
 type LookupSelectProps = {
@@ -39,6 +42,7 @@ type LookupSelectProps = {
   onRefresh?: () => Promise<void> | void
   compact?: boolean
   compactSelectOnly?: boolean
+  selectOnly?: boolean
   className?: string
 }
 
@@ -69,6 +73,7 @@ export function LookupSelect({
   onRefresh,
   compact = false,
   compactSelectOnly = false,
+  selectOnly = false,
   className = "",
 }: LookupSelectProps) {
   const [query, setQuery] = useState("")
@@ -181,23 +186,25 @@ export function LookupSelect({
   return (
     <div className={`space-y-1 ${className}`}>
       {label && <label className="block text-sm font-medium text-slate-700">{label} {required && <span className="text-red-500">*</span>}</label>}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <input
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value)
-            if (!event.target.value) onChange("")
-          }}
-          disabled={disabled}
-          placeholder={options.length === 0 ? (canAdd ? emptyLabel : unauthorizedEmptyLabel) : placeholder}
-          list={listId}
-          className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
-        />
-        <datalist id={listId}>
-          {filtered.map((option) => <option key={option.id} value={optionLabel(option)} />)}
-        </datalist>
-      </div>
+      {!selectOnly && (
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              if (!event.target.value) onChange("")
+            }}
+            disabled={disabled}
+            placeholder={options.length === 0 ? (canAdd ? emptyLabel : unauthorizedEmptyLabel) : placeholder}
+            list={listId}
+            className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
+          />
+          <datalist id={listId}>
+            {filtered.map((option) => <option key={option.id} value={optionLabel(option)} />)}
+          </datalist>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <select
           value={value}
@@ -209,11 +216,20 @@ export function LookupSelect({
           className="min-w-[180px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
         >
           <option value="">{options.length === 0 ? (canAdd ? emptyLabel : unauthorizedEmptyLabel) : placeholder}</option>
-          {filtered.map((option) => <option key={option.id} value={option.id}>{optionLabel(option)}</option>)}
+          {(selectOnly ? options : filtered).map((option) => <option key={option.id} value={option.id}>{optionLabel(option)}</option>)}
         </select>
         {canAdd && addTable && (
-          <button type="button" onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 rounded-lg border border-png-gold/50 px-3 py-2 text-sm font-medium text-png-red hover:bg-png-red/5">
-            <Plus className="h-4 w-4" /> {addLabel.replace(/^\+\s*/, "")}
+          <button
+            type="button"
+            onClick={() => setShowAdd(true)}
+            disabled={disabled}
+            title={addLabel.replace(/^\+\s*/, "")}
+            aria-label={addLabel.replace(/^\+\s*/, "")}
+            className={selectOnly
+              ? "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
+              : "inline-flex items-center gap-1 rounded-lg border border-png-gold/50 px-3 py-2 text-sm font-medium text-png-red hover:bg-png-red/5 disabled:cursor-not-allowed disabled:opacity-50"}
+          >
+            <Plus className="h-4 w-4" /> {!selectOnly && addLabel.replace(/^\+\s*/, "")}
           </button>
         )}
       </div>
@@ -230,7 +246,25 @@ export function LookupSelect({
               {addFields.map((field) => (
                 <div key={field.name}>
                   <label className="mb-1 block text-sm font-medium text-slate-700">{field.label} {field.required && <span className="text-red-500">*</span>}</label>
-                  <input value={form[field.name] || ""} onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))} placeholder={field.placeholder} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red" />
+                  {field.type === "select" ? (
+                    <select
+                      value={form[field.name] || ""}
+                      onChange={(event) => setForm((current) => {
+                        const updated = { ...current, [field.name]: event.target.value }
+                        addFields.filter((dependent) => dependent.dependsOn === field.name).forEach((dependent) => { updated[dependent.name] = "" })
+                        return updated
+                      })}
+                      disabled={Boolean(field.dependsOn && !form[field.dependsOn])}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"
+                    >
+                      <option value="">{field.placeholder || `Select ${field.label}`}</option>
+                      {(field.options || [])
+                        .filter((option) => !field.dependsOn || String(option[field.dependsOn] || "") === form[field.dependsOn])
+                        .map((option) => <option key={option.id} value={option.id}>{optionLabel(option)}</option>)}
+                    </select>
+                  ) : (
+                    <input value={form[field.name] || ""} onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))} placeholder={field.placeholder} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red" />
+                  )}
                 </div>
               ))}
             </div>

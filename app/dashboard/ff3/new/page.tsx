@@ -10,6 +10,15 @@ import { checkBudgetAndNotify, notifyFF3Submitted } from "@/lib/notifications"
 import { approveFF3, checkBudgetAvailability, createSupplier } from "@/lib/api"
 import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadLookup } from "@/lib/lookups"
+import { useAuth } from "@/contexts/AuthContext"
+import {
+  attachLedgerDescriptions,
+  buildApprovedExpenseCodes,
+  buildExpenseCodePayload,
+  buildMasterLookupPayload,
+  formatExpenseCodeLabel,
+  type ExpenseCodeOption,
+} from "@/lib/ff3-lookups"
 
 type Department = { id: string; code: string; name: string }
 type Section = { id: string; code: string; name: string; department_id: string }
@@ -17,7 +26,9 @@ type Project = { id: string; code: string; name: string }
 type Province = { id: string; code: string; name: string }
 type FundingSource = { id: string; code: string; name: string }
 type CostCentre = { id: string; code: string; name: string; section_id: string | null; department_id: string | null }
-type ExpenseCode = { id: string; full_expense_code: string; section_id: string | null }
+type ExpenseCategory = { id: string; code: string; name: string }
+type ExpenseItem = { id: string; code: string; name: string; expense_category_id: string | null }
+type ExpenseCode = ExpenseCodeOption
 type BudgetInfo = { available_balance: number; quarterly_released: number }
 type BudgetCheck = { budgetAllocationId: string | null; mappingStatus: string; allocationCount: number; revised: number; released: number; pending: number; committed: number; spent: number; available: number; projectedAvailableAfterPending: number; hasAllocation: boolean; withinBudget?: boolean } | null
 type FF3ItemDraft = {
@@ -51,7 +62,10 @@ const isValidItem = (item: FF3ItemDraft) => Boolean(item.item_description.trim()
 
 export default function NewFF3Page() {
   const router = useRouter()
+  const { can } = useAuth()
   const activeFinancialYear = new Date().getFullYear()
+  const canManageMasterData = can("masterdata.manage") || can("registry.manage")
+  const canManageExpenseCodes = can("registry.manage")
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
@@ -64,6 +78,8 @@ export default function NewFF3Page() {
   const [fundingSources, setFundingSources] = useState<FundingSource[]>([])
   const [costCentres, setCostCentres] = useState<CostCentre[]>([])
   const [expenseCodes, setExpenseCodes] = useState<ExpenseCode[]>([])
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([])
+  const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([])
   const [budgetInfo, setBudgetInfo] = useState<BudgetInfo>({ available_balance: 0, quarterly_released: 0 })
   const [budgetCheck, setBudgetCheck] = useState<BudgetCheck>(null)
   const [urgencyLevels, setUrgencyLevels] = useState<LookupOption[]>([])
@@ -108,14 +124,17 @@ export default function NewFF3Page() {
   useEffect(() => {
     async function fetchMasterData() {
       try {
-        const [deptRes, secRes, projRes, provRes, fundRes, ccRes, codeRes, urgencyRows, methodRows, unitRows, supplierRows] = await Promise.all([
+        const [deptRes, secRes, projRes, provRes, fundRes, ccRes, codeRes, ledgerRes, categoryRes, itemRes, urgencyRows, methodRows, unitRows, supplierRows] = await Promise.all([
           supabase.from("departments").select("id, code, name").eq("is_active", true).order("name"),
           supabase.from("sections").select("id, code, name, department_id").eq("is_active", true).order("name"),
           supabase.from("projects").select("id, code, name").eq("is_active", true).order("name"),
           supabase.from("provinces").select("id, code, name").eq("is_active", true).order("name"),
           supabase.from("funding_sources").select("id, code, name").eq("is_active", true).order("name"),
           supabase.from("cost_centres").select("id, code, name, section_id, department_id").eq("is_active", true).order("code"),
-          supabase.from("expense_code_registry").select("id, full_expense_code, section_id").eq("is_active", true).order("full_expense_code"),
+          supabase.from("expense_code_registry").select("id, full_expense_code, section_id, description").eq("is_active", true).order("full_expense_code"),
+          supabase.from("expense_ledger").select("finance_code, standard_description, expense_code_registry_id").eq("is_active", true).order("finance_code"),
+          supabase.from("expense_categories").select("id, code, name").eq("is_active", true).order("name"),
+          supabase.from("expense_items").select("id, code, name, expense_category_id").eq("is_active", true).order("name"),
           loadLookup("urgency_levels"),
           loadLookup("procurement_methods"),
           loadLookup("units_of_measure"),
@@ -128,6 +147,8 @@ export default function NewFF3Page() {
         setProvinces(provRes.data || [])
         setFundingSources(fundRes.data || [])
         setCostCentres(ccRes.data || [])
+        setExpenseCategories(categoryRes.data || [])
+        setExpenseItems(itemRes.data || [])
         setUrgencyLevels(urgencyRows)
         setProcurementMethods(methodRows)
         setUnits(unitRows)
@@ -135,18 +156,14 @@ export default function NewFF3Page() {
 
         const { data: approvedBudgetCodes } = await supabase
           .from("v_budget_by_code")
-          .select("expense_code_registry_id, full_expense_code, section_id")
+          .select("expense_code_registry_id, full_expense_code, section_id, expense_description")
           .eq("financial_year", activeFinancialYear)
 
-        const approvedCodes = (approvedBudgetCodes || [])
-          .filter((code) => code.expense_code_registry_id)
-          .map((code) => ({
-            id: String(code.expense_code_registry_id),
-            full_expense_code: code.full_expense_code || "",
-            section_id: code.section_id || null,
-          }))
+        const ledgerDescriptions = ledgerRes.data || []
+        const registryCodes = attachLedgerDescriptions((codeRes.data || []) as ExpenseCode[], ledgerDescriptions)
+        const approvedCodes = buildApprovedExpenseCodes(approvedBudgetCodes || [], registryCodes, ledgerDescriptions)
 
-        setExpenseCodes(approvedCodes.length > 0 ? approvedCodes : (codeRes.data || []))
+        setExpenseCodes(approvedCodes.length > 0 ? approvedCodes : registryCodes)
         setFormData((current) => ({
           ...current,
           urgency_level_id: current.urgency_level_id || urgencyRows.find((row) => row.code === current.urgency_level)?.id || "",
@@ -441,12 +458,107 @@ export default function NewFF3Page() {
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div><label className="block text-sm font-medium text-slate-700 mb-1">Financial Year</label><input type="number" value={formData.financial_year} onChange={(e) => setFormData({ ...formData, financial_year: parseInt(e.target.value) })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" /></div>
           <div><label className="block text-sm font-medium text-slate-700 mb-1">Department <span className="text-red-500">*</span></label><select value={formData.department_id} onChange={(e) => setFormData({ ...formData, department_id: e.target.value, section_id: "" })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select Department</option>{departments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}</select></div>
-          <div><label className="block text-sm font-medium text-slate-700 mb-1">Section <span className="text-red-500">*</span></label><select value={formData.section_id} onChange={(e) => setFormData({ ...formData, section_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red" disabled={!formData.department_id}><option value="">Select Section</option>{filteredSections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}</select></div>
-          <div><label className="block text-sm font-medium text-slate-700 mb-1">Project / Portfolio</label><select value={formData.project_id} onChange={(e) => setFormData({ ...formData, project_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select Project</option>{projects.map(proj => <option key={proj.id} value={proj.id}>{proj.name}</option>)}</select></div>
+          <LookupSelect
+            label="Section"
+            required
+            selectOnly
+            value={formData.section_id}
+            options={filteredSections}
+            placeholder="Select Section"
+            disabled={!formData.department_id}
+            canAdd={canManageMasterData}
+            addTable="sections"
+            addLabel="Add Section"
+            addPayload={(form) => buildMasterLookupPayload("sections", form, { departmentId: formData.department_id })}
+            onCreated={(option) => setSections((current) => [...current, option as Section])}
+            onChange={(value) => setFormData((current) => ({ ...current, section_id: value, cost_centre_id: "", expense_code_registry_id: "" }))}
+          />
+          <LookupSelect
+            label="Project / Portfolio"
+            selectOnly
+            value={formData.project_id}
+            options={projects}
+            placeholder="Select Project"
+            canAdd={canManageMasterData}
+            addTable="projects"
+            addLabel="Add Project / Portfolio"
+            addPayload={(form) => buildMasterLookupPayload("projects", form, { departmentId: formData.department_id })}
+            onCreated={(option) => setProjects((current) => [...current, option as Project])}
+            onChange={(value) => setFormData((current) => ({ ...current, project_id: value }))}
+          />
           <div><label className="block text-sm font-medium text-slate-700 mb-1">Province</label><select value={formData.province_id} onChange={(e) => setFormData({ ...formData, province_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select Province</option>{provinces.map(prov => <option key={prov.id} value={prov.id}>{prov.name}</option>)}</select></div>
-          <div><label className="block text-sm font-medium text-slate-700 mb-1">Funding Source</label><select value={formData.funding_source_id} onChange={(e) => setFormData({ ...formData, funding_source_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Select Funding Source</option>{fundingSources.map(fs => <option key={fs.id} value={fs.id}>{fs.name}</option>)}</select></div>
-          <div><label className="block text-sm font-medium text-slate-700 mb-1">Cost Centre</label><select value={formData.cost_centre_id} onChange={(e) => setFormData({ ...formData, cost_centre_id: e.target.value })} disabled={!formData.department_id} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red disabled:bg-slate-100"><option value="">Select Cost Centre</option>{filteredCostCentres.map(cc => <option key={cc.id} value={cc.id}>{cc.code} — {cc.name}</option>)}</select></div>
-          <div><label className="block text-sm font-medium text-slate-700 mb-1">Expense Code <span className="text-slate-400 text-xs">(approved budget line)</span></label><select value={formData.expense_code_registry_id} onChange={(e) => setFormData({ ...formData, expense_code_registry_id: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-png-red font-mono text-sm"><option value="">Select Expense Code</option>{filteredCodes.map(c => <option key={c.id} value={c.id}>{c.full_expense_code}</option>)}</select></div>
+          <LookupSelect
+            label="Funding Source"
+            selectOnly
+            value={formData.funding_source_id}
+            options={fundingSources}
+            placeholder="Select Funding Source"
+            canAdd={canManageMasterData}
+            addTable="funding_sources"
+            addLabel="Add Funding Source"
+            addFields={[
+              { name: "code", label: "Funding Code", required: true },
+              { name: "name", label: "Funding Source", required: true },
+              { name: "source_type", label: "Source Type", placeholder: "Government, donor or grant" },
+            ]}
+            addPayload={(form) => buildMasterLookupPayload("funding_sources", form)}
+            onCreated={(option) => setFundingSources((current) => [...current, option as FundingSource])}
+            onChange={(value) => setFormData((current) => ({ ...current, funding_source_id: value }))}
+          />
+          <LookupSelect
+            label="Cost Centre"
+            selectOnly
+            value={formData.cost_centre_id}
+            options={filteredCostCentres}
+            placeholder="Select Cost Centre"
+            disabled={!formData.department_id}
+            canAdd={canManageMasterData}
+            addTable="cost_centres"
+            addLabel="Add Cost Centre"
+            addPayload={(form) => buildMasterLookupPayload("cost_centres", form, { departmentId: formData.department_id, sectionId: formData.section_id })}
+            onCreated={(option) => setCostCentres((current) => [...current, option as CostCentre])}
+            onChange={(value) => setFormData((current) => ({ ...current, cost_centre_id: value, expense_code_registry_id: "" }))}
+          />
+          <LookupSelect
+            label="Expense Code (approved budget line)"
+            selectOnly
+            value={formData.expense_code_registry_id}
+            options={filteredCodes.map((code) => ({ ...code, name: formatExpenseCodeLabel(code) }))}
+            placeholder="Select Expense Code"
+            canAdd={canManageExpenseCodes}
+            addTable="expense_code_registry"
+            addLabel="Add Expense Code"
+            addFields={[
+              { name: "expense_category_id", label: "Expense Category", required: true, type: "select", options: expenseCategories },
+              { name: "expense_item_id", label: "Expense Item", required: true, type: "select", options: expenseItems, dependsOn: "expense_category_id" },
+              { name: "description", label: "Expense Description", required: true, placeholder: "Describe what this expense code is used for" },
+            ]}
+            createVia={async (form) => {
+              const payload = buildExpenseCodePayload({
+                departmentId: formData.department_id,
+                sectionId: formData.section_id,
+                costCentreId: formData.cost_centre_id,
+                categoryId: form.expense_category_id,
+                itemId: form.expense_item_id,
+                financialYear: formData.financial_year,
+                description: form.description,
+              })
+              const { data, error: insertError } = await supabase
+                .from("expense_code_registry")
+                .insert(payload)
+                .select("id, full_expense_code, section_id, description")
+                .single()
+              if (insertError) throw new Error(insertError.message)
+              return { ...data, name: formatExpenseCodeLabel(data) }
+            }}
+            onCreated={(option) => setExpenseCodes((current) => [...current, {
+              id: option.id,
+              full_expense_code: String(option.full_expense_code || ""),
+              section_id: typeof option.section_id === "string" ? option.section_id : null,
+              description: typeof option.description === "string" ? option.description : null,
+            }])}
+            onChange={(value) => setFormData((current) => ({ ...current, expense_code_registry_id: value }))}
+          />
         </div>
       </div>
 
@@ -590,7 +702,7 @@ export default function NewFF3Page() {
       </div>
 
       <div className="bg-white rounded-lg border border-slate-200 p-6">
-        <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold text-slate-900">Section F: Budget Validation</h2>{selectedCode && <span className="font-mono text-xs px-2 py-1 rounded-lg bg-png-red/5 text-png-red border border-png-gold/40">{selectedCode.full_expense_code}</span>}</div>
+        <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold text-slate-900">Section F: Budget Validation</h2>{selectedCode && <span className="font-mono text-xs px-2 py-1 rounded-lg bg-png-red/5 text-png-red border border-png-gold/40">{formatExpenseCodeLabel(selectedCode)}</span>}</div>
         {budgetCheck?.hasAllocation ? <div className="space-y-2"><p className="text-xs text-slate-500 mb-1">{selectedCode ? "Position for the selected expense code" : "Position for the selected section"}</p><BudgetLine label="Approved Budget (Revised)" amount={budgetCheck.revised} /><BudgetLine label="Released (cash available)" amount={budgetCheck.released} /><BudgetLine label="Pending Requests" amount={budgetCheck.pending} /><BudgetLine label="Committed" amount={budgetCheck.committed} /><BudgetLine label="Actual Expenditure" amount={budgetCheck.spent} /><BudgetLine label="Available Balance" amount={budgetCheck.available} isTotal /><div className="border-t border-slate-200 pt-2 mt-2"><BudgetLine label="This Request" amount={totalEstimate} highlight /><BudgetLine label="Available After This Request" amount={budgetCheck.available - totalEstimate} /><BudgetLine label="Projected Available After Pending" amount={budgetCheck.projectedAvailableAfterPending - totalEstimate} /></div></div> : <div className="space-y-2">{(formData.expense_code_registry_id || formData.section_id) && <div className="mb-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-2"><AlertCircle className="h-4 w-4" /> Exact budget allocation is required. {budgetCheck?.mappingStatus === "BUDGET_MAPPING_REQUIRED_AMBIGUOUS" ? "Multiple allocations match this request." : "No confirmed budget allocation found yet."}</div>}<BudgetLine label="Quarterly Released" amount={budgetInfo.quarterly_released} /><BudgetLine label="Available Balance" amount={budgetInfo.available_balance} isTotal /><div className="border-t border-slate-200 pt-2 mt-2"><BudgetLine label="This Request" amount={totalEstimate} highlight /></div></div>}
         {totalEstimate > 0 && <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-sm ${totalEstimate <= effectiveAvailable ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{totalEstimate <= effectiveAvailable ? <><CheckCircle2 className="h-4 w-4" /><span className="font-medium">Within Budget — sufficient funds available (K {effectiveAvailable.toLocaleString()} remaining)</span></> : <><AlertCircle className="h-4 w-4" /><span className="font-medium">Insufficient Funds — exceeds available balance of K {effectiveAvailable.toLocaleString()}</span></>}</div>}
       </div>
