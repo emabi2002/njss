@@ -49,9 +49,11 @@ export function clientIp(request: NextRequest) {
 }
 
 /**
- * Verifies the caller's own session and permissions using the anon-key client,
- * then hands back a service-role client for the privileged write.
- * Every denial is recorded in the immutable Access Audit.
+ * Verifies the caller's own session and permissions. When the service-role
+ * secret is available it is used for privileged administration. If the runtime
+ * cannot see that secret, the helper falls back to the signed-in caller's
+ * Supabase client, which remains constrained by RLS. This keeps authorised
+ * reads available without granting any additional database rights.
  */
 export async function authorizeAdmin(
   request: NextRequest,
@@ -75,7 +77,8 @@ export async function authorizeAdmin(
   }
 
   if (!hasAnyServerPermission(context, permissions)) {
-    await recordAudit(null, {
+    const client = createRequestSupabaseClient(request)
+    await recordAudit(client, {
       actorContext: context,
       action: 'ACCESS_DENIED',
       entityType: 'AUTHORIZATION',
@@ -92,7 +95,8 @@ export async function authorizeAdmin(
     }
   }
 
-  return { ok: true, context, admin: createAdminClient() }
+  const admin = tryCreateAdminClient() || createRequestSupabaseClient(request)
+  return { ok: true, context, admin }
 }
 
 /**
