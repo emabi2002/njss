@@ -2,7 +2,7 @@ import 'server-only'
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
-import { getServerAccessContext, hasAnyServerPermission } from './server'
+import { createRequestSupabaseClient, getServerAccessContext, hasAnyServerPermission } from './server'
 import type { PermissionCode, UserAccessContext } from './types'
 import { redactSensitive } from '@/lib/password'
 
@@ -23,8 +23,21 @@ export function createAdminClient(): SupabaseClient {
   })
 }
 
+/** Best-effort service-role client for non-critical enrichment/bookkeeping. */
+export function tryCreateAdminClient(): SupabaseClient | null {
+  try {
+    return createAdminClient()
+  } catch {
+    return null
+  }
+}
+
 export type AdminAuthorization =
   | { ok: true; context: UserAccessContext; admin: SupabaseClient }
+  | { ok: false; response: NextResponse }
+
+export type AdminReadAuthorization =
+  | { ok: true; context: UserAccessContext; client: SupabaseClient }
   | { ok: false; response: NextResponse }
 
 export function clientIp(request: NextRequest) {
@@ -36,9 +49,11 @@ export function clientIp(request: NextRequest) {
 }
 
 /**
- * Verifies the caller's own session and permissions using the anon-key client,
- * then hands back a service-role client for the privileged write.
- * Every denial is recorded in the immutable Access Audit.
+ * Verifies the caller's own session and permissions. When the service-role
+ * secret is available it is used for privileged administration. If the runtime
+ * cannot see that secret, the helper falls back to the signed-in caller's
+ * Supabase client, which remains constrained by RLS. This keeps authorised
+ * reads available without granting any additional database rights.
  */
 export async function authorizeAdmin(
   request: NextRequest,
@@ -62,7 +77,8 @@ export async function authorizeAdmin(
   }
 
   if (!hasAnyServerPermission(context, permissions)) {
-    await recordAudit(null, {
+    const client = createRequestSupabaseClient(request)
+    await recordAudit(client, {
       actorContext: context,
       action: 'ACCESS_DENIED',
       entityType: 'AUTHORIZATION',
@@ -79,7 +95,48 @@ export async function authorizeAdmin(
     }
   }
 
-  return { ok: true, context, admin: createAdminClient() }
+  const admin = tryCreateAdminClient() || createRequestSupabaseClient(request)
+  return { ok: true, context, admin }
+}
+
+/**
+ * Read-only administrator authorization. Reads are executed as the signed-in
+ * user and therefore remain constrained by database RLS. This deliberately
+ * avoids making administration screens depend on the service-role secret.
+ */
+export async function authorizeAdminRead(
+  request: NextRequest,
+  permissions: PermissionCode[],
+  action: string,
+): Promise<AdminReadAuthorization> {
+  const context = await getServerAccessContext(request)
+  if (!context) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }),
+    }
+  }
+
+  const client = createRequestSupabaseClient(request)
+  if (!hasAnyServerPermission(context, permissions)) {
+    await recordAudit(client, {
+      actorContext: context,
+      action: 'ACCESS_DENIED',
+      entityType: 'AUTHORIZATION',
+      request,
+      metadata: {
+        attempted_action: action,
+        required_permissions: permissions,
+        pathname: request.nextUrl.pathname,
+      },
+    })
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Access denied' }, { status: 403 }),
+    }
+  }
+
+  return { ok: true, context, client }
 }
 
 export type AuditInput = {
