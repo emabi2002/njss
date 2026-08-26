@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: RBAC regression checks
+        run: node lib/rbac/four-group-rbac.test.mjs
+
       - name: Lint
         run: bun run lint
 
