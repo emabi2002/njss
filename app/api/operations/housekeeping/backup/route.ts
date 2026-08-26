@@ -14,7 +14,8 @@ export async function POST(request: NextRequest) {
   }
 
   const body = (await request.json().catch(() => ({}))) as { backupType?: BackupType }
-  if (body.backupType !== 'FULL' && body.backupType !== 'DIFFERENTIAL') {
+  const backupType: BackupType = body.backupType || 'FULL'
+  if (backupType !== 'FULL' && backupType !== 'DIFFERENTIAL') {
     return NextResponse.json({ error: 'backupType must be FULL or DIFFERENTIAL.' }, { status: 400 })
   }
 
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
       apikey: anonKey,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ backupType: body.backupType }),
+    body: JSON.stringify({ backupType }),
     cache: 'no-store',
   })
 
