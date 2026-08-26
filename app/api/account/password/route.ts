@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient, recordAudit } from '@/lib/rbac/admin'
-import { getServerAccessContext } from '@/lib/rbac/server'
+import { createRequestSupabaseClient, getServerAccessContext } from '@/lib/rbac/server'
 import { validatePassword } from '@/lib/password'
 
 export const dynamic = 'force-dynamic'
@@ -13,13 +13,14 @@ export async function GET(request: NextRequest) {
   const context = await getServerAccessContext(request)
   if (!context) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
 
-  const admin = createAdminClient()
-  const { data } = await admin
+  const client = createRequestSupabaseClient(request)
+  const { data, error } = await client
     .from('users')
     .select('must_change_password')
     .eq('id', context.userId)
     .maybeSingle()
 
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ mustChangePassword: Boolean(data?.must_change_password) })
 }
 
