@@ -62,6 +62,8 @@ export function isRecordInScope(context: ScopeContext | null, record: ScopeableR
     switch (scope.scope_type) {
       case 'SYSTEM_WIDE':
         return true
+      case 'SECTION_WIDE':
+        return Boolean(context.sectionId && record.section_id && record.section_id === context.sectionId)
       case 'DEPARTMENT_WIDE':
         return Boolean(context.departmentId && record.department_id === context.departmentId)
       case 'OWN_DIVISION':
