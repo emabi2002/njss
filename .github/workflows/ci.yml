@@ -30,6 +30,9 @@ jobs:
       - name: RBAC regression checks
         run: node lib/rbac/four-group-rbac.test.mjs
 
+      - name: Admin runtime fallback regression checks
+        run: node lib/rbac/admin-runtime-fallback.test.mjs
+
       - name: Lint
         run: bun run lint
 
