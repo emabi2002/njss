@@ -14,6 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Standalone Node/Bun maintenance scripts (not part of the app bundle):
     "scripts/**",
+    // Supabase Edge Functions run under Deno and are validated by Supabase,
+    // not by the Next.js browser/server TypeScript environment.
+    "supabase/functions/**",
   ]),
 ]);
 
