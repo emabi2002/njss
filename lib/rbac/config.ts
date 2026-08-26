@@ -80,6 +80,7 @@ const FINANCE_PERMISSIONS = [
   ['ff4.verify', 'Verify FF4 payment requests'],
   ['ff4.approve', 'Approve FF4 payment requests'],
   ['ff4.process', 'Process FF4 payments'],
+  ['ff4.reconcile', 'Reconcile FF4 payments'],
   ['ff4.reject', 'Reject FF4 payment requests'],
   ['ff4.print', 'Print FF4 payment requests'],
   ['ff4.export', 'Export FF4 payment requests'],

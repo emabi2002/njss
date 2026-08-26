@@ -109,6 +109,7 @@ export type AccessConfig = {
 
 export const DATA_SCOPE_OPTIONS: Array<{ value: DataScopeType; label: string; description: string }> = [
   { value: "OWN_RECORDS", label: "Own Records", description: "Only records the user raised or is assigned to" },
+  { value: "SECTION_WIDE", label: "Section-wide", description: "All authorised records within the user's assigned section" },
   { value: "OWN_DIVISION", label: "Own Division", description: "Records within the user's division" },
   { value: "OWN_BRANCH", label: "Own Branch", description: "Records within the user's branch" },
   { value: "OWN_PROVINCE", label: "Own Province", description: "Records within the user's province" },
@@ -116,13 +117,12 @@ export const DATA_SCOPE_OPTIONS: Array<{ value: DataScopeType; label: string; de
   { value: "SYSTEM_WIDE", label: "System-wide", description: "All records across NJSS" },
 ]
 
-/** The five controlled workflow roles, in FF3 → FF4 processing order. */
+/** The four controlled business workflow groups, in processing order. */
 export const WORKFLOW_ROLE_ORDER = [
-  "FF Requisition Officer",
-  "Line/Section Supervisor",
+  "Requisition Officer",
+  "Line Supervisor",
   "Registrar",
-  "FF4 Officer",
-  "Accounts Reconciliation Officer",
+  "Payment/Reconciliation Officer",
 ]
 
 export const SYSTEM_ADMINISTRATOR = "System Administrator"

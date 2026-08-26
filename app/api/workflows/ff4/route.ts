@@ -23,7 +23,7 @@ const ACTION_PERMISSION: Record<FF4WorkflowAction, string[]> = {
   APPROVE: ['ff4.approve'],
   PROCESS: ['ff4.process'],
   MARK_PAID: ['ff4.process'],
-  RECONCILE: ['ff4.process'],
+  RECONCILE: ['ff4.reconcile'],
   CANCEL: ['ff4.reject'],
 }
 

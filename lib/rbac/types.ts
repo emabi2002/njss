@@ -16,6 +16,7 @@ export type RbacAction = (typeof RBAC_ACTIONS)[number]
 
 export type DataScopeType =
   | 'OWN_RECORDS'
+  | 'SECTION_WIDE'
   | 'OWN_DIVISION'
   | 'OWN_BRANCH'
   | 'OWN_PROVINCE'
