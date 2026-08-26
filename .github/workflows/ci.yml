@@ -36,6 +36,9 @@ jobs:
       - name: User CRUD Edge routing regression checks
         run: node lib/rbac/user-crud-edge.test.mjs
 
+      - name: Full and differential backup regression checks
+        run: node lib/backup/full-differential-backup.test.mjs
+
       - name: Lint
         run: bun run lint
 
