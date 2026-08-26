@@ -175,7 +175,7 @@ async function loadUser(admin: SupabaseClient, userId: string) {
     .eq("id", userId)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return data as Record<string, any> | null;
+  return data as Record<string, unknown> | null;
 }
 
 async function roleById(admin: SupabaseClient, roleId: string) {
@@ -189,6 +189,11 @@ async function roleById(admin: SupabaseClient, roleId: string) {
   if (!data.is_active) throw new Error("Selected role is no longer active.");
   if (!ASSIGNABLE_ROLES.has(data.name)) throw new Error("Only the four operational groups or System Administrator can be assigned.");
   return data;
+}
+
+function roleIdOf(user: Record<string, unknown>) {
+  const rows = user.user_roles as Array<{ role?: { id?: string } | null }> | undefined;
+  return rows?.[0]?.role?.id || null;
 }
 
 async function setSingleRole(admin: SupabaseClient, userId: string, roleId: string) {
@@ -212,7 +217,10 @@ async function activeAdminCount(admin: SupabaseClient) {
 async function isSystemAdministrator(admin: SupabaseClient, userId: string) {
   const { data, error } = await admin.from("user_roles").select("role:roles(name)").eq("user_id", userId);
   if (error) throw new Error(error.message);
-  return (data || []).some((row: any) => row.role?.name === "System Administrator");
+  return (data || []).some((row) => {
+    const role = row.role as unknown as { name?: string } | null;
+    return role?.name === "System Administrator";
+  });
 }
 
 async function activitySummary(admin: SupabaseClient, userId: string) {
@@ -304,9 +312,9 @@ async function updateUser(admin: SupabaseClient, context: AppContext, body: Acti
   if (!before) return fail("User not found", 404);
   const input = body.user || {};
 
-  let targetRole: any = null;
+  let targetRole: Awaited<ReturnType<typeof roleById>> | null = null;
   if (input.role_id) targetRole = await roleById(admin, input.role_id);
-  const effectiveSectionId = input.section_id !== undefined ? input.section_id : before.section_id;
+  const effectiveSectionId = input.section_id !== undefined ? input.section_id : (before.section_id as string | null);
   if (targetRole && SECTION_ROLES.has(targetRole.name) && !effectiveSectionId) return fail(`${targetRole.name} requires an assigned section.`);
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -322,8 +330,7 @@ async function updateUser(admin: SupabaseClient, context: AppContext, body: Acti
 
   let roleChanged: string | null = null;
   if (targetRole) {
-    const currentRoleId = before.user_roles?.[0]?.role?.id;
-    if (currentRoleId !== targetRole.id) {
+    if (roleIdOf(before) !== targetRole.id) {
       await setSingleRole(admin, body.userId, targetRole.id);
       roleChanged = targetRole.name;
     }
@@ -344,12 +351,12 @@ async function setActive(admin: SupabaseClient, context: AppContext, body: Actio
   if (!nextActive && userId === context.userId) return fail("You cannot deactivate your own account.");
   const before = await loadUser(admin, userId);
   if (!before) return fail("User not found", 404);
-  if (!nextActive && before.is_protected) return fail("This is a protected technical account and cannot be deactivated.");
+  if (!nextActive && before.is_protected === true) return fail("This is a protected technical account and cannot be deactivated.");
   if (!nextActive && await isSystemAdministrator(admin, userId) && await activeAdminCount(admin) <= 1) return fail("The final active System Administrator cannot be deactivated.");
 
   const { data: updated, error } = await admin.from("users").update({ is_active: nextActive, updated_at: new Date().toISOString() }).eq("id", userId).select(USER_FIELDS).single();
   if (error) return fail(error.message);
-  await banAuthUser(admin, before.auth_user_id, !nextActive);
+  await banAuthUser(admin, (before.auth_user_id as string | null) || null, !nextActive);
   await audit(admin, context, nextActive ? "USER_RESTORED" : "USER_DEACTIVATED", userId, updated.email, { oldValues: { is_active: before.is_active }, newValues: { is_active: nextActive } });
   return json({ user: updated });
 }
@@ -358,15 +365,16 @@ async function resetPassword(admin: SupabaseClient, context: AppContext, body: A
   if (!body.userId) return fail("userId is required.");
   const user = await loadUser(admin, body.userId);
   if (!user) return fail("User not found", 404);
-  if (!user.auth_user_id) return fail("This profile has no linked authentication account.");
+  const authUserId = (user.auth_user_id as string | null) || null;
+  if (!authUserId) return fail("This profile has no linked authentication account.");
   const password = body.generatePassword ? generateTemporaryPassword() : body.password || "";
   const errors = body.generatePassword ? [] : validatePassword(password, body.confirmPassword);
   if (errors.length) return json({ error: errors[0], errors }, 400);
-  const { error: authError } = await admin.auth.admin.updateUserById(user.auth_user_id, { password });
+  const { error: authError } = await admin.auth.admin.updateUserById(authUserId, { password });
   if (authError) return fail(authError.message);
   const now = new Date().toISOString();
   await admin.from("users").update({ must_change_password: true, password_set_at: now, updated_at: now }).eq("id", body.userId);
-  await audit(admin, context, "USER_PASSWORD_SET", body.userId, user.email || null, { metadata: { method: body.generatePassword ? "GENERATED_TEMPORARY" : "ADMINISTRATOR_RESET", must_change_password: true } });
+  await audit(admin, context, "USER_PASSWORD_SET", body.userId, (user.email as string | null) || null, { metadata: { method: body.generatePassword ? "GENERATED_TEMPORARY" : "ADMINISTRATOR_RESET", must_change_password: true } });
   return json({ ok: true, generatedPassword: body.generatePassword ? password : undefined });
 }
 
@@ -376,7 +384,7 @@ async function resendInvitation(admin: SupabaseClient, context: AppContext, body
   if (!user) return fail("User not found", 404);
   const now = new Date().toISOString();
   await admin.from("users").update({ invited_at: now, updated_at: now }).eq("id", body.userId);
-  await audit(admin, context, "USER_INVITATION_SENT", body.userId, user.email || null, { metadata: { includes_password: false, resend: true } });
+  await audit(admin, context, "USER_INVITATION_SENT", body.userId, (user.email as string | null) || null, { metadata: { includes_password: false, resend: true } });
   return json({ ok: true });
 }
 
@@ -388,12 +396,12 @@ async function archiveUser(admin: SupabaseClient, context: AppContext, body: Act
   if (userId === context.userId) return fail("You cannot archive your own account.");
   const user = await loadUser(admin, userId);
   if (!user) return fail("User not found", 404);
-  if (user.is_protected) return fail("This is a protected technical account and cannot be archived.");
+  if (user.is_protected === true) return fail("This is a protected technical account and cannot be archived.");
   if (await isSystemAdministrator(admin, userId) && await activeAdminCount(admin) <= 1) return fail("The final active System Administrator cannot be archived.");
   const now = new Date().toISOString();
   const { data: updated, error } = await admin.from("users").update({ is_active: false, archived_at: now, archived_by: context.userId, archive_reason: reason, updated_at: now }).eq("id", userId).select(USER_FIELDS).single();
   if (error) return fail(error.message);
-  await banAuthUser(admin, user.auth_user_id, true);
+  await banAuthUser(admin, (user.auth_user_id as string | null) || null, true);
   await audit(admin, context, "USER_ARCHIVED", userId, updated.email, { oldValues: user, newValues: updated, metadata: { reason } });
   return json({ user: updated, outcome: "ARCHIVED" });
 }
@@ -404,7 +412,7 @@ async function restoreUser(admin: SupabaseClient, context: AppContext, body: Act
   if (!user) return fail("User not found", 404);
   const { data: updated, error } = await admin.from("users").update({ is_active: true, archived_at: null, archived_by: null, archive_reason: null, updated_at: new Date().toISOString() }).eq("id", body.userId).select(USER_FIELDS).single();
   if (error) return fail(error.message);
-  await banAuthUser(admin, user.auth_user_id, false);
+  await banAuthUser(admin, (user.auth_user_id as string | null) || null, false);
   await audit(admin, context, "USER_RESTORED", body.userId, updated.email, { newValues: updated });
   return json({ user: updated });
 }
@@ -417,7 +425,7 @@ async function deleteUser(admin: SupabaseClient, context: AppContext, body: Acti
   if (userId === context.userId) return fail("You cannot delete your own account.");
   const user = await loadUser(admin, userId);
   if (!user) return fail("User not found", 404);
-  if (user.is_protected) return fail("This is a protected technical account. Archive it instead.");
+  if (user.is_protected === true) return fail("This is a protected technical account. Archive it instead.");
   if (await isSystemAdministrator(admin, userId) && await activeAdminCount(admin) <= 1) return fail("The final active System Administrator cannot be deleted.");
 
   const activity = await activitySummary(admin, userId);
@@ -431,11 +439,12 @@ async function deleteUser(admin: SupabaseClient, context: AppContext, body: Acti
   const { error: profileDeleteError } = await admin.from("users").delete().eq("id", userId);
   if (profileDeleteError) return fail(profileDeleteError.message);
 
-  if (user.auth_user_id) {
-    const { error: authDeleteError } = await admin.auth.admin.deleteUser(user.auth_user_id);
+  const authUserId = (user.auth_user_id as string | null) || null;
+  if (authUserId) {
+    const { error: authDeleteError } = await admin.auth.admin.deleteUser(authUserId);
     if (authDeleteError) console.error("Auth account deletion failed", authDeleteError.message);
   }
-  await audit(admin, context, "USER_DELETED", userId, user.email || null, { oldValues: user, metadata: { reason, activity } });
+  await audit(admin, context, "USER_DELETED", userId, (user.email as string | null) || null, { oldValues: user, metadata: { reason, activity } });
   return json({ ok: true, outcome: "DELETED" });
 }
 
