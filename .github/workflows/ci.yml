@@ -39,6 +39,9 @@ jobs:
       - name: Full and differential backup regression checks
         run: node lib/backup/full-differential-backup.test.mjs
 
+      - name: Master-data cleanup regression checks
+        run: node scripts/master-data-cleanup.test.mjs
+
       - name: Lint
         run: bun run lint
 
