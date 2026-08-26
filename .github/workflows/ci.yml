@@ -33,6 +33,9 @@ jobs:
       - name: Admin runtime fallback regression checks
         run: node lib/rbac/admin-runtime-fallback.test.mjs
 
+      - name: User CRUD Edge routing regression checks
+        run: node lib/rbac/user-crud-edge.test.mjs
+
       - name: Lint
         run: bun run lint
 
