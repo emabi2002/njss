@@ -1,0 +1,30 @@
+name: Apply Safe Revision Allocation
+
+on:
+  push:
+    branches:
+      - feature/budget-revision-implementation
+    paths:
+      - scripts/apply-safe-revision-allocation.py
+      - .github/workflows/apply-safe-revision-allocation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/budget-revision-implementation
+      - name: Apply safe revision allocation behavior
+        run: python scripts/apply-safe-revision-allocation.py
+      - name: Commit page update and remove helper
+        run: |
+          rm scripts/apply-safe-revision-allocation.py .github/workflows/apply-safe-revision-allocation.yml
+          git config user.name "emabi2002"
+          git config user.email "emabi2002@gmail.com"
+          git add app/dashboard/budget-template/page.tsx scripts/apply-safe-revision-allocation.py .github/workflows/apply-safe-revision-allocation.yml
+          git commit -m "fix: preserve locked months during revision allocation"
+          git push origin HEAD:feature/budget-revision-implementation
