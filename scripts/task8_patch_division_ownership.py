@@ -1,3 +1,4 @@
+# Triggered after patch runner workflow is present.
 from pathlib import Path
 
 p = Path('supabase/migrations/055_budget_revision_workspace_notifications.sql')
