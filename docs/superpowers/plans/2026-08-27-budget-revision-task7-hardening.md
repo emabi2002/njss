@@ -4,7 +4,7 @@
 
 **Goal:** Harden the approved NJSS budget-revision workflow against scope bypasses, invalid financial movements, ambiguous allocation lineage, and direct-table mutation paths while enforcing the approved business sequence: Registrar requests the post-approval change, the responsible Line Supervisor reviews/adjusts and submits their section budget, and the Registrar performs the final approve/return/reject decision.
 
-**Architecture:** Keep migrations 051–053 intact and use migration 054 as the additive hardening/correction layer. The existing SECURITY DEFINER revision RPCs remain internal workers behind hardened public wrappers. Business-role ownership is enforced at the database boundary, not only in the UI: Registrar-only initiation; Line-Supervisor-only draft preparation/submission within SECTION_WIDE scope; Registrar-only final disposition. There is no externally exposed separate revision REVIEW action. The single Registrar Approve action may use the legacy REVIEWED state internally and atomically because migration 052 expects it before approval.
+**Architecture:** Keep migrations 051–053 intact and use migration 054 as the additive hardening/correction layer. The existing SECURITY DEFINER revision RPCs remain internal workers behind hardened public wrappers. Business-role ownership is enforced at the database boundary and mirrored in the UI: Registrar-only initiation; Line-Supervisor-only draft preparation/submission within SECTION_WIDE scope; Registrar-only final disposition. Generic technical `all` permission alone does not expose these business workflow buttons. There is no externally exposed separate revision REVIEW action. The single Registrar Approve action may use the legacy REVIEWED state internally and atomically because migration 052 expects it before approval.
 
 **Tech Stack:** PostgreSQL/Supabase RLS and SECURITY DEFINER RPCs, Next.js API routing, React/Next.js Budget Preparation UI, Node source-level regression checks, GitHub Actions CI.
 
@@ -19,6 +19,7 @@
 - The Line Supervisor cannot approve the revision.
 - The Registrar does not prepare the revised line figures; after submission the Registrar can APPROVE, RETURN or REJECT.
 - Requisition Officer and Payment/Reconciliation Officer remain view/report only for revision workflow purposes.
+- System Administrator remains technical-only: broad technical permission does not make that role a Registrar or Line Supervisor for revision actions.
 - Do not apply migrations 051–054 to live Supabase during Task 7.
 - Do not merge PR #11 during Task 7.
 - Correct Netlify preview gate is `netlify/njsscrem/deploy-preview`.
@@ -63,6 +64,7 @@
 - [x] **Step 6: Remove externally exposed revision REVIEW action** from API/client/UI. Registrar Approve is available directly after SUBMITTED/RESUBMITTED and performs any legacy REVIEWED transition internally and atomically.
 - [x] **Step 7: Preserve financial validation**: REFORECAST annual neutrality; REDUCTION one-way negative movement; balanced VIREMENT/RECLASSIFICATION; only Supplementary may increase the total envelope; funded-floor protection; exact active cost-centre/posting-code/Chart-of-Accounts mappings for new targets.
 - [x] **Step 8: Preserve direct-write trigger guards** and base-function revocations so UI/API bypasses do not weaken database controls.
+- [x] **Step 9: Mirror business-role ownership in the UI** so `Request Budget Change` is Registrar-only, revision editing/submission is Line-Supervisor-only, and final disposition buttons are Registrar-only even where a technical role has broad permissions.
 
 ### Task 3: Verify and review
 
