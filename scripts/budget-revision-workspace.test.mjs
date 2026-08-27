@@ -63,6 +63,8 @@ for (const token of [
 ]) assert.ok(workspaceService.includes(token), `workspace service missing ${token}`)
 assert.ok(workspaceService.includes('departmentByCode'), 'approved budget candidates must derive the owning organisational department by division code when section linkage is absent')
 assert.match(workspaceService, /division\?\.code[\s\S]*departmentByCode/i, 'candidate ownership mapping must use budget division code before falling back to umbrella department linkage')
+assert.ok(workspaceService.includes('source_budget_line_id'), 'approved budget candidate filtering must inspect operational allocation lineage')
+assert.ok(workspaceService.includes('revisionReadySubmissionIds'), 'only approved submissions with complete active operational allocation lineage may be offered for revision')
 
 assert.ok(fs.existsSync('app/dashboard/budget/revisions/page.tsx'))
 assert.ok(fs.existsSync('app/dashboard/budget/revisions/BudgetRevisionRequestDialog.tsx'))
@@ -82,6 +84,7 @@ for (const label of [
   'Instruction to Line Supervisor', 'Responsible Line Supervisor',
 ]) assert.ok(requestDialog.includes(label), `request dialog missing ${label}`)
 assert.ok(requestDialog.includes('No active Line Supervisor is assigned to this section'), 'request dialog must block missing supervisor configuration')
+assert.ok(requestDialog.toLowerCase().includes('operational allocation'), 'empty candidate guidance must explain the operational-allocation prerequisite')
 assert.ok(requestDialog.includes('initialParentId ? candidates.find'), 'an explicit parent deep link must never silently fall back to another approved budget')
 assert.ok(requestDialog.includes('if (parentSubmissionId || candidates.length === 0) return'), 'request dialog must hydrate selection after async candidates arrive')
 assert.ok(requestDialog.includes('setParentSubmissionId(next.submission_id)'), 'async candidate hydration must restore the requested approved parent')
