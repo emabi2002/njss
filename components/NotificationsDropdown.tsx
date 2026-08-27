@@ -51,6 +51,9 @@ export function NotificationsDropdown() {
     if (notification.reference_type === 'FF4') {
       return `/dashboard/ff4/${notification.reference_id}`
     }
+    if (notification.reference_type === 'BUDGET_REVISION') {
+      return `/dashboard/budget/revisions?revision=${encodeURIComponent(notification.reference_id)}`
+    }
     return '/dashboard'
   }
 
