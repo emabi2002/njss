@@ -96,5 +96,7 @@ assert.ok(budgetPage.includes('getBudgetRevisionPosition'), 'budget page must lo
 assert.ok(budgetPage.includes('getBudgetRevisionHistory'), 'budget page must load revision history')
 assert.ok(budgetPage.includes('closed_month_numbers'), 'budget page must protect closed revision months')
 assert.ok(budgetPage.includes('source_budget_allocation_id'), 'budget page must distinguish protected baseline rows')
+assert.ok(budgetPage.includes('isRevisionMonthLocked'), 'budget page must disable closed/actual revision months')
+assert.ok(budgetPage.includes('protectedBaseline'), 'budget page must disable destructive changes to baseline rows')
 
 console.log('budget revision and reforecast regression checks passed')
