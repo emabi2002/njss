@@ -232,7 +232,6 @@ export default function BudgetTemplatePage() {
   const canRevisionCreate = can("budget.revision.create")
   const canRevisionEdit = can("budget.revision.edit")
   const canRevisionSubmit = can("budget.revision.submit")
-  const canRevisionReview = can("budget.revision.review")
   const canRevisionReturn = can("budget.revision.return")
   const canRevisionReject = can("budget.revision.reject")
   const canRevisionApprove = can("budget.revision.approve")
@@ -478,7 +477,7 @@ export default function BudgetTemplatePage() {
       setShowRevisionDialog(false)
       await loadDashboard()
       setSelectedId(result.revision_submission_id)
-      setMessage({ type: "ok", text: `${result.revision_number} created as a controlled revision draft. The approved baseline remains locked.` })
+      setMessage({ type: "ok", text: `${result.revision_number} requested. The Line Supervisor can now review and adjust the controlled revision draft; the approved baseline remains locked.` })
     } catch (err) {
       setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not create the budget revision." })
     } finally {
@@ -724,7 +723,7 @@ export default function BudgetTemplatePage() {
     }
   }
 
-  const runRevisionAction = async (action: "SUBMIT" | "RESUBMIT" | "RETURN" | "REVIEW" | "APPROVE" | "REJECT") => {
+  const runRevisionAction = async (action: "SUBMIT" | "RESUBMIT" | "RETURN" | "APPROVE" | "REJECT") => {
     if (!selected || !revision) return
     const filledRows = gridRows.filter((row) => !isEmptyRow(row))
     if (["SUBMIT", "RESUBMIT"].includes(action)) {
@@ -1123,7 +1122,7 @@ export default function BudgetTemplatePage() {
                 <div className="flex flex-wrap gap-2">
                   {canCreateRevision && (
                     <button onClick={() => setShowRevisionDialog(true)} disabled={saving} className="btn-primary">
-                      <Plus className="h-4 w-4" /> Create Budget Revision
+                      <Plus className="h-4 w-4" /> Request Budget Change
                     </button>
                   )}
 
@@ -1165,11 +1164,6 @@ export default function BudgetTemplatePage() {
                           <Send className="h-4 w-4" /> {revision.status === "RETURNED" ? "Resubmit Revision" : "Submit Revision"}
                         </button>
                       )}
-                      {["SUBMITTED", "RESUBMITTED"].includes(revision.status) && canRevisionReview && (
-                        <button onClick={() => runRevisionAction("REVIEW")} disabled={saving} className="btn-primary">
-                          <ShieldCheck className="h-4 w-4" /> Review Revision
-                        </button>
-                      )}
                       {["SUBMITTED", "RESUBMITTED"].includes(revision.status) && canRevisionReturn && (
                         <button onClick={() => runRevisionAction("RETURN")} disabled={saving} className="btn-light">
                           <Undo2 className="h-4 w-4" /> Return Revision
@@ -1180,7 +1174,7 @@ export default function BudgetTemplatePage() {
                           Reject Revision
                         </button>
                       )}
-                      {revision.status === "REVIEWED" && canRevisionApprove && (
+                      {["SUBMITTED", "RESUBMITTED"].includes(revision.status) && canRevisionApprove && (
                         <button onClick={() => runRevisionAction("APPROVE")} disabled={saving} className="btn-primary">
                           <CheckCircle2 className="h-4 w-4" /> Approve Revision
                         </button>

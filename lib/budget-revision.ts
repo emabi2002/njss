@@ -10,7 +10,6 @@ export type BudgetRevisionType =
 export type BudgetRevisionAction =
   | 'SUBMIT'
   | 'RESUBMIT'
-  | 'REVIEW'
   | 'RETURN'
   | 'REJECT'
   | 'APPROVE'

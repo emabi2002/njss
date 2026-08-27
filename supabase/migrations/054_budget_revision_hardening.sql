@@ -4,7 +4,7 @@
 --
 -- Objectives:
 --   * enforce strict organisational scope for revision mutations (no own-record bypass)
---   * enforce maker/checker separation for review and approval
+--   * enforce Registrar-initiation / Line-Supervisor-preparation / Registrar-disposition workflow
 --   * constrain each revision type to its intended accounting meaning
 --   * prevent reductions below already-approved funding
 --   * require exact operational/master-data lineage for revision target rows
@@ -13,6 +13,32 @@
 -- =============================================================================
 
 BEGIN;
+
+-- -----------------------------------------------------------------------------
+-- 0. Correct revision workflow ownership.
+--    Registrar alone initiates a post-approval change. The Line Supervisor for
+--    the affected section prepares/adjusts and submits it. Registrar then
+--    approves, returns or rejects it. The legacy 051 Line Supervisor create
+--    grant is explicitly disabled here because 051 has not been deployed live.
+-- -----------------------------------------------------------------------------
+INSERT INTO role_permissions (role_id, permission, is_allowed)
+SELECT r.id, x.permission, x.is_allowed
+FROM roles r
+JOIN (VALUES
+  ('Registrar', 'budget.revision.create', true),
+  ('Registrar', 'budget.revision.review', true),
+  ('Registrar', 'budget.revision.approve', true),
+  ('Registrar', 'budget.revision.return', true),
+  ('Registrar', 'budget.revision.reject', true),
+  ('Registrar', 'budget.revision.edit', false),
+  ('Registrar', 'budget.revision.submit', false),
+  ('Line Supervisor', 'budget.revision.create', false),
+  ('Line Supervisor', 'budget.revision.edit', true),
+  ('Line Supervisor', 'budget.revision.submit', true)
+) AS x(role_name, permission, is_allowed)
+  ON x.role_name = r.name
+ON CONFLICT (role_id, permission) DO UPDATE
+SET is_allowed = EXCLUDED.is_allowed;
 
 -- -----------------------------------------------------------------------------
 -- 1. Reassert one active operational allocation per approved source budget line.
@@ -80,6 +106,23 @@ BEGIN
 
   IF v_user_id IS NULL THEN
     RAISE EXCEPTION 'Authenticated NJSS user profile is required.';
+  END IF;
+
+  -- Registrar creation clones the approved baseline through the hardened
+  -- creation wrapper. Ordinary editing remains Line-Supervisor-only.
+  IF COALESCE(current_setting('njss.budget_revision_create', true), '') = 'on' THEN
+    RETURN;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = v_user_id
+      AND r.name = 'Line Supervisor'
+      AND r.is_active = true
+  ) THEN
+    RAISE EXCEPTION 'Only the Line Supervisor can prepare or edit a requested budget revision.';
   END IF;
 
   IF revision_status NOT IN ('DRAFT','RETURNED') THEN
@@ -242,6 +285,15 @@ BEGIN
     RETURN NEW;
   END IF;
 
+
+  -- Registrar initiation also performs system-controlled header recalculation
+  -- while cloning the approved baseline. This bypass is set only after the
+  -- hardened creation wrapper confirms the Registrar role.
+  IF COALESCE(current_setting('njss.budget_revision_create', true), '') = 'on' THEN
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END IF;
+
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'Budget revision submissions cannot be deleted; reject or supersede them through the revision workflow.';
   END IF;
@@ -254,10 +306,17 @@ BEGIN
   IF v_revision.status NOT IN ('DRAFT','RETURNED') THEN
     RAISE EXCEPTION 'Budget revision submission cannot be edited in status %.', v_revision.status;
   END IF;
-  IF NOT (
-    COALESCE(fn_current_user_has_permission('budget.revision.edit'), false)
-    OR COALESCE(fn_current_user_has_permission('all'), false)
+  IF NOT EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = fn_current_app_user_id()
+      AND r.name = 'Line Supervisor'
+      AND r.is_active = true
   ) THEN
+    RAISE EXCEPTION 'Only the Line Supervisor can prepare or edit a requested budget revision.';
+  END IF;
+  IF NOT COALESCE(fn_current_user_has_permission('budget.revision.edit'), false) THEN
     RAISE EXCEPTION 'Permission denied: budget.revision.edit is required to modify a revision submission.';
   END IF;
   IF NOT fn_current_user_data_scope_allows(v_division.department_id, v_division.section_id, NULL, NULL, NULL) THEN
@@ -468,10 +527,18 @@ BEGIN
     RAISE EXCEPTION 'Authenticated NJSS user profile is required.';
   END IF;
 
-  IF NOT (
-    COALESCE(fn_current_user_has_permission('budget.revision.create'), false)
-    OR COALESCE(fn_current_user_has_permission('all'), false)
+  IF NOT EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = v_user_id
+      AND r.name = 'Registrar'
+      AND r.is_active = true
   ) THEN
+    RAISE EXCEPTION 'Only the Registrar can initiate a budget revision or supplementary budget request.';
+  END IF;
+
+  IF NOT COALESCE(fn_current_user_has_permission('budget.revision.create'), false) THEN
     RAISE EXCEPTION 'Permission denied: budget.revision.create is required.';
   END IF;
 
@@ -524,6 +591,10 @@ BEGIN
     RAISE EXCEPTION 'Approved source row % must have exactly one active operational budget allocation; found %.', v_bad_line, COALESCE(v_allocation_count, 0);
   END IF;
 
+  -- Permit only the trusted cloning/recalculation work performed inside the
+  -- base creator. Direct user edits remain protected by the Line Supervisor guard.
+  PERFORM set_config('njss.budget_revision_create', 'on', true);
+
   RETURN public.njss_create_budget_revision_base(
     p_parent_submission_id,
     p_revision_type,
@@ -540,8 +611,8 @@ REVOKE ALL ON FUNCTION public.njss_create_budget_revision(UUID,TEXT,TEXT,TEXT,DA
 GRANT EXECUTE ON FUNCTION public.njss_create_budget_revision(UUID,TEXT,TEXT,TEXT,DATE,TEXT,TEXT) TO authenticated;
 
 -- -----------------------------------------------------------------------------
--- 5. Harden transitions. Reviewer/approver cannot be the requester; rejection
---    must be reasoned; and every mutation is constrained to current strict scope.
+-- 5. Harden transitions. Line Supervisor prepares/submits the Registrar-requested
+--    change. Registrar alone performs final approve/return/reject disposition.
 -- -----------------------------------------------------------------------------
 ALTER FUNCTION public.njss_transition_budget_revision(UUID,TEXT,TEXT,TEXT)
   RENAME TO njss_transition_budget_revision_base;
@@ -592,8 +663,36 @@ BEGIN
     RAISE EXCEPTION 'Budget revision is outside the current user organisational scope.';
   END IF;
 
-  IF v_action IN ('REVIEW','APPROVE') AND v_revision.requested_by = v_user_id THEN
-    RAISE EXCEPTION 'Requester cannot review or approve their own budget revision.';
+  IF v_action IN ('SUBMIT','RESUBMIT') THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM user_roles ur
+      JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = v_user_id
+        AND r.name = 'Line Supervisor'
+        AND r.is_active = true
+    ) THEN
+      RAISE EXCEPTION 'Only the Line Supervisor can submit a budget revision requested for their section.';
+    END IF;
+  ELSIF v_action IN ('APPROVE','RETURN','REJECT') THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM user_roles ur
+      JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = v_user_id
+        AND r.name = 'Registrar'
+        AND r.is_active = true
+    ) THEN
+      RAISE EXCEPTION 'Only the Registrar can approve, return or reject a budget revision.';
+    END IF;
+  ELSIF v_action = 'REVIEW' THEN
+    RAISE EXCEPTION 'A separate revision review action is not used. The Line Supervisor submits and the Registrar approves, returns or rejects.';
+  ELSE
+    RAISE EXCEPTION 'Unsupported budget revision action: %', p_action;
+  END IF;
+
+  IF v_action='APPROVE' AND v_revision.status NOT IN ('SUBMITTED','RESUBMITTED') THEN
+    RAISE EXCEPTION 'Registrar approval requires a budget revision submitted by the Line Supervisor.';
   END IF;
 
   IF v_action = 'RETURN' AND COALESCE(TRIM(p_comments), '') = '' THEN
@@ -606,6 +705,24 @@ BEGIN
   -- Distinguish the dedicated revision transition from the initial-budget
   -- workflow. The submission guard rejects status changes without this flag.
   PERFORM set_config('njss.budget_revision_workflow', 'on', true);
+
+  -- The 052 worker expects REVIEWED before APPROVE. Keep that internal state
+  -- transition atomic inside the single Registrar Approve action; the UI/API do
+  -- not expose a separate Review Revision action.
+  IF v_action = 'APPROVE' THEN
+    PERFORM public.njss_transition_budget_revision_base(
+      p_revision_id,
+      'REVIEW',
+      'Registrar final approval review',
+      p_user_email
+    );
+    RETURN public.njss_transition_budget_revision_base(
+      p_revision_id,
+      'APPROVE',
+      p_comments,
+      p_user_email
+    );
+  END IF;
 
   RETURN public.njss_transition_budget_revision_base(
     p_revision_id,

@@ -69,13 +69,13 @@ export function BudgetRevisionDialog({ open, parentSubmissionId, saving = false,
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label="Create Budget Revision">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label="Request Budget Change">
       <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-slate-200 bg-[#1f4e79] px-5 py-4 text-white">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blue-100">Controlled post-approval change</p>
-            <h2 className="mt-1 text-lg font-bold">Create Budget Revision</h2>
-            <p className="mt-1 max-w-xl text-xs text-blue-100">The approved budget remains locked. NJSS creates a new revision version for adjustment and approval.</p>
+            <h2 className="mt-1 text-lg font-bold">Request Budget Change</h2>
+            <p className="mt-1 max-w-xl text-xs text-blue-100">The approved budget remains locked. The Registrar opens the change request; the responsible Line Supervisor reviews and adjusts the revision before submitting it back to the Registrar for approval.</p>
           </div>
           <button type="button" onClick={closeDialog} disabled={saving} className="rounded-lg p-1.5 text-blue-100 hover:bg-white/10 hover:text-white" aria-label="Close revision dialog">
             <X className="h-5 w-5" />
@@ -128,7 +128,7 @@ export function BudgetRevisionDialog({ open, parentSubmissionId, saving = false,
         <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
           <button type="button" onClick={closeDialog} disabled={saving} className="btn-light">Cancel</button>
           <button type="button" onClick={submit} disabled={saving} className="btn-primary">
-            {saving ? "Creating Revision..." : "Create Budget Revision"}
+            {saving ? "Creating Request..." : "Request Budget Change"}
           </button>
         </div>
       </div>

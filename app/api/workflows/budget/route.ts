@@ -22,7 +22,6 @@ const SUBMISSION_PERMISSION: Record<string, string[]> = {
 const REVISION_PERMISSION: Record<string, string[]> = {
   SUBMIT: ['budget.revision.submit'],
   RESUBMIT: ['budget.revision.submit'],
-  REVIEW: ['budget.revision.review'],
   RETURN: ['budget.revision.return'],
   REJECT: ['budget.revision.reject'],
   APPROVE: ['budget.revision.approve'],
