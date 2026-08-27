@@ -21,6 +21,7 @@ for (const required of [
   'RETURNED',
   'budget_monthly_allocations',
   'divisional_budget_lines',
+  'divisional_budget_submissions',
   'REFORECAST',
   'REDUCTION',
   'VIREMENT',
@@ -76,7 +77,14 @@ for (const message of [
 // Direct revision-table edits must be guarded independently of browser/API checks.
 assert.ok(lower.includes('create trigger trg_budget_revision_line_write_guard'), 'revision line write guard trigger is required')
 assert.ok(lower.includes('create trigger trg_budget_revision_monthly_write_guard'), 'revision monthly write guard trigger is required')
+assert.ok(lower.includes('create trigger trg_budget_revision_submission_write_guard'), 'revision submission write guard trigger is required')
 assert.match(lower, /revision_status\s+not\s+in\s*\('draft','returned'\)/, 'only DRAFT/RETURNED revisions may be edited directly')
+
+// The ordinary initial-budget transition path must not be able to transition a revision version.
+assert.ok(lower.includes("current_setting('njss.budget_revision_workflow', true)"), 'revision status changes need a dedicated transaction-local workflow flag')
+assert.ok(lower.includes("set_config('njss.budget_revision_workflow', 'on', true)"), 'only the hardened revision transition wrapper should set the dedicated flag')
+assert.ok(lower.includes('budget revision status can only be changed through the dedicated budget revision workflow'), 'generic budget workflow status changes must be blocked for revision submissions')
+assert.ok(lower.includes('transition_divisional_budget_submission'), 'migration must document the initial-budget RPC bypass being guarded')
 
 // No ambiguous first-row account fallback may remain usable for new target allocations.
 assert.ok(
