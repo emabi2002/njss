@@ -123,6 +123,14 @@ const BUDGET_PERMISSIONS = [
   ['funding.allocate', 'Allocate funding to approved budgets'],
   ['funding.allocation.approve', 'Approve funding allocations'],
   ['budget.control.view', 'View authoritative budget control'],
+  ['budget.revision.view', 'View budget revisions'],
+  ['budget.revision.create', 'Create budget revisions'],
+  ['budget.revision.edit', 'Edit budget revision drafts'],
+  ['budget.revision.submit', 'Submit budget revisions'],
+  ['budget.revision.review', 'Review budget revisions'],
+  ['budget.revision.approve', 'Approve budget revisions'],
+  ['budget.revision.reject', 'Reject budget revisions'],
+  ['budget.revision.report', 'View budget revision reports'],
 ]
 
 const ADMIN_PERMISSIONS = [
@@ -144,6 +152,7 @@ export const PERMISSION_CATALOG: RbacPermission[] = [
   { code: 'all', module_code: 'administration', action: 'manage', label: 'Full system access', is_active: true },
   { code: 'dashboard.view', module_code: 'njss_operations', action: 'view', label: 'View dashboard', is_active: true },
   ...BUDGET_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'njss_operations', action: actionFromCode(code), is_active: true }) as RbacPermission),
+  { code: 'budget.revision.return', module_code: 'njss_operations', action: 'edit', label: 'Return budget revisions', is_active: true },
   ...FINANCE_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'njss_operations', action: actionFromCode(code), is_active: true }) as RbacPermission),
   { code: 'reports.view', module_code: 'njss_operations', action: 'view', label: 'View reports', is_active: true },
   { code: 'reports.export', module_code: 'njss_operations', action: 'export', label: 'Export reports', is_active: true },
