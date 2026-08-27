@@ -44,6 +44,18 @@ import { LookupSelect, type LookupOption } from "@/components/LookupSelect"
 import { loadActiveUsers, loadLookup } from "@/lib/lookups"
 import { findDuplicateBudgetCycle, selectBudgetCycle } from "@/lib/budget-cycle-ui"
 import { findDuplicateBudgetDivision } from "@/lib/budget-division-ui"
+import {
+  createBudgetRevision,
+  getBudgetRevisionHistory,
+  getBudgetRevisionPosition,
+  getRevisionForSubmission,
+  transitionBudgetRevision,
+  type BudgetRevision,
+  type BudgetRevisionPosition,
+  type CreateBudgetRevisionInput,
+} from "@/lib/budget-revision"
+import { BudgetRevisionDialog } from "./BudgetRevisionDialog"
+import { BudgetRevisionPanel } from "./BudgetRevisionPanel"
 
 type FundingSource = { id: string; code: string; name: string }
 type LookupState = {
@@ -208,12 +220,27 @@ export default function BudgetTemplatePage() {
   const [showCycleForm, setShowCycleForm] = useState(false)
   const [newCycle, setNewCycle] = useState({ budget_year: String(new Date().getFullYear() + 1), cycle_type: "ANNUAL", name: "", submission_deadline: "", department_ceiling: "" })
   const [draftHeader, setDraftHeader] = useState({ cycle_id: "", division_id: "", budget_ceiling: "", submission_reference: "" })
+  const [revision, setRevision] = useState<BudgetRevision | null>(null)
+  const [revisionPosition, setRevisionPosition] = useState<BudgetRevisionPosition[]>([])
+  const [revisionHistory, setRevisionHistory] = useState<BudgetRevision[]>([])
+  const [showRevisionDialog, setShowRevisionDialog] = useState(false)
 
   const canAdmin = can("masterdata.manage") || can("registry.manage") || can("users.manage") || can("budget.template.approve")
   const canEdit = can("budget.template.edit") || can("budget.template.create") || can("budget.template") || can("budget.template.submit")
   const canReview = can("budget.template.review")
   const canApprove = can("budget.template.approve")
-  const selectedLocked = selected?.is_locked || ["SUBMITTED", "RESUBMITTED", "REVIEWED", "APPROVED", "ARCHIVED"].includes(selected?.status || "")
+  const canRevisionCreate = can("budget.revision.create")
+  const canRevisionEdit = can("budget.revision.edit")
+  const canRevisionSubmit = can("budget.revision.submit")
+  const canRevisionReview = can("budget.revision.review")
+  const canRevisionReturn = can("budget.revision.return")
+  const canRevisionReject = can("budget.revision.reject")
+  const canRevisionApprove = can("budget.revision.approve")
+  const revisionEditable = Boolean(revision && ["DRAFT", "RETURNED"].includes(revision.status) && canRevisionEdit)
+  const selectedLocked = revision
+    ? !revisionEditable
+    : Boolean(selected?.is_locked || ["SUBMITTED", "RESUBMITTED", "REVIEWED", "APPROVED", "ARCHIVED"].includes(selected?.status || "") || !canEdit)
+  const canCreateRevision = Boolean(selected && selected.status === "APPROVED" && !selected.superseded_by_id && canRevisionCreate)
 
   const restrictedDivisionUser = !canAdmin && !canReview && !canApprove
   const profileDepartment = profile?.department || ""
@@ -266,6 +293,18 @@ export default function BudgetTemplatePage() {
   const hasVariance = gridRows.some((row) => !isEmptyRow(row) && Math.abs(variance(row)) >= 0.01)
   const invalidLineCount = gridRows.filter((row) => !isEmptyRow(row) && !hasMandatory(row)).length
   const validationLabel = gridRows.some((row) => !isEmptyRow(row)) && !hasVariance && invalidLineCount === 0 ? "VALID" : "CHECK VARIANCES"
+  const revisionPositionByLine = useMemo(
+    () => new Map(revisionPosition.map((item) => [item.revision_budget_line_id, item])),
+    [revisionPosition]
+  )
+  const revisionPositionForRow = (row: GridRow) => (row.id ? revisionPositionByLine.get(row.id) : undefined)
+  const isProtectedRevisionRow = (row: GridRow) => Boolean(revision && revisionPositionForRow(row)?.source_budget_allocation_id)
+  const isRevisionMonthLocked = (row: GridRow, monthIndex: number) => {
+    const position = revisionPositionForRow(row)
+    if (!revision || !position?.source_budget_allocation_id) return false
+    const monthNumber = monthIndex + 1
+    return position.closed_month_numbers.includes(monthNumber) || Number(position.actual_monthly?.[String(monthNumber)] || 0) > 0
+  }
 
   const loadDashboard = useCallback(async () => {
     setLoading(true)
@@ -303,6 +342,9 @@ export default function BudgetTemplatePage() {
       setGridRows([])
       setSelectedRows([])
       setHistory([])
+      setRevision(null)
+      setRevisionPosition([])
+      setRevisionHistory([])
       return
     }
     setLoading(true)
@@ -314,6 +356,20 @@ export default function BudgetTemplatePage() {
       setSelectedRows([])
       setHistory(detail.history || [])
       setSelectedRow(rows[0]?.clientId || "")
+
+      const loadedRevision = await getRevisionForSubmission(detail.submission.id)
+      setRevision(loadedRevision)
+      if (loadedRevision) {
+        const [positionRows, versionRows] = await Promise.all([
+          getBudgetRevisionPosition(loadedRevision.id),
+          getBudgetRevisionHistory(loadedRevision.parent_submission_id),
+        ])
+        setRevisionPosition(positionRows)
+        setRevisionHistory(versionRows as BudgetRevision[])
+      } else {
+        setRevisionPosition([])
+        setRevisionHistory([])
+      }
     } catch (err) {
       setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not load the selected submission." })
     } finally {
@@ -408,6 +464,23 @@ export default function BudgetTemplatePage() {
       await loadDashboard()
     } catch (err) {
       setMessage({ type: "err", text: err instanceof Error ? `Could not create the draft submission: ${err.message}` : "Could not create the draft submission." })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const createRevisionFromSelected = async (input: CreateBudgetRevisionInput) => {
+    if (!selected) return
+    setSaving(true)
+    setMessage(null)
+    try {
+      const result = await createBudgetRevision(input)
+      setShowRevisionDialog(false)
+      await loadDashboard()
+      setSelectedId(result.revision_submission_id)
+      setMessage({ type: "ok", text: `${result.revision_number} created as a controlled revision draft. The approved baseline remains locked.` })
+    } catch (err) {
+      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not create the budget revision." })
     } finally {
       setSaving(false)
     }
@@ -508,6 +581,7 @@ export default function BudgetTemplatePage() {
     }
   }
 
+  const selectableGridRows = gridRows.filter((row) => !isProtectedRevisionRow(row))
   const addRow = () => setGridRows((rows) => [...rows, newRow(rows.length + 1)])
   const duplicateRow = () => {
     const source = gridRows.find((row) => row.clientId === selectedRow)
@@ -515,19 +589,19 @@ export default function BudgetTemplatePage() {
     setGridRows((rows) => [...rows, { ...source, id: undefined, clientId: clientId(), line_number: rows.length + 1 }])
   }
 
-  const allRowsSelected = gridRows.length > 0 && gridRows.every((row) => selectedRows.includes(row.clientId))
+  const allRowsSelected = selectableGridRows.length > 0 && selectableGridRows.every((row) => selectedRows.includes(row.clientId))
 
   const toggleSelectedRow = (clientIdValue: string) => {
     setSelectedRows((rows) => (rows.includes(clientIdValue) ? rows.filter((id) => id !== clientIdValue) : [...rows, clientIdValue]))
   }
 
   const toggleSelectAllRows = () => {
-    setSelectedRows(allRowsSelected ? [] : gridRows.map((row) => row.clientId))
+    setSelectedRows(allRowsSelected ? [] : selectableGridRows.map((row) => row.clientId))
   }
 
   const removeSelectedRows = async () => {
     if (selectedRows.length === 0) return
-    const rowsToDelete = gridRows.filter((item) => selectedRows.includes(item.clientId))
+    const rowsToDelete = gridRows.filter((item) => selectedRows.includes(item.clientId) && !isProtectedRevisionRow(item))
     if (rowsToDelete.length === 0) return
     const savedRows = rowsToDelete.filter((row) => row.id)
     if (savedRows.length > 0 && selected && !confirm(`Delete ${rowsToDelete.length} selected budget row${rowsToDelete.length === 1 ? "" : "s"}?`)) return
@@ -622,6 +696,49 @@ export default function BudgetTemplatePage() {
     }
   }
 
+  const runRevisionAction = async (action: "SUBMIT" | "RESUBMIT" | "RETURN" | "REVIEW" | "APPROVE" | "REJECT") => {
+    if (!selected || !revision) return
+    const filledRows = gridRows.filter((row) => !isEmptyRow(row))
+    if (["SUBMIT", "RESUBMIT"].includes(action)) {
+      if (filledRows.length === 0) {
+        setMessage({ type: "err", text: "Add at least one valid budget line before submitting the revision." })
+        return
+      }
+      if (filledRows.some((row) => !isValidLine(row))) {
+        setMessage({ type: "err", text: "Revision submission blocked. Complete mandatory fields and zero all monthly variances first." })
+        return
+      }
+      const protectedBreach = filledRows.find((row) => {
+        const position = revisionPositionForRow(row)
+        return position && annualEstimate(row) + 0.009 < Number(position.protected_minimum || 0)
+      })
+      if (protectedBreach) {
+        setMessage({ type: "err", text: `Revision row ${protectedBreach.line_number} is below its Protected Minimum. Increase the proposed amount before submission.` })
+        return
+      }
+      const saved = await saveGridDraft()
+      if (!saved) return
+    }
+
+    const comments = action === "RETURN" || action === "REJECT" ? window.prompt("Comments / reason:") || "" : ""
+    if (action === "RETURN" && !comments.trim()) {
+      setMessage({ type: "err", text: "A return reason is required." })
+      return
+    }
+
+    setSaving(true)
+    try {
+      await transitionBudgetRevision(revision.id, action, comments)
+      await loadSubmission(selected.id)
+      await loadDashboard()
+      setMessage({ type: "ok", text: `Budget revision ${action.toLowerCase()} action completed.` })
+    } catch (err) {
+      setMessage({ type: "err", text: err instanceof Error ? err.message : "Budget revision workflow action failed." })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleGridKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Enter") return
     const inputs = Array.from(gridRef.current?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input,select,textarea") || [])
@@ -634,7 +751,7 @@ export default function BudgetTemplatePage() {
   }
 
   const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
-    if (selectedLocked) return
+    if (selectedLocked || revision) return
     const text = event.clipboardData.getData("text")
     if (!text.includes("\t") && !text.includes("\n")) return
     event.preventDefault()
@@ -778,7 +895,8 @@ export default function BudgetTemplatePage() {
             <HeaderCell label="Date Prepared" value={selected.date_prepared ? new Date(selected.date_prepared).toLocaleDateString("en-GB") : "-"} />
             <HeaderCell label="Submission Reference" value={selected.submission_reference || "-"} />
             <HeaderCell label="Version" value={String(selected.version || 1)} />
-            <HeaderCell label="Budget Ceiling" value={money(selected.budget_ceiling || 0)} />
+            <HeaderCell label="Version Position" value={selected.superseded_by_id ? "Historical" : selected.status === "APPROVED" ? "Current Authoritative" : revision ? "Revision in Progress" : "Working Version"} />
+            <HeaderCell label="Budget Ceiling" value={money(selected.budget_ceiling || 0)} strong />
             <HeaderCell label="Total Proposed Budget" value={money(totalProposed)} strong />
             <HeaderCell label="Monthly Allocation Total" value={money(totalMonthly)} strong />
             <HeaderCell label="Unallocated / Variance" value={money(totalVariance)} alert={Math.abs(totalVariance) >= 0.01} />
@@ -951,6 +1069,13 @@ export default function BudgetTemplatePage() {
             <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Select or create a divisional budget sheet to begin.</div>
           ) : (
             <>
+              <BudgetRevisionPanel
+                revision={revision}
+                position={revisionPosition}
+                history={revisionHistory}
+                currentAuthoritative={Boolean(selected.status === "APPROVED" && !selected.superseded_by_id)}
+              />
+
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                 <div className="flex flex-wrap gap-2">
                   <button onClick={addRow} disabled={selectedLocked} className="btn-light">
@@ -967,34 +1092,77 @@ export default function BudgetTemplatePage() {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={saveGridDraft} disabled={saving || selectedLocked} className="btn-primary">
-                    <Save className="h-4 w-4" /> Save Draft
-                  </button>
-                  {(selected.status === "DRAFT" || selected.status === "RETURNED") && (
-                    <button onClick={() => runAction(selected.status === "RETURNED" ? "RESUBMIT" : "SUBMIT")} disabled={saving} className="btn-primary">
-                      <Send className="h-4 w-4" /> Submit
+                  {canCreateRevision && (
+                    <button onClick={() => setShowRevisionDialog(true)} disabled={saving} className="btn-primary">
+                      <Plus className="h-4 w-4" /> Create Budget Revision
                     </button>
                   )}
-                  {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && (
-                    <button onClick={() => runAction("REVIEW")} className="btn-primary">
-                      <ShieldCheck className="h-4 w-4" /> Review
-                    </button>
-                  )}
-                  {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && (
-                    <button onClick={() => runAction("RETURN")} className="btn-light">
-                      <Undo2 className="h-4 w-4" /> Return
-                    </button>
-                  )}
-                  {canApprove && selected.status === "REVIEWED" && (
-                    <button onClick={() => runAction("APPROVE")} className="btn-primary">
-                      <CheckCircle2 className="h-4 w-4" /> Approve
-                    </button>
+
+                  {!revision ? (
+                    <>
+                      <button onClick={saveGridDraft} disabled={saving || selectedLocked} className="btn-primary">
+                        <Save className="h-4 w-4" /> Save Draft
+                      </button>
+                      {canEdit && (selected.status === "DRAFT" || selected.status === "RETURNED") && (
+                        <button onClick={() => runAction(selected.status === "RETURNED" ? "RESUBMIT" : "SUBMIT")} disabled={saving} className="btn-primary">
+                          <Send className="h-4 w-4" /> Submit
+                        </button>
+                      )}
+                      {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && (
+                        <button onClick={() => runAction("REVIEW")} className="btn-primary">
+                          <ShieldCheck className="h-4 w-4" /> Review
+                        </button>
+                      )}
+                      {canReview && ["SUBMITTED", "RESUBMITTED"].includes(selected.status) && (
+                        <button onClick={() => runAction("RETURN")} className="btn-light">
+                          <Undo2 className="h-4 w-4" /> Return
+                        </button>
+                      )}
+                      {canApprove && selected.status === "REVIEWED" && (
+                        <button onClick={() => runAction("APPROVE")} className="btn-primary">
+                          <CheckCircle2 className="h-4 w-4" /> Approve
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {["DRAFT", "RETURNED"].includes(revision.status) && canRevisionEdit && (
+                        <button onClick={saveGridDraft} disabled={saving || selectedLocked} className="btn-primary">
+                          <Save className="h-4 w-4" /> Save Revision Draft
+                        </button>
+                      )}
+                      {["DRAFT", "RETURNED"].includes(revision.status) && canRevisionSubmit && (
+                        <button onClick={() => runRevisionAction(revision.status === "RETURNED" ? "RESUBMIT" : "SUBMIT")} disabled={saving} className="btn-primary">
+                          <Send className="h-4 w-4" /> {revision.status === "RETURNED" ? "Resubmit Revision" : "Submit Revision"}
+                        </button>
+                      )}
+                      {["SUBMITTED", "RESUBMITTED"].includes(revision.status) && canRevisionReview && (
+                        <button onClick={() => runRevisionAction("REVIEW")} disabled={saving} className="btn-primary">
+                          <ShieldCheck className="h-4 w-4" /> Review Revision
+                        </button>
+                      )}
+                      {["SUBMITTED", "RESUBMITTED"].includes(revision.status) && canRevisionReturn && (
+                        <button onClick={() => runRevisionAction("RETURN")} disabled={saving} className="btn-light">
+                          <Undo2 className="h-4 w-4" /> Return Revision
+                        </button>
+                      )}
+                      {["SUBMITTED", "RESUBMITTED", "REVIEWED"].includes(revision.status) && canRevisionReject && (
+                        <button onClick={() => runRevisionAction("REJECT")} disabled={saving} className="btn-light text-red-700">
+                          Reject Revision
+                        </button>
+                      )}
+                      {revision.status === "REVIEWED" && canRevisionApprove && (
+                        <button onClick={() => runRevisionAction("APPROVE")} disabled={saving} className="btn-primary">
+                          <CheckCircle2 className="h-4 w-4" /> Approve Revision
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
 
               <div ref={gridRef} onKeyDown={handleGridKeyDown} onPaste={handlePaste} className="sheet-wrap rounded-xl border border-[#1f4e79] bg-white shadow-sm">
-                <table className="budget-sheet min-w-[5200px] border-collapse text-xs">
+                <table className={`budget-sheet ${revision ? "min-w-[6400px]" : "min-w-[5200px]"} border-collapse text-xs`}>
                   <thead>
                     <tr>
                       <SheetTh sticky left={0} width={70}>
@@ -1004,7 +1172,7 @@ export default function BudgetTemplatePage() {
                             checked={allRowsSelected}
                             onChange={toggleSelectAllRows}
                             onClick={(event) => event.stopPropagation()}
-                            disabled={selectedLocked || gridRows.length === 0}
+                            disabled={selectedLocked || selectableGridRows.length === 0}
                             aria-label="Select all budget rows"
                             className="h-4 w-4 shrink-0 accent-[#1f4e79]"
                           />
@@ -1021,6 +1189,17 @@ export default function BudgetTemplatePage() {
                       <SheetTh width={230}>Expense Description</SheetTh>
                       <SheetTh width={150}>Budget Class</SheetTh>
                       <SheetTh width={170}>Expense Category</SheetTh>
+                      {revision && (
+                        <>
+                          <SheetTh width={145}>Original Approved</SheetTh>
+                          <SheetTh width={145}>Current Revised</SheetTh>
+                          <SheetTh width={145}>Actual Paid</SheetTh>
+                          <SheetTh width={165}>Outstanding Commitments</SheetTh>
+                          <SheetTh width={145}>Protected Minimum</SheetTh>
+                          <SheetTh width={145}>Adjustment</SheetTh>
+                          <SheetTh width={165}>Available After Revision</SheetTh>
+                        </>
+                      )}
                       <SheetTh width={260}>Line Item / Activity Description</SheetTh>
                       <SheetTh width={280}>Business Justification / Expected Output</SheetTh>
                       <SheetTh width={220}>Location / Destination / Provider</SheetTh>
@@ -1053,7 +1232,11 @@ export default function BudgetTemplatePage() {
                       const rowVariance = variance(row)
                       const lineInvalid = !isEmptyRow(row) && !hasMandatory(row)
                       const lineHasVariance = !isEmptyRow(row) && Math.abs(rowVariance) >= 0.01
-                      const rowTone = lineHasVariance ? "bg-red-50" : lineInvalid ? "bg-amber-50" : "odd:bg-[#eaf3f8] even:bg-white"
+                      const linePosition = revisionPositionForRow(row)
+                      const protectedBaseline = Boolean(revision && linePosition?.source_budget_allocation_id)
+                      const proposedRevised = annualEstimate(row)
+                      const protectedMinimumBreach = Boolean(revision && linePosition && proposedRevised + 0.009 < Number(linePosition.protected_minimum || 0))
+                      const rowTone = lineHasVariance || protectedMinimumBreach ? "bg-red-50" : lineInvalid ? "bg-amber-50" : "odd:bg-[#eaf3f8] even:bg-white"
                       return (
                         <tr key={row.clientId} onClick={() => setSelectedRow(row.clientId)} className={`${rowTone} ${selectedRow === row.clientId ? "outline outline-2 outline-[#1f4e79]" : ""}`}>
                           <SheetTd sticky left={0} readOnly>
@@ -1066,7 +1249,7 @@ export default function BudgetTemplatePage() {
                                   toggleSelectedRow(row.clientId)
                                 }}
                                 onClick={(event) => event.stopPropagation()}
-                                disabled={selectedLocked}
+                                disabled={selectedLocked || protectedBaseline}
                                 aria-label={`Select budget row ${row.line_number}`}
                                 className="h-4 w-4 shrink-0 accent-[#1f4e79]"
                               />
@@ -1088,7 +1271,7 @@ export default function BudgetTemplatePage() {
                             <LookupSelect
                               compact
                               compactSelectOnly
-                              disabled={selectedLocked}
+                              disabled={selectedLocked || protectedBaseline}
                               value={row.expense_ledger_id}
                               options={ledgerOptions}
                               placeholder="Search finance code"
@@ -1108,6 +1291,17 @@ export default function BudgetTemplatePage() {
                           <SheetTd readOnly>
                             <ReadOnlyCell value={row.expense_category} empty="Select Finance Code" />
                           </SheetTd>
+                          {revision && (
+                            <>
+                              <SheetTd readOnly align="right">{money(Number(linePosition?.original_budget || 0))}</SheetTd>
+                              <SheetTd readOnly align="right">{money(Number(linePosition?.current_revised_budget || 0))}</SheetTd>
+                              <SheetTd readOnly align="right">{money(Number(linePosition?.actual_expenditure || 0))}</SheetTd>
+                              <SheetTd readOnly align="right">{money(Number(linePosition?.outstanding_commitment || 0))}</SheetTd>
+                              <SheetTd readOnly align="right" invalid={protectedMinimumBreach}>{money(Number(linePosition?.protected_minimum || 0))}</SheetTd>
+                              <SheetTd readOnly align="right">{money(proposedRevised - Number(linePosition?.current_revised_budget || 0))}</SheetTd>
+                              <SheetTd readOnly align="right" invalid={protectedMinimumBreach}>{money(proposedRevised - Number(linePosition?.actual_expenditure || 0) - Number(linePosition?.outstanding_commitment || 0))}</SheetTd>
+                            </>
+                          )}
                           <SheetTd required invalid={!isEmptyRow(row) && !row.line_item_description.trim()}>
                             <SheetInput disabled={selectedLocked} value={row.line_item_description} onChange={(v) => updateRow(row.clientId, { line_item_description: v })} />
                           </SheetTd>
@@ -1152,11 +1346,14 @@ export default function BudgetTemplatePage() {
                           <SheetTd readOnly align="right">
                             {money(annualEstimate(row))}
                           </SheetTd>
-                          {MONTHS.map((month, index) => (
-                            <SheetTd key={month}>
-                              <SheetNumber disabled={selectedLocked} value={row.months[index]} onChange={(v) => updateMonth(row.clientId, index, v)} />
-                            </SheetTd>
-                          ))}
+                          {MONTHS.map((month, index) => {
+                            const monthLocked = isRevisionMonthLocked(row, index)
+                            return (
+                              <SheetTd key={month} readOnly={monthLocked}>
+                                <SheetNumber disabled={selectedLocked || monthLocked} value={row.months[index]} onChange={(v) => updateMonth(row.clientId, index, v)} />
+                              </SheetTd>
+                            )
+                          })}
                           <SheetTd readOnly align="right">
                             {money(monthlyTotal(row))}
                           </SheetTd>
@@ -1175,7 +1372,7 @@ export default function BudgetTemplatePage() {
                             />
                           </SheetTd>
                           <SheetTd>
-                            <select disabled={selectedLocked} className="sheet-input" value={row.funding_source_id} onChange={(e) => updateRow(row.clientId, { funding_source_id: e.target.value })}>
+                            <select disabled={selectedLocked || protectedBaseline} className="sheet-input" value={row.funding_source_id} onChange={(e) => updateRow(row.clientId, { funding_source_id: e.target.value })}>
                               <option value="">Select</option>
                               {lookups.fundingSources.map((source) => (
                                 <option key={source.id} value={source.id}>
@@ -1221,7 +1418,7 @@ export default function BudgetTemplatePage() {
                       <td className="sticky left-0 z-20 border border-[#9fbad0] bg-[#1f4e79] px-2 py-2 font-bold text-white" colSpan={3}>
                         Totals
                       </td>
-                      <td className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 text-right font-bold" colSpan={16}>
+                      <td className="border border-[#9fbad0] bg-[#d9eaf7] px-2 py-2 text-right font-bold" colSpan={revision ? 23 : 16}>
                         {money(totalProposed)}
                       </td>
                       {MONTHS.map((month, index) => (
@@ -1277,6 +1474,16 @@ export default function BudgetTemplatePage() {
           )}
         </main>
       </div>
+
+      {selected && (
+        <BudgetRevisionDialog
+          open={showRevisionDialog}
+          parentSubmissionId={selected.id}
+          saving={saving}
+          onClose={() => setShowRevisionDialog(false)}
+          onCreate={createRevisionFromSelected}
+        />
+      )}
 
       {loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/40">
