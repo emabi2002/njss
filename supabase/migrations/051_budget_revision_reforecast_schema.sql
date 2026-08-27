@@ -139,17 +139,18 @@ CREATE TRIGGER trg_budget_revision_lines_touch
 
 -- -----------------------------------------------------------------------------
 -- 3. Revision permissions and additive four-group role mapping.
+--    Database module FKs use the live `budget` and `reports` module codes.
 -- -----------------------------------------------------------------------------
 INSERT INTO permissions (code, module_code, menu_code, action, label, description, is_active) VALUES
-  ('budget.revision.view',    'njss_operations', 'budget.template', 'view',    'View budget revisions',        'View budget revision and reforecast records within authorised scope.', true),
-  ('budget.revision.create',  'njss_operations', 'budget.template', 'create',  'Create budget revisions',      'Create a revision from the current approved budget version.', true),
-  ('budget.revision.edit',    'njss_operations', 'budget.template', 'edit',    'Edit budget revision drafts',  'Edit controlled revision draft lines and future cashflow.', true),
-  ('budget.revision.submit',  'njss_operations', 'budget.template', 'submit',  'Submit budget revisions',      'Submit or resubmit a controlled budget revision.', true),
-  ('budget.revision.review',  'njss_operations', 'budget.template', 'verify',  'Review budget revisions',      'Review submitted budget revisions.', true),
-  ('budget.revision.approve', 'njss_operations', 'budget.template', 'approve', 'Approve budget revisions',     'Approve a reviewed revision as the new authoritative budget version.', true),
-  ('budget.revision.reject',  'njss_operations', 'budget.template', 'reject',  'Reject budget revisions',      'Reject a submitted or reviewed budget revision.', true),
-  ('budget.revision.return',  'njss_operations', 'budget.template', 'edit',    'Return budget revisions',      'Return a submitted budget revision to the Line Supervisor.', true),
-  ('budget.revision.report',  'njss_operations', 'reports.library', 'view',    'View budget revision reports', 'View revision history and reporting within authorised scope.', true)
+  ('budget.revision.view',    'budget',  'budget.template', 'view',    'View budget revisions',        'View budget revision and reforecast records within authorised scope.', true),
+  ('budget.revision.create',  'budget',  'budget.template', 'create',  'Create budget revisions',      'Create a revision from the current approved budget version.', true),
+  ('budget.revision.edit',    'budget',  'budget.template', 'edit',    'Edit budget revision drafts',  'Edit controlled revision draft lines and future cashflow.', true),
+  ('budget.revision.submit',  'budget',  'budget.template', 'submit',  'Submit budget revisions',      'Submit or resubmit a controlled budget revision.', true),
+  ('budget.revision.review',  'budget',  'budget.template', 'verify',  'Review budget revisions',      'Review submitted budget revisions.', true),
+  ('budget.revision.approve', 'budget',  'budget.template', 'approve', 'Approve budget revisions',     'Approve a reviewed revision as the new authoritative budget version.', true),
+  ('budget.revision.reject',  'budget',  'budget.template', 'reject',  'Reject budget revisions',      'Reject a submitted or reviewed budget revision.', true),
+  ('budget.revision.return',  'budget',  'budget.template', 'edit',    'Return budget revisions',      'Return a submitted budget revision to the Line Supervisor.', true),
+  ('budget.revision.report',  'reports', 'reports.library', 'view',    'View budget revision reports', 'View revision history and reporting within authorised scope.', true)
 ON CONFLICT (code) DO UPDATE SET
   module_code = EXCLUDED.module_code,
   menu_code = EXCLUDED.menu_code,
