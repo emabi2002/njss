@@ -77,6 +77,7 @@
 - [x] **Step 3: Review migration 054 against migrations 023, 036, 046, 051–053** to ensure commitment, funding, report-scope and preparation semantics do not regress.
 - [x] **Step 4: Verify the correct `njsscrem` Netlify deploy preview succeeds.**
 - [x] **Step 5: Apply migrations 051–054 to production Supabase only after green CI/deploy gates and verify schema/RBAC/integrity before merge.**
+- [x] **Step 6: Re-run full CI and the correct Netlify deploy preview on the final branch head after recording production verification.**
 
 ## Production migration verification — 27 August 2026
 
@@ -85,3 +86,4 @@
 - Post-migration checks confirmed: zero revision data rows were introduced by deployment; zero active allocation formula mismatches; no duplicate active source-line allocation groups; all three hardening triggers exist; wrapper RPCs are executable to authenticated while renamed base functions are not; `budget_available` and `released_available` exist in the authoritative view.
 - Role matrix verified: Registrar initiates and disposes; Line Supervisor cannot create but can edit/submit; Requisition Officer and Payment/Reconciliation Officer remain view/report only.
 - Active Financial Cost Centres and active Posting Codes remain zero by prior master-data cleanup design, so creation of new revision target lines remains intentionally blocked until Finance-approved master data is loaded.
+- Final branch verification after this record: full CI and `netlify/njsscrem/deploy-preview` both passed on the merge candidate.
