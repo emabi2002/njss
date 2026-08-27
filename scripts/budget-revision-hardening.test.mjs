@@ -76,11 +76,15 @@ for (const message of [
 
 // Approved operating model: Registrar alone initiates; Line Supervisor prepares/submits;
 // Registrar then approves/returns/rejects. There is no mandatory separate REVIEW action.
-assert.ok(lower.includes("r.name = 'Registrar'"), 'Registrar role must be checked explicitly for revision initiation/approval')
-assert.ok(lower.includes("r.name = 'Line Supervisor'"), 'Line Supervisor role must be checked explicitly for revision preparation/submission')
-assert.ok(lower.includes("'Registrar', 'budget.revision.create'"), 'Registrar must receive budget.revision.create')
-assert.ok(lower.includes("'Line Supervisor', 'budget.revision.create'"), 'migration must explicitly address legacy Line Supervisor create permission')
-assert.ok(lower.includes('is_allowed = false'), 'legacy Line Supervisor revision-create permission must be disabled')
+assert.ok(lower.includes("r.name = 'registrar'"), 'Registrar role must be checked explicitly for revision initiation/approval')
+assert.ok(lower.includes("r.name = 'line supervisor'"), 'Line Supervisor role must be checked explicitly for revision preparation/submission')
+assert.ok(lower.includes("'registrar', 'budget.revision.create', true"), 'Registrar must receive budget.revision.create')
+assert.match(
+  lower,
+  /\('line supervisor',\s*'budget\.revision\.create',\s*false\)/,
+  'legacy Line Supervisor revision-create permission must be disabled',
+)
+assert.ok(lower.includes('set is_allowed = excluded.is_allowed'), 'role permission correction must overwrite legacy grants')
 assert.ok(lower.includes('only the registrar can initiate a budget revision'), 'database must reject non-Registrar revision initiation')
 assert.ok(lower.includes('only the line supervisor can submit a budget revision'), 'database must reject non-Line-Supervisor revision submission')
 assert.ok(lower.includes('only the registrar can approve, return or reject a budget revision'), 'Registrar must own final revision disposition')
