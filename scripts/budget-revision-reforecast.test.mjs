@@ -70,4 +70,31 @@ for (const required of [
   "p_user_email: guard.context?.email || ''",
 ]) assert.ok(budgetRoute.includes(required), `budget API route missing ${required}`)
 
+const revisionPanelPath = 'app/dashboard/budget-template/BudgetRevisionPanel.tsx'
+const revisionDialogPath = 'app/dashboard/budget-template/BudgetRevisionDialog.tsx'
+assert.ok(fs.existsSync(revisionPanelPath), 'BudgetRevisionPanel must exist')
+assert.ok(fs.existsSync(revisionDialogPath), 'BudgetRevisionDialog must exist')
+const revisionPanel = read(revisionPanelPath)
+const revisionDialog = read(revisionDialogPath)
+const budgetPage = read('app/dashboard/budget-template/page.tsx')
+
+for (const label of [
+  'Original Approved', 'Current Revised', 'Actual Paid', 'Outstanding Commitments',
+  'Protected Minimum', 'Available After Revision', 'Current Authoritative',
+]) assert.ok(revisionPanel.includes(label) || budgetPage.includes(label), `budget revision UI missing ${label}`)
+
+for (const label of ['Create Budget Revision', 'Revision Type']) {
+  assert.ok(revisionDialog.includes(label) || budgetPage.includes(label), `budget revision UI missing ${label}`)
+}
+
+for (const permission of [
+  'budget.revision.create', 'budget.revision.edit', 'budget.revision.submit',
+  'budget.revision.review', 'budget.revision.return', 'budget.revision.reject', 'budget.revision.approve',
+]) assert.ok(budgetPage.includes(permission), `budget page missing ${permission} permission check`)
+
+assert.ok(budgetPage.includes('getBudgetRevisionPosition'), 'budget page must load revision position')
+assert.ok(budgetPage.includes('getBudgetRevisionHistory'), 'budget page must load revision history')
+assert.ok(budgetPage.includes('closed_month_numbers'), 'budget page must protect closed revision months')
+assert.ok(budgetPage.includes('source_budget_allocation_id'), 'budget page must distinguish protected baseline rows')
+
 console.log('budget revision and reforecast regression checks passed')
