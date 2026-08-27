@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { CalendarDays, FileText, X } from "lucide-react"
 import type { BudgetRevisionType, CreateBudgetRevisionInput } from "@/lib/budget-revision"
 
@@ -30,15 +30,19 @@ export function BudgetRevisionDialog({ open, parentSubmissionId, saving = false,
   const [supportingReference, setSupportingReference] = useState("")
   const [error, setError] = useState("")
 
-  useEffect(() => {
-    if (!open) return
+  const resetForm = () => {
     setRevisionType("REFORECAST")
     setReason("")
     setAuthorityReference("")
     setEffectiveDate(today())
     setSupportingReference("")
     setError("")
-  }, [open, parentSubmissionId])
+  }
+
+  const closeDialog = () => {
+    resetForm()
+    onClose()
+  }
 
   if (!open) return null
 
@@ -61,6 +65,7 @@ export function BudgetRevisionDialog({ open, parentSubmissionId, saving = false,
       effectiveDate: effectiveDate || null,
       supportingReference: supportingReference.trim() || null,
     })
+    resetForm()
   }
 
   return (
@@ -72,7 +77,7 @@ export function BudgetRevisionDialog({ open, parentSubmissionId, saving = false,
             <h2 className="mt-1 text-lg font-bold">Create Budget Revision</h2>
             <p className="mt-1 max-w-xl text-xs text-blue-100">The approved budget remains locked. NJSS creates a new revision version for adjustment and approval.</p>
           </div>
-          <button type="button" onClick={onClose} disabled={saving} className="rounded-lg p-1.5 text-blue-100 hover:bg-white/10 hover:text-white" aria-label="Close revision dialog">
+          <button type="button" onClick={closeDialog} disabled={saving} className="rounded-lg p-1.5 text-blue-100 hover:bg-white/10 hover:text-white" aria-label="Close revision dialog">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -121,7 +126,7 @@ export function BudgetRevisionDialog({ open, parentSubmissionId, saving = false,
         </div>
 
         <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
-          <button type="button" onClick={onClose} disabled={saving} className="btn-light">Cancel</button>
+          <button type="button" onClick={closeDialog} disabled={saving} className="btn-light">Cancel</button>
           <button type="button" onClick={submit} disabled={saving} className="btn-primary">
             {saving ? "Creating Revision..." : "Create Budget Revision"}
           </button>
