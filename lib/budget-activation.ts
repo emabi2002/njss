@@ -104,7 +104,8 @@ async function lookupByIds(table: string, select: string, ids: Array<string | nu
   if (!cleanIds.length) return new Map<string, LookupRow>()
   const { data, error } = await supabase.from(table).select(select).in('id', cleanIds)
   if (error) throw error
-  return new Map(((data || []) as LookupRow[]).map((row) => [row.id, row]))
+  const rows = (data || []) as unknown as LookupRow[]
+  return new Map(rows.map((row) => [row.id, row]))
 }
 
 export async function getBudgetActivationLines(batchId: string): Promise<BudgetActivationLine[]> {
