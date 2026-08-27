@@ -215,7 +215,7 @@ BEGIN
     AND r.name = 'Line Supervisor'
     AND r.is_active = true
     AND u.section_id = v_division.section_id
-  ORDER BY COALESCE(u.full_name, u.email), u.email;
+  ORDER BY u.full_name NULLS LAST, u.email;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.njss_get_eligible_line_supervisors(UUID) FROM PUBLIC;
