@@ -7,6 +7,7 @@ const migration54Path = 'supabase/migrations/054_budget_revision_hardening.sql'
 assert.ok(fs.existsSync(migration54Path), 'migration 054 must exist')
 const migration54 = read(migration54Path)
 const lower = migration54.toLowerCase()
+const budgetPage = read('app/dashboard/budget-template/page.tsx')
 
 for (const required of [
   'njss_validate_budget_revision_base',
@@ -58,7 +59,6 @@ for (const signature of [
 // Edge-case and financial-control rules must be explicit and user-readable.
 for (const message of [
   'effective date must fall within budget year',
-  'cannot review or approve their own budget revision',
   'rejection comments/reason are required',
   'exactly one active operational budget allocation',
   'Reforecast can only change monthly phasing',
@@ -73,6 +73,26 @@ for (const message of [
 ]) {
   assert.ok(lower.includes(message.toLowerCase()), `migration 054 missing hardening message: ${message}`)
 }
+
+// Approved operating model: Registrar alone initiates; Line Supervisor prepares/submits;
+// Registrar then approves/returns/rejects. There is no mandatory separate REVIEW action.
+assert.ok(lower.includes("r.name = 'Registrar'"), 'Registrar role must be checked explicitly for revision initiation/approval')
+assert.ok(lower.includes("r.name = 'Line Supervisor'"), 'Line Supervisor role must be checked explicitly for revision preparation/submission')
+assert.ok(lower.includes("'Registrar', 'budget.revision.create'"), 'Registrar must receive budget.revision.create')
+assert.ok(lower.includes("'Line Supervisor', 'budget.revision.create'"), 'migration must explicitly address legacy Line Supervisor create permission')
+assert.ok(lower.includes('is_allowed = false'), 'legacy Line Supervisor revision-create permission must be disabled')
+assert.ok(lower.includes('only the registrar can initiate a budget revision'), 'database must reject non-Registrar revision initiation')
+assert.ok(lower.includes('only the line supervisor can submit a budget revision'), 'database must reject non-Line-Supervisor revision submission')
+assert.ok(lower.includes('only the registrar can approve, return or reject a budget revision'), 'Registrar must own final revision disposition')
+assert.ok(lower.includes("v_action='approve' and v_revision.status not in ('submitted','resubmitted')"), 'Registrar approval must be allowed directly after Line Supervisor submission/resubmission')
+assert.ok(!lower.includes('requester cannot review or approve their own budget revision'), 'Registrar requester must be allowed to approve the Line Supervisor-prepared revision')
+
+assert.ok(!budgetPage.includes('Review Revision'), 'revision UI must not force a separate Registrar Review step')
+assert.match(
+  budgetPage,
+  /\["SUBMITTED",\s*"RESUBMITTED"\]\.includes\(revision\.status\).*canRevisionApprove/s,
+  'revision UI must offer Registrar approval directly from SUBMITTED/RESUBMITTED',
+)
 
 // Direct revision-table edits must be guarded independently of browser/API checks.
 assert.ok(lower.includes('create trigger trg_budget_revision_line_write_guard'), 'revision line write guard trigger is required')
