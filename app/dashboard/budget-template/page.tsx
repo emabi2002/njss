@@ -45,16 +45,13 @@ import { loadActiveUsers, loadLookup } from "@/lib/lookups"
 import { findDuplicateBudgetCycle, selectBudgetCycle } from "@/lib/budget-cycle-ui"
 import { findDuplicateBudgetDivision } from "@/lib/budget-division-ui"
 import {
-  createBudgetRevision,
   getBudgetRevisionHistory,
   getBudgetRevisionPosition,
   getRevisionForSubmission,
   transitionBudgetRevision,
   type BudgetRevision,
   type BudgetRevisionPosition,
-  type CreateBudgetRevisionInput,
 } from "@/lib/budget-revision"
-import { BudgetRevisionDialog } from "./BudgetRevisionDialog"
 import { BudgetRevisionPanel } from "./BudgetRevisionPanel"
 
 type FundingSource = { id: string; code: string; name: string }
@@ -223,7 +220,6 @@ export default function BudgetTemplatePage() {
   const [revision, setRevision] = useState<BudgetRevision | null>(null)
   const [revisionPosition, setRevisionPosition] = useState<BudgetRevisionPosition[]>([])
   const [revisionHistory, setRevisionHistory] = useState<BudgetRevision[]>([])
-  const [showRevisionDialog, setShowRevisionDialog] = useState(false)
 
   const canAdmin = can("masterdata.manage") || can("registry.manage") || can("users.manage") || can("budget.template.approve")
   const canEdit = can("budget.template.edit") || can("budget.template.create") || can("budget.template") || can("budget.template.submit")
@@ -474,23 +470,6 @@ export default function BudgetTemplatePage() {
       await loadDashboard()
     } catch (err) {
       setMessage({ type: "err", text: err instanceof Error ? `Could not create the draft submission: ${err.message}` : "Could not create the draft submission." })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const createRevisionFromSelected = async (input: CreateBudgetRevisionInput) => {
-    if (!selected) return
-    setSaving(true)
-    setMessage(null)
-    try {
-      const result = await createBudgetRevision(input)
-      setShowRevisionDialog(false)
-      await loadDashboard()
-      setSelectedId(result.revision_submission_id)
-      setMessage({ type: "ok", text: `${result.revision_number} requested. The Line Supervisor can now review and adjust the controlled revision draft; the approved baseline remains locked.` })
-    } catch (err) {
-      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not create the budget revision." })
     } finally {
       setSaving(false)
     }
@@ -1132,7 +1111,11 @@ export default function BudgetTemplatePage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {canCreateRevision && (
-                    <button onClick={() => setShowRevisionDialog(true)} disabled={saving} className="btn-primary">
+                    <button
+                      onClick={() => window.location.assign(`/dashboard/budget/revisions?parent=${selected.id}&action=request`)}
+                      disabled={saving}
+                      className="btn-primary"
+                    >
                       <Plus className="h-4 w-4" /> Request Budget Change
                     </button>
                   )}
@@ -1509,15 +1492,6 @@ export default function BudgetTemplatePage() {
         </main>
       </div>
 
-      {selected && (
-        <BudgetRevisionDialog
-          open={showRevisionDialog}
-          parentSubmissionId={selected.id}
-          saving={saving}
-          onClose={() => setShowRevisionDialog(false)}
-          onCreate={createRevisionFromSelected}
-        />
-      )}
 
       {loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/40">
