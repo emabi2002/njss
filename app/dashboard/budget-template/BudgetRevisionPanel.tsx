@@ -24,6 +24,7 @@ type Props = {
   position: BudgetRevisionPosition[]
   history: RevisionHistoryRow[]
   currentAuthoritative: boolean
+  proposedTotal: number
 }
 
 function Metric({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
@@ -35,7 +36,7 @@ function Metric({ label, value, strong = false }: { label: string; value: string
   )
 }
 
-export function BudgetRevisionPanel({ revision, position, history, currentAuthoritative }: Props) {
+export function BudgetRevisionPanel({ revision, position, history, currentAuthoritative, proposedTotal }: Props) {
   if (!revision) return null
 
   const totals = position.reduce(
@@ -45,12 +46,12 @@ export function BudgetRevisionPanel({ revision, position, history, currentAuthor
       actual: sum.actual + Number(row.actual_expenditure || 0),
       outstanding: sum.outstanding + Number(row.outstanding_commitment || 0),
       protectedMinimum: sum.protectedMinimum + Number(row.protected_minimum || 0),
-      proposed: sum.proposed + Number(row.proposed_revised_budget || 0),
-      adjustment: sum.adjustment + Number(row.adjustment_amount || 0),
-      available: sum.available + Number(row.available_after_revision || 0),
     }),
-    { original: 0, current: 0, actual: 0, outstanding: 0, protectedMinimum: 0, proposed: 0, adjustment: 0, available: 0 },
+    { original: 0, current: 0, actual: 0, outstanding: 0, protectedMinimum: 0 },
   )
+  const liveProposed = Number(proposedTotal || 0)
+  const liveAdjustment = liveProposed - totals.current
+  const liveAvailable = liveProposed - totals.actual - totals.outstanding
 
   return (
     <section className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 shadow-sm">
@@ -78,9 +79,9 @@ export function BudgetRevisionPanel({ revision, position, history, currentAuthor
         <Metric label="Actual Paid" value={money(totals.actual)} />
         <Metric label="Outstanding Commitments" value={money(totals.outstanding)} />
         <Metric label="Protected Minimum" value={money(totals.protectedMinimum)} />
-        <Metric label="Proposed" value={money(totals.proposed)} strong />
-        <Metric label="Net Adjustment" value={money(totals.adjustment)} />
-        <Metric label="Available After Revision" value={money(totals.available)} strong />
+        <Metric label="Proposed" value={money(liveProposed)} strong />
+        <Metric label="Net Adjustment" value={money(liveAdjustment)} />
+        <Metric label="Available After Revision" value={money(liveAvailable)} strong />
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white">
