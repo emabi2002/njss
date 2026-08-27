@@ -1,0 +1,30 @@
+name: Apply Live Revision Summary
+
+on:
+  push:
+    branches:
+      - feature/budget-revision-implementation
+    paths:
+      - scripts/apply-live-revision-summary.py
+      - .github/workflows/apply-live-revision-summary.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/budget-revision-implementation
+      - name: Wire live revision summary total
+        run: python scripts/apply-live-revision-summary.py
+      - name: Commit page update and remove helper
+        run: |
+          rm scripts/apply-live-revision-summary.py .github/workflows/apply-live-revision-summary.yml
+          git config user.name "emabi2002"
+          git config user.email "emabi2002@gmail.com"
+          git add app/dashboard/budget-template/page.tsx scripts/apply-live-revision-summary.py .github/workflows/apply-live-revision-summary.yml
+          git commit -m "fix: show live proposed budget in revision summary"
+          git push origin HEAD:feature/budget-revision-implementation
