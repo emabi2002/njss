@@ -1,0 +1,38 @@
+name: Task 8 budget template deep link
+
+on:
+  push:
+    branches:
+      - feature/budget-revision-workspace
+    paths:
+      - .github/workflows/task8-budget-template-deeplink.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/budget-revision-workspace
+          fetch-depth: 0
+      - name: Add exact submission deep link
+        run: |
+          node <<'NODE'
+          const fs = require('fs')
+          const path = 'app/dashboard/budget-template/page.tsx'
+          let source = fs.readFileSync(path, 'utf8')
+          const marker = `  useEffect(() => {\n    // eslint-disable-next-line react-hooks/set-state-in-effect\n    loadDashboard()\n  }, [loadDashboard])\n\n  useEffect(() => {\n    // eslint-disable-next-line react-hooks/set-state-in-effect\n    loadSubmission(selectedId)\n  }, [selectedId, loadSubmission])`
+          const replacement = `  useEffect(() => {\n    // eslint-disable-next-line react-hooks/set-state-in-effect\n    loadDashboard()\n  }, [loadDashboard])\n\n  useEffect(() => {\n    const params = new URLSearchParams(window.location.search)\n    const submissionId = params.get(\"submission\")\n    if (submissionId) {\n      // eslint-disable-next-line react-hooks/set-state-in-effect\n      setSelectedId(submissionId)\n    }\n  }, [])\n\n  useEffect(() => {\n    // eslint-disable-next-line react-hooks/set-state-in-effect\n    loadSubmission(selectedId)\n  }, [selectedId, loadSubmission])`
+          if (!source.includes(marker)) throw new Error('Budget template effect marker not found')
+          source = source.replace(marker, replacement)
+          fs.writeFileSync(path, source)
+          NODE
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard/budget-template/page.tsx
+          git rm .github/workflows/task8-budget-template-deeplink.yml
+          git commit -m "fix: open exact revision submission from workspace"
+          git push origin HEAD:feature/budget-revision-workspace
