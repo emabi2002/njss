@@ -69,6 +69,9 @@ for (const label of [
   'Instruction to Line Supervisor', 'Responsible Line Supervisor',
 ]) assert.ok(requestDialog.includes(label), `request dialog missing ${label}`)
 assert.ok(requestDialog.includes('No active Line Supervisor is assigned to this section'), 'request dialog must block missing supervisor configuration')
+assert.ok(requestDialog.includes('initialParentId ? candidates.find'), 'an explicit parent deep link must never silently fall back to another approved budget')
+assert.ok(requestDialog.includes('if (parentSubmissionId || candidates.length === 0) return'), 'request dialog must hydrate selection after async candidates arrive')
+assert.ok(requestDialog.includes('setParentSubmissionId(next.submission_id)'), 'async candidate hydration must restore the requested approved parent')
 assert.ok(workspacePage.includes('roles.includes("Registrar")') || workspacePage.includes("roles.includes('Registrar')"), 'workspace must explicitly identify Registrar role')
 assert.ok(workspacePage.includes('roles.includes("Line Supervisor")') || workspacePage.includes("roles.includes('Line Supervisor')"), 'workspace must explicitly identify Line Supervisor role')
 assert.ok(workspacePage.includes('/dashboard/budget-template?submission='), 'supervisor queue must open the exact revision submission in Budget Preparation')
