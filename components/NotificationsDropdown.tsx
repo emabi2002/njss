@@ -11,8 +11,8 @@ import { useAuth } from "@/contexts/AuthContext"
 
 export function NotificationsDropdown() {
   const [isOpen, setIsOpen] = useState(false)
-  const { user } = useAuth()
-  const { notifications, unreadCount, markAsRead, markAllAsRead } = useRealtimeNotifications(user?.id)
+  const { profile } = useAuth()
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useRealtimeNotifications(profile?.id)
 
   const getNotificationIcon = (type: string) => {
     if (type.startsWith('FF3')) return <FileText className="h-4 w-4 text-blue-600" />
