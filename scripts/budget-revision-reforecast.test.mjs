@@ -42,4 +42,33 @@ assert.ok(migration51.includes("revision_type IN ('VIREMENT','SUPPLEMENTARY','RE
 assert.ok(migration51.includes('fn_current_user_data_scope_allows'), 'revision RLS must enforce data scope')
 assert.ok(migration51.includes('fn_current_user_has_permission'), 'revision RLS must enforce permission')
 
+const migration52Path = 'supabase/migrations/052_budget_revision_workflow.sql'
+assert.ok(fs.existsSync(migration52Path), 'migration 052 must exist')
+const migration52 = read(migration52Path)
+
+for (const required of [
+  'CREATE OR REPLACE VIEW v_budget_revision_position',
+  'njss_create_budget_revision',
+  'njss_transition_budget_revision',
+  'FOR UPDATE',
+  'protected_minimum',
+  'actual_expenditure_at_submission',
+  'actual_expenditure_at_approval',
+  'superseded_by_id',
+  'VIREMENT',
+  'SUPPLEMENTARY',
+  'REDUCTION',
+  'RECLASSIFICATION',
+  'REFORECAST',
+  'active revision already exists',
+]) {
+  assert.ok(migration52.includes(required), `migration 052 missing ${required}`)
+}
+
+assert.ok(migration52.includes("fn_current_user_has_permission('budget.revision.create')"), 'create RPC must enforce create permission')
+assert.ok(migration52.includes("fn_current_user_has_permission('budget.revision.approve')"), 'approval RPC must enforce approve permission')
+assert.ok(migration52.includes('fn_current_user_data_scope_allows'), 'workflow RPCs must enforce data scope')
+assert.ok(migration52.includes('set_config(\'njss.budget_workflow\', \'on\', true)'), 'revision workflow must use budget workflow privileged context')
+assert.ok(!migration52.includes("transition_divisional_budget_submission(v_revision.revision_submission_id, 'APPROVE'"), 'revision approval must not call initial-budget allocation creation path')
+
 console.log('budget revision and reforecast regression checks passed')
