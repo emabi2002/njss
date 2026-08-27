@@ -222,7 +222,7 @@ export function BudgetRevisionRequestDialog({ candidates, initialParentId, onClo
           )}
 
           {candidates.length === 0 ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">No current approved budget is available for a new revision request. A budget must be approved, locked, unsuperseded and have no other active revision.</div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">No revision-ready approved budget is available. The approved budget must be locked and current, have no active revision, and each approved budget line must already have one active operational allocation before a post-approval change can be requested.</div>
           ) : (
             <>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
