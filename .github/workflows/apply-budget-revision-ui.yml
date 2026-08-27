@@ -6,6 +6,7 @@ on:
       - feature/budget-revision-implementation
     paths:
       - scripts/apply-budget-revision-ui.py
+      - scripts/run-budget-revision-ui-transform.py
       - .github/workflows/apply-budget-revision-ui.yml
 
 permissions:
@@ -19,12 +20,12 @@ jobs:
         with:
           ref: feature/budget-revision-implementation
       - name: Apply UI transformation
-        run: python scripts/apply-budget-revision-ui.py
+        run: python scripts/run-budget-revision-ui-transform.py
       - name: Commit transformed Budget Preparation page and remove helper
         run: |
-          rm scripts/apply-budget-revision-ui.py .github/workflows/apply-budget-revision-ui.yml
+          rm scripts/apply-budget-revision-ui.py scripts/run-budget-revision-ui-transform.py .github/workflows/apply-budget-revision-ui.yml
           git config user.name "emabi2002"
           git config user.email "emabi2002@gmail.com"
-          git add app/dashboard/budget-template/page.tsx scripts/apply-budget-revision-ui.py .github/workflows/apply-budget-revision-ui.yml
+          git add app/dashboard/budget-template/page.tsx scripts/apply-budget-revision-ui.py scripts/run-budget-revision-ui-transform.py .github/workflows/apply-budget-revision-ui.yml
           git commit -m "feat: add budget revision UI controls"
           git push origin HEAD:feature/budget-revision-implementation
