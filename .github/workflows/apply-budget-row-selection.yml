@@ -1,0 +1,36 @@
+name: Apply budget row selection
+
+on:
+  push:
+    branches: [feature/budget-multi-row-selection]
+    paths:
+      - scripts/apply-budget-row-selection.mjs
+      - .github/workflows/apply-budget-row-selection.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/budget-multi-row-selection
+          fetch-depth: 0
+
+      - name: Apply source transformation
+        run: node scripts/apply-budget-row-selection.mjs
+
+      - name: Commit transformed Budget Preparation page
+        run: |
+          if git diff --quiet -- app/dashboard/budget-template/page.tsx; then
+            echo "No source changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard/budget-template/page.tsx
+          git commit -m "feat: add checkbox multi-row budget deletion"
+          git push origin HEAD:feature/budget-multi-row-selection
