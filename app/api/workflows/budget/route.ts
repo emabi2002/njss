@@ -10,8 +10,6 @@ const FUNDING_AUTHORITY_PERMISSION: Record<string, string[]> = {
 
 const FUNDING_RECEIPT_PERMISSION: Record<string, string[]> = FUNDING_AUTHORITY_PERMISSION
 
-// Legacy Annual Plan workflow is retired from active use. Historical records remain read-only.
-
 const SUBMISSION_PERMISSION: Record<string, string[]> = {
   SUBMIT: ['budget.template.submit'],
   RESUBMIT: ['budget.template.submit'],
@@ -21,6 +19,15 @@ const SUBMISSION_PERMISSION: Record<string, string[]> = {
   RETURN: ['budget.template.review'],
 }
 
+const REVISION_PERMISSION: Record<string, string[]> = {
+  SUBMIT: ['budget.revision.submit'],
+  RESUBMIT: ['budget.revision.submit'],
+  REVIEW: ['budget.revision.review'],
+  RETURN: ['budget.revision.return'],
+  REJECT: ['budget.revision.reject'],
+  APPROVE: ['budget.revision.approve'],
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json()
   const operation = body.operation as string
@@ -28,35 +35,74 @@ export async function POST(request: NextRequest) {
   if (operation === 'transition-plan') {
     return NextResponse.json({ error: 'Annual Activity Plan workflow is retired. Use Budget Preparation for submission, review and approval.' }, { status: 410 })
   }
-  if (operation === 'create-quarterly-release') {
-    return createRelease(request, body)
-  }
-  if (operation === 'transition-submission') {
-    return transitionSubmission(request, body)
-  }
-  if (operation === 'create-funding-authority') {
-    return createFundingAuthority(request, body)
-  }
-  if (operation === 'transition-funding-authority') {
-    return transitionFundingAuthority(request, body)
-  }
-  if (operation === 'create-funding-receipt') {
-    return createFundingReceipt(request, body)
-  }
-  if (operation === 'transition-funding-receipt') {
-    return transitionFundingReceipt(request, body)
-  }
-  if (operation === 'allocate-funding') {
-    return allocateFunding(request, body)
-  }
-  if (operation === 'approve-funding-allocation') {
-    return approveFundingAllocation(request, body)
-  }
+  if (operation === 'create-quarterly-release') return createRelease(request, body)
+  if (operation === 'transition-submission') return transitionSubmission(request, body)
+  if (operation === 'create-budget-revision') return createBudgetRevision(request, body)
+  if (operation === 'transition-budget-revision') return transitionBudgetRevision(request, body)
+  if (operation === 'create-funding-authority') return createFundingAuthority(request, body)
+  if (operation === 'transition-funding-authority') return transitionFundingAuthority(request, body)
+  if (operation === 'create-funding-receipt') return createFundingReceipt(request, body)
+  if (operation === 'transition-funding-receipt') return transitionFundingReceipt(request, body)
+  if (operation === 'allocate-funding') return allocateFunding(request, body)
+  if (operation === 'approve-funding-allocation') return approveFundingAllocation(request, body)
 
   return NextResponse.json({ error: 'Unsupported budget workflow operation' }, { status: 400 })
 }
 
-// Legacy Annual Plan transition and Confirm to Budget functions intentionally removed from active API use.
+async function createBudgetRevision(request: NextRequest, body: Record<string, unknown>) {
+  const guard = await requirePermission(request, ['budget.revision.create'])
+  if (guard.response) return guard.response
+
+  const parentSubmissionId = body.parentSubmissionId as string
+  const revisionType = body.revisionType as string
+  const reason = body.reason as string
+  const authorityReference = (body.authorityReference as string | null | undefined) || null
+  const effectiveDate = (body.effectiveDate as string | null | undefined) || null
+  const supportingReference = (body.supportingReference as string | null | undefined) || null
+
+  if (!parentSubmissionId || !revisionType || !reason?.trim()) {
+    return NextResponse.json({ error: 'Parent submission, revision type and reason are required.' }, { status: 400 })
+  }
+  if (revisionType === 'SUPPLEMENTARY' && !authorityReference?.trim()) {
+    return NextResponse.json({ error: 'Supplementary authority reference is required.' }, { status: 400 })
+  }
+
+  const response = NextResponse.next()
+  const supabase = createRequestSupabaseClient(request, response)
+  const { data, error } = await supabase.rpc('njss_create_budget_revision', {
+    p_parent_submission_id: parentSubmissionId,
+    p_revision_type: revisionType,
+    p_reason: reason.trim(),
+    p_authority_reference: authorityReference,
+    p_effective_date: effectiveDate || new Date().toISOString().split('T')[0],
+    p_supporting_reference: supportingReference,
+    p_user_email: guard.context?.email || '',
+  })
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ data })
+}
+
+async function transitionBudgetRevision(request: NextRequest, body: Record<string, unknown>) {
+  const revisionId = body.revisionId as string
+  const action = body.action as string
+  if (!revisionId || !REVISION_PERMISSION[action]) {
+    return NextResponse.json({ error: 'Invalid budget revision workflow request.' }, { status: 400 })
+  }
+
+  const guard = await requirePermission(request, REVISION_PERMISSION[action])
+  if (guard.response) return guard.response
+
+  const response = NextResponse.next()
+  const supabase = createRequestSupabaseClient(request, response)
+  const { data, error } = await supabase.rpc('njss_transition_budget_revision', {
+    p_revision_id: revisionId,
+    p_action: action,
+    p_comments: (body.comments as string | undefined) || null,
+    p_user_email: guard.context?.email || '',
+  })
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ data })
+}
 
 async function createRelease(request: NextRequest, body: Record<string, unknown>) {
   const guard = await requirePermission(request, ['budget.release'])
@@ -93,7 +139,6 @@ async function createRelease(request: NextRequest, body: Record<string, unknown>
     p_user_email: guard.context?.email || '',
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-
   return NextResponse.json({ data })
 }
 
