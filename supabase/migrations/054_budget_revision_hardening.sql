@@ -58,17 +58,24 @@ AS $$
 DECLARE
   v_user_id UUID := fn_current_app_user_id();
   revision_status TEXT;
+  v_division_id UUID;
   v_division budget_divisions%ROWTYPE;
 BEGIN
-  SELECT br.status, d.*
-  INTO revision_status, v_division
+  SELECT br.status, br.division_id
+  INTO revision_status, v_division_id
   FROM budget_revisions br
-  JOIN budget_divisions d ON d.id = br.division_id
   WHERE br.revision_submission_id = p_submission_id;
 
   -- Ordinary (non-revision) Budget Preparation rows keep their existing policy.
   IF NOT FOUND THEN
     RETURN;
+  END IF;
+
+  SELECT * INTO v_division
+  FROM budget_divisions
+  WHERE id = v_division_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Budget revision division was not found.';
   END IF;
 
   IF v_user_id IS NULL THEN
@@ -143,6 +150,7 @@ DROP TRIGGER IF EXISTS trg_budget_revision_line_write_guard ON divisional_budget
 CREATE TRIGGER trg_budget_revision_line_write_guard
   BEFORE INSERT OR UPDATE OR DELETE ON divisional_budget_lines
   FOR EACH ROW EXECUTE FUNCTION njss_guard_budget_revision_line_write();
+REVOKE ALL ON FUNCTION njss_guard_budget_revision_line_write() FROM PUBLIC, authenticated;
 
 CREATE OR REPLACE FUNCTION njss_guard_budget_revision_monthly_write()
 RETURNS TRIGGER
@@ -202,6 +210,69 @@ DROP TRIGGER IF EXISTS trg_budget_revision_monthly_write_guard ON budget_monthly
 CREATE TRIGGER trg_budget_revision_monthly_write_guard
   BEFORE INSERT OR UPDATE OR DELETE ON budget_monthly_allocations
   FOR EACH ROW EXECUTE FUNCTION njss_guard_budget_revision_monthly_write();
+REVOKE ALL ON FUNCTION njss_guard_budget_revision_monthly_write() FROM PUBLIC, authenticated;
+
+-- Revision submissions share the ordinary submission table. This guard prevents
+-- callers from sending a revision version through transition_divisional_budget_submission
+-- (which is the initial-budget path and can create operational allocations).
+CREATE OR REPLACE FUNCTION njss_guard_budget_revision_submission_write()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_submission_id UUID := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
+  v_revision budget_revisions%ROWTYPE;
+  v_division budget_divisions%ROWTYPE;
+BEGIN
+  SELECT * INTO v_revision
+  FROM budget_revisions
+  WHERE revision_submission_id = v_submission_id;
+
+  IF NOT FOUND THEN
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END IF;
+
+  -- Only the hardened revision transition wrapper sets this local flag. The
+  -- generic budget workflow uses njss.budget_workflow and therefore cannot pass.
+  IF COALESCE(current_setting('njss.budget_revision_workflow', true), '') = 'on' THEN
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Budget revision submissions cannot be deleted; reject or supersede them through the revision workflow.';
+  END IF;
+
+  IF NEW.status IS DISTINCT FROM OLD.status THEN
+    RAISE EXCEPTION 'Budget revision status can only be changed through the dedicated budget revision workflow.';
+  END IF;
+
+  SELECT * INTO v_division FROM budget_divisions WHERE id = v_revision.division_id;
+  IF v_revision.status NOT IN ('DRAFT','RETURNED') THEN
+    RAISE EXCEPTION 'Budget revision submission cannot be edited in status %.', v_revision.status;
+  END IF;
+  IF NOT (
+    COALESCE(fn_current_user_has_permission('budget.revision.edit'), false)
+    OR COALESCE(fn_current_user_has_permission('all'), false)
+  ) THEN
+    RAISE EXCEPTION 'Permission denied: budget.revision.edit is required to modify a revision submission.';
+  END IF;
+  IF NOT fn_current_user_data_scope_allows(v_division.department_id, v_division.section_id, NULL, NULL, NULL) THEN
+    RAISE EXCEPTION 'Budget revision submission edit is outside the current user organisational scope.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_budget_revision_submission_write_guard ON divisional_budget_submissions;
+CREATE TRIGGER trg_budget_revision_submission_write_guard
+  BEFORE UPDATE OR DELETE ON divisional_budget_submissions
+  FOR EACH ROW EXECUTE FUNCTION njss_guard_budget_revision_submission_write();
+REVOKE ALL ON FUNCTION njss_guard_budget_revision_submission_write() FROM PUBLIC, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- 3. Harden the internal validator without copying the 052 implementation.
@@ -531,6 +602,10 @@ BEGIN
   IF v_action = 'REJECT' AND COALESCE(TRIM(p_comments), '') = '' THEN
     RAISE EXCEPTION 'Rejection comments/reason are required.';
   END IF;
+
+  -- Distinguish the dedicated revision transition from the initial-budget
+  -- workflow. The submission guard rejects status changes without this flag.
+  PERFORM set_config('njss.budget_revision_workflow', 'on', true);
 
   RETURN public.njss_transition_budget_revision_base(
     p_revision_id,
