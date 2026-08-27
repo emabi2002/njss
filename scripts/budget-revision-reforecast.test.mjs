@@ -45,6 +45,7 @@ assert.ok(migration51.includes('fn_current_user_has_permission'), 'revision RLS 
 const migration52Path = 'supabase/migrations/052_budget_revision_workflow.sql'
 assert.ok(fs.existsSync(migration52Path), 'migration 052 must exist')
 const migration52 = read(migration52Path)
+const migration52Lower = migration52.toLowerCase()
 
 for (const required of [
   'CREATE OR REPLACE VIEW v_budget_revision_position',
@@ -60,15 +61,16 @@ for (const required of [
   'REDUCTION',
   'RECLASSIFICATION',
   'REFORECAST',
-  'active revision already exists',
 ]) {
   assert.ok(migration52.includes(required), `migration 052 missing ${required}`)
 }
 
+assert.ok(migration52Lower.includes('active revision already exists'), 'workflow must reject a second active revision')
 assert.ok(migration52.includes("fn_current_user_has_permission('budget.revision.create')"), 'create RPC must enforce create permission')
-assert.ok(migration52.includes("fn_current_user_has_permission('budget.revision.approve')"), 'approval RPC must enforce approve permission')
+assert.ok(migration52.includes("'APPROVE' THEN 'budget.revision.approve'"), 'approval action must map to budget.revision.approve')
+assert.ok(migration52.includes('fn_current_user_has_permission(v_permission)'), 'transition RPC must enforce its action-specific permission')
 assert.ok(migration52.includes('fn_current_user_data_scope_allows'), 'workflow RPCs must enforce data scope')
-assert.ok(migration52.includes('set_config(\'njss.budget_workflow\', \'on\', true)'), 'revision workflow must use budget workflow privileged context')
-assert.ok(!migration52.includes("transition_divisional_budget_submission(v_revision.revision_submission_id, 'APPROVE'"), 'revision approval must not call initial-budget allocation creation path')
+assert.match(migration52, /set_config\(\s*'njss\.budget_workflow'\s*,\s*'on'\s*,\s*true\s*\)/, 'revision workflow must use budget workflow privileged context')
+assert.ok(!/transition_divisional_budget_submission\s*\([^;]*'APPROVE'/s.test(migration52), 'revision approval must not call initial-budget allocation creation path')
 
 console.log('budget revision and reforecast regression checks passed')
