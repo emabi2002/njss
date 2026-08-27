@@ -384,6 +384,15 @@ export default function BudgetTemplatePage() {
   }, [loadDashboard])
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const submissionId = params.get("submission")
+    if (submissionId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedId(submissionId)
+    }
+  }, [])
+
+  useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSubmission(selectedId)
   }, [selectedId, loadSubmission])
