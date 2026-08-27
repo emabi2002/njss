@@ -72,6 +72,8 @@ export type BudgetSubmission = {
   budget_year: number
   submission_reference: string | null
   version: number
+  parent_submission_id: string | null
+  superseded_by_id: string | null
   budget_ceiling: number
   status: BudgetStatus
   validation_status: string
@@ -323,7 +325,6 @@ export async function createDraftSubmission(input: { cycle_id: string; budget_ye
 
   let { data, error } = await insertPayload()
 
-  // If another draft was created at the same time, recompute next version once.
   if (error?.code === '23505') {
     const retry = await insertPayload()
     data = retry.data
