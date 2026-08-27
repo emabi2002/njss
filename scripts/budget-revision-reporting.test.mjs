@@ -15,6 +15,10 @@ for (const required of [
   'budget_available',
   'released_available',
   'available_amount',
+  'projected_available_after_pending',
+  'outstanding_amount',
+  "'ENDORSED_SUPERVISOR'",
+  "'ENDORSED_SECTION_HEAD'",
   'CREATE OR REPLACE VIEW v_budget_revision_history_report',
   'security_invoker',
   'budget-revision-history',
@@ -29,6 +33,10 @@ assert.ok(
 assert.ok(
   migration53.includes('budget_available is budget headroom; available_amount/released_available is released-cash headroom'),
   'migration 053 must preserve the distinction between budget and released availability',
+)
+assert.ok(
+  migration53.indexOf('projected_available_after_pending') < migration53.indexOf('AS original_budget'),
+  'new revision columns must be appended after the existing Phase 2 authoritative-view signature',
 )
 
 const apiSource = read('lib/api.ts')
