@@ -30,6 +30,17 @@ assert.ok(!/SELECT DISTINCT[\s\S]*ORDER BY COALESCE\(u\.full_name, u\.email\)/i.
 assert.ok(!/SELECT DISTINCT[\s\S]*u\.full_name::TEXT[\s\S]*ORDER BY u\.full_name NULLS LAST, u\.email/i.test(migration), 'DISTINCT supervisor ordering must use the same cast expressions present in the select list')
 assert.match(migration, /ORDER BY u\.full_name::TEXT NULLS LAST, u\.email::TEXT/i, 'eligible supervisor ordering must match the DISTINCT text projections')
 
+// Live NJSS approved budget divisions are division-level records; many have section_id NULL.
+// Task 8 must use exact section ownership when available and otherwise map the budget
+// division code to the corresponding organisational department code (e.g. HR -> HR department).
+assert.ok(migration.includes('njss_budget_revision_supervisor_matches'), 'migration must centralise division/section supervisor ownership validation')
+assert.match(migration, /d\.code\s*=\s*bd\.code/i, 'division ownership must support matching budget_divisions.code to departments.code')
+assert.match(migration, /bd\.section_id\s+IS\s+NOT\s+NULL[\s\S]*u\.section_id\s*=\s*bd\.section_id/i, 'exact section assignment must take precedence when a budget division has section_id')
+assert.match(migration, /bd\.section_id\s+IS\s+NULL[\s\S]*u\.department_id/i, 'division-level budgets must validate the supervisor against the derived owning department')
+assert.ok(migration.includes('budget_revisions_select_assigned_supervisor'), 'assigned Line Supervisor must receive revision-header RLS access')
+assert.ok(migration.includes('budget_revision_lines_select_assigned_supervisor'), 'assigned Line Supervisor must receive revision-line RLS access')
+assert.match(migration, /assigned_line_supervisor_id\s+IS\s+DISTINCT\s+FROM\s+v_user_id/i, 'edit/submit guards must continue to require the exact assigned Line Supervisor')
+
 const config = read('lib/rbac/config.ts')
 assert.ok(config.includes("code: 'budget.revisions'"))
 assert.ok(config.includes("href: '/dashboard/budget/revisions'"))
@@ -50,6 +61,8 @@ for (const token of [
   'createBudgetRevisionRequest',
   "operation: 'create-budget-revision-request'",
 ]) assert.ok(workspaceService.includes(token), `workspace service missing ${token}`)
+assert.ok(workspaceService.includes('departmentByCode'), 'approved budget candidates must derive the owning organisational department by division code when section linkage is absent')
+assert.match(workspaceService, /division\?\.code[\s\S]*departmentByCode/i, 'candidate ownership mapping must use budget division code before falling back to umbrella department linkage')
 
 assert.ok(fs.existsSync('app/dashboard/budget/revisions/page.tsx'))
 assert.ok(fs.existsSync('app/dashboard/budget/revisions/BudgetRevisionRequestDialog.tsx'))
