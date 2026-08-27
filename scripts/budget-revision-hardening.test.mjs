@@ -98,6 +98,18 @@ assert.match(
   'revision UI must offer Registrar approval directly from SUBMITTED/RESUBMITTED',
 )
 
+// UI must be role-aware as well as permission-aware, so technical `all` access
+// does not expose business workflow buttons to System Administrator.
+assert.match(budgetPage, /const \{ profile, roles, can \} = useAuth\(\)/, 'budget page must load current roles')
+assert.ok(budgetPage.includes('const isRegistrar = roles.includes("Registrar")'), 'budget page must identify Registrar role explicitly')
+assert.ok(budgetPage.includes('const isLineSupervisor = roles.includes("Line Supervisor")'), 'budget page must identify Line Supervisor role explicitly')
+assert.match(budgetPage, /const canRevisionCreate = isRegistrar && can\("budget\.revision\.create"\)/, 'only Registrar UI may initiate revision')
+assert.match(budgetPage, /const canRevisionEdit = isLineSupervisor && can\("budget\.revision\.edit"\)/, 'only Line Supervisor UI may edit revision')
+assert.match(budgetPage, /const canRevisionSubmit = isLineSupervisor && can\("budget\.revision\.submit"\)/, 'only Line Supervisor UI may submit revision')
+assert.match(budgetPage, /const canRevisionApprove = isRegistrar && can\("budget\.revision\.approve"\)/, 'only Registrar UI may approve revision')
+assert.match(budgetPage, /const canRevisionReturn = isRegistrar && can\("budget\.revision\.return"\)/, 'only Registrar UI may return revision')
+assert.match(budgetPage, /const canRevisionReject = isRegistrar && can\("budget\.revision\.reject"\)/, 'only Registrar UI may reject revision')
+
 // Direct revision-table edits must be guarded independently of browser/API checks.
 assert.ok(lower.includes('create trigger trg_budget_revision_line_write_guard'), 'revision line write guard trigger is required')
 assert.ok(lower.includes('create trigger trg_budget_revision_monthly_write_guard'), 'revision monthly write guard trigger is required')
