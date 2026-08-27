@@ -31,6 +31,32 @@ assert.ok(migration51.includes("revision_type IN ('VIREMENT','SUPPLEMENTARY','RE
 assert.ok(migration51.includes('fn_current_user_data_scope_allows'), 'revision RLS must enforce data scope')
 assert.ok(migration51.includes('fn_current_user_has_permission'), 'revision RLS must enforce permission')
 
+// Database FK contract: live modules use `budget` for operational budget permissions
+// and `reports` for report permissions. `njss_operations` is a front-end grouping,
+// not a row in the database modules catalogue.
+for (const permission of [
+  'budget.revision.view',
+  'budget.revision.create',
+  'budget.revision.edit',
+  'budget.revision.submit',
+  'budget.revision.review',
+  'budget.revision.approve',
+  'budget.revision.reject',
+  'budget.revision.return',
+]) {
+  assert.match(
+    migration51,
+    new RegExp(`\\('${permission}',\\s*'budget'`),
+    `${permission} must use the live budget module code`,
+  )
+}
+assert.match(
+  migration51,
+  /\('budget\.revision\.report',\s*'reports'/,
+  'budget.revision.report must use the live reports module code',
+)
+assert.ok(!migration51.includes("'njss_operations'"), 'migration 051 must not reference non-existent database module njss_operations')
+
 const migration52Path = 'supabase/migrations/052_budget_revision_workflow.sql'
 assert.ok(fs.existsSync(migration52Path), 'migration 052 must exist')
 const migration52 = read(migration52Path)
