@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Wallet, TrendingUp, DollarSign, FileText, Loader2, Layers, Hash, Building2, Play, CheckCircle2, AlertCircle, Download, RefreshCw, Banknote } from "lucide-react"
+import { Wallet, TrendingUp, DollarSign, FileText, Loader2, Layers, Hash, Building2, Play, CheckCircle2, AlertCircle, Download, RefreshCw, Banknote, History } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts"
-import { getBudgetByCode, getConsolidations, consolidateDepartmentBudget, getDepartments, getReleases, getAllocationsForRelease, createQuarterlyRelease } from "@/lib/api"
+import { getBudgetByCode, getBudgetRevisionHistoryReport, getConsolidations, consolidateDepartmentBudget, getDepartments, getReleases, getAllocationsForRelease, createQuarterlyRelease } from "@/lib/api"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { exportToCSV, exportToPDF, rowsToPdfTable } from "@/lib/export"
@@ -21,6 +21,12 @@ type CodeRow = {
   expense_code_registry_id: string | null
   full_expense_code: string | null
   revised_budget: number
+  original_budget?: number
+  supplemental_budget?: number
+  revision_adjustment?: number
+  current_revised_budget?: number
+  budget_available?: number
+  released_available?: number
   approved_budget?: number
   funded_amount?: number
   released_amount: number
@@ -83,12 +89,33 @@ type Allocation = {
 type Dept = { id: string; code: string; name: string }
 type BudgetCycleOption = { id: string; budget_year: number; name: string; status: string }
 type BudgetPeriodOption = { id: string; period_number: number; period_code: string; period_name: string }
-type Tab = "code" | "centre" | "releases" | "consolidation"
+type RevisionHistoryRow = {
+  budget_revision_id: string
+  revision_number: string
+  division_code: string | null
+  division_name: string | null
+  revision_type: string
+  status: string
+  reason: string
+  authority_reference: string | null
+  effective_date: string
+  created_at: string
+  approved_at: string | null
+  original_budget: number
+  current_revised_budget_before: number
+  revision_adjustment: number
+  proposed_revised_budget: number
+  actual_expenditure_at_submission: number
+  outstanding_commitment_at_submission: number
+  protected_minimum_at_submission: number
+}
+type Tab = "code" | "centre" | "releases" | "revisions" | "consolidation"
 
 const CHART_COLORS = ["#8a1420", "#4c0f16", "#d4af37", "#a8324a", "#b8860b", "#6b1420"]
 
 export default function BudgetControlPage() {
   const { can } = useAuth()
+  const canViewRevisionReport = can("budget.revision.report")
   const [tab, setTab] = useState<Tab>("code")
   const [cycles, setCycles] = useState<BudgetCycleOption[]>([])
   const [periods, setPeriods] = useState<BudgetPeriodOption[]>([])
@@ -99,23 +126,26 @@ export default function BudgetControlPage() {
   const [depts, setDepts] = useState<Dept[]>([])
   const [releases, setReleases] = useState<ReleaseRow[]>([])
   const [allocations, setAllocations] = useState<Allocation[]>([])
+  const [revisionHistory, setRevisionHistory] = useState<RevisionHistoryRow[]>([])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [codeData, consData, deptData, relData, allocData, cycleRes] = await Promise.all([
+      const [codeData, consData, deptData, relData, allocData, cycleRes, revisionData] = await Promise.all([
         getBudgetByCode(year),
         getConsolidations(year),
         getDepartments(),
         getReleases(year),
         getAllocationsForRelease(year),
         supabase.from("budget_cycles").select("id, budget_year, name, status").order("budget_year", { ascending: false }),
+        canViewRevisionReport ? getBudgetRevisionHistoryReport(year) : Promise.resolve([]),
       ])
       setRows((codeData || []) as unknown as CodeRow[])
       setConsolidations((consData || []) as unknown as Consolidation[])
       setDepts((deptData || []) as unknown as Dept[])
       setReleases((relData || []) as unknown as ReleaseRow[])
       setAllocations((allocData || []) as unknown as Allocation[])
+      setRevisionHistory((revisionData || []) as unknown as RevisionHistoryRow[])
       const cycleRows = (cycleRes.data || []) as BudgetCycleOption[]
       setCycles(cycleRows)
       const selectedCycle = cycleRows.find((cycle) => cycle.budget_year === year) || cycleRows[0]
@@ -129,7 +159,7 @@ export default function BudgetControlPage() {
     } finally {
       setLoading(false)
     }
-  }, [year])
+  }, [year, canViewRevisionReport])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -137,41 +167,56 @@ export default function BudgetControlPage() {
   }, [fetchData])
 
   const totals = useMemo(() => {
-    const approved = rows.reduce((s, r) => s + (r.approved_budget ?? r.revised_budget ?? 0), 0)
+    const original = rows.reduce((s, r) => s + (r.original_budget || 0), 0)
+    const supplementary = rows.reduce((s, r) => s + (r.supplemental_budget || 0), 0)
+    const revisionAdjustment = rows.reduce((s, r) => s + (r.revision_adjustment || 0), 0)
+    const currentRevised = rows.reduce((s, r) => s + (r.current_revised_budget ?? r.approved_budget ?? r.revised_budget ?? 0), 0)
     const funded = rows.reduce((s, r) => s + (r.funded_amount || 0), 0)
     const released = rows.reduce((s, r) => s + (r.released_amount || 0), 0)
     const pending = rows.reduce((s, r) => s + (r.pending_amount || 0), 0)
     const committed = rows.reduce((s, r) => s + (r.outstanding_commitment ?? r.committed_amount ?? 0), 0)
     const actual = rows.reduce((s, r) => s + (r.actual_expenditure || 0), 0)
-    const available = rows.reduce((s, r) => s + (r.available_amount ?? ((r.released_amount || 0) - (r.outstanding_commitment ?? r.committed_amount ?? 0) - (r.actual_expenditure || 0))), 0)
-    const unfunded = rows.reduce((s, r) => s + (r.unfunded_amount ?? ((r.approved_budget ?? r.revised_budget ?? 0) - (r.funded_amount || 0))), 0)
+    const budgetAvailable = rows.reduce((s, r) => s + (r.budget_available ?? ((r.current_revised_budget ?? r.approved_budget ?? r.revised_budget ?? 0) - (r.outstanding_commitment ?? r.committed_amount ?? 0) - (r.actual_expenditure || 0))), 0)
+    const releasedAvailable = rows.reduce((s, r) => s + (r.released_available ?? r.available_amount ?? ((r.released_amount || 0) - (r.outstanding_commitment ?? r.committed_amount ?? 0) - (r.actual_expenditure || 0))), 0)
+    const unfunded = rows.reduce((s, r) => s + (r.unfunded_amount ?? ((r.current_revised_budget ?? r.approved_budget ?? r.revised_budget ?? 0) - (r.funded_amount || 0))), 0)
     const unreleased = rows.reduce((s, r) => s + (r.unreleased_funding ?? ((r.funded_amount || 0) - (r.released_amount || 0))), 0)
-    return { approved, funded, released, pending, committed, actual, available, unfunded, unreleased }
+    return { original, supplementary, revisionAdjustment, currentRevised, funded, released, pending, committed, actual, budgetAvailable, releasedAvailable, unfunded, unreleased }
   }, [rows])
 
   const byCentre = useMemo(() => {
-    const map = new Map<string, { label: string; approved: number; funded: number; released: number; pending: number; committed: number; actual: number; unfunded: number; unreleased: number }>()
+    const map = new Map<string, { label: string; original: number; supplementary: number; revisionAdjustment: number; currentRevised: number; funded: number; released: number; pending: number; committed: number; actual: number; budgetAvailable: number; releasedAvailable: number; unfunded: number; unreleased: number }>()
     for (const r of rows) {
       const key = r.cost_centre_code || r.section_name || "Unassigned"
       const label = r.cost_centre_code ? `${r.cost_centre_code} — ${r.cost_centre_name}` : r.section_name || "Unassigned"
-      const approved = r.approved_budget ?? r.revised_budget ?? 0
+      const original = r.original_budget || 0
+      const supplementary = r.supplemental_budget || 0
+      const revisionAdjustment = r.revision_adjustment || 0
+      const currentRevised = r.current_revised_budget ?? r.approved_budget ?? r.revised_budget ?? 0
       const committed = r.outstanding_commitment ?? r.committed_amount ?? 0
-      const e = map.get(key) || { label, approved: 0, funded: 0, released: 0, pending: 0, committed: 0, actual: 0, unfunded: 0, unreleased: 0 }
-      e.approved += approved
+      const actual = r.actual_expenditure || 0
+      const budgetAvailable = r.budget_available ?? (currentRevised - committed - actual)
+      const releasedAvailable = r.released_available ?? r.available_amount ?? ((r.released_amount || 0) - committed - actual)
+      const e = map.get(key) || { label, original: 0, supplementary: 0, revisionAdjustment: 0, currentRevised: 0, funded: 0, released: 0, pending: 0, committed: 0, actual: 0, budgetAvailable: 0, releasedAvailable: 0, unfunded: 0, unreleased: 0 }
+      e.original += original
+      e.supplementary += supplementary
+      e.revisionAdjustment += revisionAdjustment
+      e.currentRevised += currentRevised
       e.funded += r.funded_amount || 0
       e.released += r.released_amount || 0
       e.pending += r.pending_amount || 0
       e.committed += committed
-      e.actual += r.actual_expenditure || 0
-      e.unfunded += r.unfunded_amount ?? (approved - (r.funded_amount || 0))
+      e.actual += actual
+      e.budgetAvailable += budgetAvailable
+      e.releasedAvailable += releasedAvailable
+      e.unfunded += r.unfunded_amount ?? (currentRevised - (r.funded_amount || 0))
       e.unreleased += r.unreleased_funding ?? ((r.funded_amount || 0) - (r.released_amount || 0))
       map.set(key, e)
     }
-    return Array.from(map.values()).sort((a, b) => b.approved - a.approved)
+    return Array.from(map.values()).sort((a, b) => b.currentRevised - a.currentRevised)
   }, [rows])
 
   const chartData = useMemo(
-    () => byCentre.slice(0, 8).map((c) => ({ name: c.label.split(" — ")[0], available: Math.max(0, c.released - c.committed - c.actual), used: c.committed + c.actual })),
+    () => byCentre.slice(0, 8).map((c) => ({ name: c.label.split(" — ")[0], available: Math.max(0, c.releasedAvailable), used: c.committed + c.actual })),
     [byCentre]
   )
 
@@ -190,22 +235,30 @@ export default function BudgetControlPage() {
         "Expense Code": r.full_expense_code || "-",
         Department: r.department_name || "-",
         "Cost Centre": r.cost_centre_code || "-",
-        "Approved (K)": r.revised_budget || 0,
+        "Original Budget (K)": r.original_budget || 0,
+        "Supplementary (K)": r.supplemental_budget || 0,
+        "Revision Adjustment (K)": r.revision_adjustment || 0,
+        "Current Revised Budget (K)": r.current_revised_budget ?? r.approved_budget ?? r.revised_budget ?? 0,
         "Released (K)": r.released_amount || 0,
-        "Committed (K)": r.committed_amount || 0,
+        "Committed (K)": r.outstanding_commitment ?? r.committed_amount ?? 0,
         "Actual (K)": r.actual_expenditure || 0,
-        "Available (K)": (r.released_amount || 0) - (r.committed_amount || 0) - (r.actual_expenditure || 0),
+        "Budget Available (K)": r.budget_available ?? ((r.current_revised_budget ?? r.approved_budget ?? r.revised_budget ?? 0) - (r.outstanding_commitment ?? r.committed_amount ?? 0) - (r.actual_expenditure || 0)),
+        "Released Available (K)": r.released_available ?? r.available_amount ?? ((r.released_amount || 0) - (r.outstanding_commitment ?? r.committed_amount ?? 0) - (r.actual_expenditure || 0)),
       })))
     } else if (tab === "centre") {
       emit("budget_by_cost_centre", "Budget by Cost Centre", byCentre.map((c) => ({
         "Cost Centre": c.label,
-        "Approved (K)": c.approved,
+        "Original Budget (K)": c.original,
+        "Supplementary (K)": c.supplementary,
+        "Revision Adjustment (K)": c.revisionAdjustment,
+        "Current Revised Budget (K)": c.currentRevised,
         "Funded (K)": c.funded,
         "Released (K)": c.released,
         "Pending (K)": c.pending,
         "Committed (K)": c.committed,
         "Actual (K)": c.actual,
-        "Available (K)": c.released - c.committed - c.actual,
+        "Budget Available (K)": c.budgetAvailable,
+        "Released Available (K)": c.releasedAvailable,
         "Unfunded (K)": c.unfunded,
         "Unreleased Funding (K)": c.unreleased,
       })))
@@ -217,6 +270,21 @@ export default function BudgetControlPage() {
         Quarter: `Q${r.quarter}`,
         Date: r.release_date,
         "Amount (K)": r.released_amount || 0,
+      })))
+    } else if (tab === "revisions") {
+      emit("budget_revision_history", "Budget Revision History", revisionHistory.map((r) => ({
+        Revision: r.revision_number,
+        Division: r.division_code || r.division_name || "-",
+        Type: r.revision_type,
+        Status: r.status,
+        "Original Budget (K)": r.original_budget || 0,
+        "Current Before (K)": r.current_revised_budget_before || 0,
+        "Revision Adjustment (K)": r.revision_adjustment || 0,
+        "Proposed Revised (K)": r.proposed_revised_budget || 0,
+        "Actual at Submission (K)": r.actual_expenditure_at_submission || 0,
+        "Commitments at Submission (K)": r.outstanding_commitment_at_submission || 0,
+        "Protected Minimum (K)": r.protected_minimum_at_submission || 0,
+        "Effective Date": r.effective_date,
       })))
     } else {
       emit("consolidations", "Budget Consolidations", consolidations.map((c) => ({
@@ -233,6 +301,7 @@ export default function BudgetControlPage() {
     { key: "code", label: "By Expense Code", icon: Hash },
     { key: "centre", label: "By Cost Centre", icon: Layers },
     { key: "releases", label: "Releases", icon: Banknote },
+    ...(canViewRevisionReport ? [{ key: "revisions" as Tab, label: "Revision History", icon: History }] : []),
     { key: "consolidation", label: "Consolidation", icon: Building2 },
   ]
 
@@ -265,15 +334,19 @@ export default function BudgetControlPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-9 gap-4">
-        <SummaryCard title="Approved" value={totals.approved} subtitle="Annual ceiling" icon={<Wallet className="h-6 w-6" />} tone="maroon" />
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        <SummaryCard title="Original Budget" value={totals.original} subtitle="Approved baseline" icon={<Wallet className="h-6 w-6" />} tone="maroon" />
+        <SummaryCard title="Supplementary" value={totals.supplementary} subtitle="Additional authority" icon={<Layers className="h-6 w-6" />} tone="gold" />
+        <SummaryCard title="Revision Adjustment" value={totals.revisionAdjustment} subtitle="Net approved movements" icon={<History className="h-6 w-6" />} tone="slate" />
+        <SummaryCard title="Current Revised Budget" value={totals.currentRevised} subtitle="Current authoritative ceiling" icon={<Wallet className="h-6 w-6" />} tone="maroon" />
         <SummaryCard title="Funded" value={totals.funded} subtitle="Actual allocations" icon={<Banknote className="h-6 w-6" />} tone="gold" />
         <SummaryCard title="Released" value={totals.released} subtitle="Cash made available" icon={<Banknote className="h-6 w-6" />} tone="gold" />
         <SummaryCard title="Pending" value={totals.pending} subtitle="Submitted FF3" icon={<AlertCircle className="h-6 w-6" />} tone="slate" />
         <SummaryCard title="Committed" value={totals.committed} subtitle="Outstanding" icon={<FileText className="h-6 w-6" />} tone="slate" />
         <SummaryCard title="Actual" value={totals.actual} subtitle="Paid to date" icon={<DollarSign className="h-6 w-6" />} tone="red" />
-        <SummaryCard title="Available" value={totals.available} subtitle="Released − Com − Act" icon={<TrendingUp className="h-6 w-6" />} tone="green" />
-        <SummaryCard title="Unfunded" value={totals.unfunded} subtitle="Approved − Funded" icon={<Layers className="h-6 w-6" />} tone="red" />
+        <SummaryCard title="Budget Available" value={totals.budgetAvailable} subtitle="Revised − Com − Act" icon={<TrendingUp className="h-6 w-6" />} tone="green" />
+        <SummaryCard title="Released Available" value={totals.releasedAvailable} subtitle="Released − Com − Act" icon={<TrendingUp className="h-6 w-6" />} tone="green" />
+        <SummaryCard title="Unfunded" value={totals.unfunded} subtitle="Revised − Funded" icon={<Layers className="h-6 w-6" />} tone="red" />
         <SummaryCard title="Unreleased Funding" value={totals.unreleased} subtitle="Funded − Released" icon={<Hash className="h-6 w-6" />} tone="maroon" />
       </div>
 
@@ -300,6 +373,8 @@ export default function BudgetControlPage() {
         <ByCentreView byCentre={byCentre} chartData={chartData} />
       ) : tab === "releases" ? (
         <ReleasesView year={year} releases={releases} allocations={allocations} periods={periods} canRelease={can("budget.release")} onChanged={fetchData} />
+      ) : tab === "revisions" ? (
+        <RevisionHistoryView rows={revisionHistory} />
       ) : (
         <ConsolidationView year={year} depts={depts} consolidations={consolidations} canRun={can("budget.consolidate") || can("consolidation.run")} onChanged={fetchData} />
       )}
@@ -318,13 +393,17 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Expense Code</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Department</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">CC</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Approved</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Original Budget</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Supplementary</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Revision Adjustment</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Current Revised Budget</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Funded</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Released</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Pending</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Committed</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Actual</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Available</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Budget Available</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Released Available</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Unfunded</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Unreleased Funding</th>
               <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Used %</th>
@@ -332,10 +411,14 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((r, i) => {
-              const approved = r.approved_budget ?? r.revised_budget ?? 0
+              const original = r.original_budget || 0
+              const supplementary = r.supplemental_budget || 0
+              const revisionAdjustment = r.revision_adjustment || 0
+              const approved = r.current_revised_budget ?? r.approved_budget ?? r.revised_budget ?? 0
               const funded = r.funded_amount || 0
               const committed = r.outstanding_commitment ?? r.committed_amount ?? 0
-              const avail = r.available_amount ?? ((r.released_amount || 0) - committed - (r.actual_expenditure || 0))
+              const budgetAvail = r.budget_available ?? (approved - committed - (r.actual_expenditure || 0))
+              const avail = r.released_available ?? r.available_amount ?? ((r.released_amount || 0) - committed - (r.actual_expenditure || 0))
               const unfunded = r.unfunded_amount ?? (approved - funded)
               const unreleased = r.unreleased_funding ?? (funded - (r.released_amount || 0))
               const used = r.released_amount ? ((committed + (r.actual_expenditure || 0)) / r.released_amount) * 100 : 0
@@ -344,12 +427,16 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
                   <td className="px-4 py-3"><span className="font-mono text-sm text-png-red font-medium">{r.full_expense_code || "—"}</span></td>
                   <td className="px-4 py-3 text-sm text-slate-600">{r.department_name || "-"}</td>
                   <td className="px-4 py-3 text-sm text-slate-600 font-mono">{r.cost_centre_code || "-"}</td>
+                  <td className="px-4 py-3 text-sm text-slate-900 text-right">K {original.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-png-gold-strong text-right">K {supplementary.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600 text-right">K {revisionAdjustment.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-slate-900 text-right font-medium">K {approved.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-maroon text-right">K {funded.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-gold-strong text-right">K {(r.released_amount || 0).toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-slate-600 text-right">K {(r.pending_amount || 0).toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-maroon text-right">K {committed.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-red text-right">K {(r.actual_expenditure || 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold"><span className={budgetAvail >= 0 ? "text-green-700" : "text-red-600"}>K {budgetAvail.toLocaleString()}</span></td>
                   <td className="px-4 py-3 text-sm text-right font-semibold"><span className={avail >= 0 ? "text-green-700" : "text-red-600"}>K {avail.toLocaleString()}</span></td>
                   <td className="px-4 py-3 text-sm text-red-600 text-right">K {unfunded.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-png-maroon text-right">K {unreleased.toLocaleString()}</td>
@@ -366,7 +453,7 @@ function ByCodeTable({ rows }: { rows: CodeRow[] }) {
   )
 }
 
-function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; approved: number; funded: number; released: number; pending: number; committed: number; actual: number; unfunded: number; unreleased: number }[]; chartData: { name: string; available: number; used: number }[] }) {
+function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; original: number; supplementary: number; revisionAdjustment: number; currentRevised: number; funded: number; released: number; pending: number; committed: number; actual: number; budgetAvailable: number; releasedAvailable: number; unfunded: number; unreleased: number }[]; chartData: { name: string; available: number; used: number }[] }) {
   if (byCentre.length === 0) return <EmptyState message="No cost-centre budgets yet." />
   return (
     <div className="space-y-6">
@@ -394,28 +481,36 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; appr
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Cost Centre</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Approved</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Original Budget</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Supplementary</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Revision Adjustment</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Current Revised Budget</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Funded</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Released</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Pending</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Committed</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Actual</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Available</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Budget Available</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Released Available</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Unfunded</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {byCentre.map((c, i) => {
-                const avail = c.released - c.committed - c.actual
+                const avail = c.releasedAvailable
                 return (
                   <tr key={i} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-sm font-medium text-slate-900">{c.label}</td>
-                    <td className="px-4 py-3 text-sm text-slate-900 text-right">K {c.approved.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-slate-900 text-right">K {c.original.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-png-gold-strong text-right">K {c.supplementary.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600 text-right">K {c.revisionAdjustment.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-slate-900 text-right font-medium">K {c.currentRevised.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-maroon text-right">K {c.funded.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-gold-strong text-right">K {c.released.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-slate-600 text-right">K {c.pending.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-maroon text-right">K {c.committed.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-png-red text-right">K {c.actual.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-right font-semibold"><span className={c.budgetAvailable >= 0 ? "text-green-700" : "text-red-600"}>K {c.budgetAvailable.toLocaleString()}</span></td>
                     <td className="px-4 py-3 text-sm text-right font-semibold"><span className={avail >= 0 ? "text-green-700" : "text-red-600"}>K {avail.toLocaleString()}</span></td>
                     <td className="px-4 py-3 text-sm text-red-600 text-right">K {c.unfunded.toLocaleString()}</td>
                   </tr>
@@ -424,6 +519,52 @@ function ByCentreView({ byCentre, chartData }: { byCentre: { label: string; appr
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function RevisionHistoryView({ rows }: { rows: RevisionHistoryRow[] }) {
+  if (rows.length === 0) return <EmptyState message="No budget revisions have been recorded for this financial year." />
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Revision</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Division</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Type</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Status</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Original Budget</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Current Before</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Revision Adjustment</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Proposed Revised</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Actual at Submit</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Commitments at Submit</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Protected Minimum</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Effective</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.budget_revision_id} className="hover:bg-slate-50">
+                <td className="px-4 py-3 text-sm font-mono font-medium text-png-red">{r.revision_number}</td>
+                <td className="px-4 py-3 text-sm text-slate-700">{r.division_code || r.division_name || "-"}</td>
+                <td className="px-4 py-3 text-sm text-slate-700">{r.revision_type}</td>
+                <td className="px-4 py-3 text-sm text-slate-700">{r.status}</td>
+                <td className="px-4 py-3 text-sm text-right">K {(r.original_budget || 0).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-right">K {(r.current_revised_budget_before || 0).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-right">K {(r.revision_adjustment || 0).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-right font-medium">K {(r.proposed_revised_budget || 0).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-right">K {(r.actual_expenditure_at_submission || 0).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-right">K {(r.outstanding_commitment_at_submission || 0).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-right">K {(r.protected_minimum_at_submission || 0).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-slate-600">{r.effective_date || "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
