@@ -103,5 +103,7 @@ assert.match(
   /const allocateEvenly[\s\S]*?isRevisionMonthLocked\(row, index\)[\s\S]*?updateRow\(row\.clientId, \{ months \}\)/,
   'Allocate Evenly must preserve closed/actual months when editing a revision',
 )
+assert.ok(revisionPanel.includes('proposedTotal'), 'revision summary panel must accept the live spreadsheet proposed total')
+assert.ok(budgetPage.includes('proposedTotal={totalProposed}'), 'budget page must pass live proposed total so new target rows appear immediately')
 
 console.log('budget revision and reforecast regression checks passed')
