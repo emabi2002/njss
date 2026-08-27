@@ -1,0 +1,319 @@
+from pathlib import Path
+
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if old not in text:
+        raise SystemExit(f"Anchor not found: {label}")
+    return text.replace(old, new, 1)
+
+
+# Migration 054
+path = Path('supabase/migrations/054_budget_revision_hardening.sql')
+text = path.read_text()
+text = text.replace(
+    '  * enforce maker/checker separation for review and approval\n',
+    '  * enforce Registrar-initiation / Line-Supervisor-preparation / Registrar-disposition workflow\n',
+)
+
+role_block = """-- -----------------------------------------------------------------------------
+-- 0. Correct revision workflow ownership.
+--    Registrar alone initiates a post-approval change. The Line Supervisor for
+--    the affected section prepares/adjusts and submits it. Registrar then
+--    approves, returns or rejects it. The legacy 051 Line Supervisor create
+--    grant is explicitly disabled here because 051 has not been deployed live.
+-- -----------------------------------------------------------------------------
+INSERT INTO role_permissions (role_id, permission, is_allowed)
+SELECT r.id, x.permission, x.is_allowed
+FROM roles r
+JOIN (VALUES
+  ('Registrar', 'budget.revision.create', true),
+  ('Registrar', 'budget.revision.review', true),
+  ('Registrar', 'budget.revision.approve', true),
+  ('Registrar', 'budget.revision.return', true),
+  ('Registrar', 'budget.revision.reject', true),
+  ('Registrar', 'budget.revision.edit', false),
+  ('Registrar', 'budget.revision.submit', false),
+  ('Line Supervisor', 'budget.revision.create', false),
+  ('Line Supervisor', 'budget.revision.edit', true),
+  ('Line Supervisor', 'budget.revision.submit', true)
+) AS x(role_name, permission, is_allowed)
+  ON x.role_name = r.name
+ON CONFLICT (role_id, permission) DO UPDATE
+SET is_allowed = EXCLUDED.is_allowed;
+
+"""
+text = replace_once(
+    text,
+    'BEGIN;\n\n-- -----------------------------------------------------------------------------\n-- 1. Reassert one active operational allocation per approved source budget line.',
+    'BEGIN;\n\n' + role_block + '-- -----------------------------------------------------------------------------\n-- 1. Reassert one active operational allocation per approved source budget line.',
+    'role correction block',
+)
+
+auth_anchor = """  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Authenticated NJSS user profile is required.';
+  END IF;
+
+  IF revision_status NOT IN ('DRAFT','RETURNED') THEN
+"""
+auth_replacement = """  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Authenticated NJSS user profile is required.';
+  END IF;
+
+  -- Registrar creation clones the approved baseline through the hardened
+  -- creation wrapper. Ordinary editing remains Line-Supervisor-only.
+  IF COALESCE(current_setting('njss.budget_revision_create', true), '') = 'on' THEN
+    RETURN;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = v_user_id
+      AND r.name = 'Line Supervisor'
+      AND r.is_active = true
+  ) THEN
+    RAISE EXCEPTION 'Only the Line Supervisor can prepare or edit a requested budget revision.';
+  END IF;
+
+  IF revision_status NOT IN ('DRAFT','RETURNED') THEN
+"""
+text = replace_once(text, auth_anchor, auth_replacement, 'Line Supervisor edit role')
+
+submit_guard_anchor = """  -- Only the hardened revision transition wrapper sets this local flag. The
+  -- generic budget workflow uses njss.budget_workflow and therefore cannot pass.
+  IF COALESCE(current_setting('njss.budget_revision_workflow', true), '') = 'on' THEN
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END IF;
+"""
+submit_guard_replacement = submit_guard_anchor + """
+
+  -- Registrar initiation also performs system-controlled header recalculation
+  -- while cloning the approved baseline. This bypass is set only after the
+  -- hardened creation wrapper confirms the Registrar role.
+  IF COALESCE(current_setting('njss.budget_revision_create', true), '') = 'on' THEN
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END IF;
+"""
+text = replace_once(text, submit_guard_anchor, submit_guard_replacement, 'creation header bypass')
+
+submission_perm_anchor = """  IF NOT (
+    COALESCE(fn_current_user_has_permission('budget.revision.edit'), false)
+    OR COALESCE(fn_current_user_has_permission('all'), false)
+  ) THEN
+    RAISE EXCEPTION 'Permission denied: budget.revision.edit is required to modify a revision submission.';
+  END IF;
+"""
+submission_perm_replacement = """  IF NOT EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = fn_current_app_user_id()
+      AND r.name = 'Line Supervisor'
+      AND r.is_active = true
+  ) THEN
+    RAISE EXCEPTION 'Only the Line Supervisor can prepare or edit a requested budget revision.';
+  END IF;
+  IF NOT COALESCE(fn_current_user_has_permission('budget.revision.edit'), false) THEN
+    RAISE EXCEPTION 'Permission denied: budget.revision.edit is required to modify a revision submission.';
+  END IF;
+"""
+text = replace_once(text, submission_perm_anchor, submission_perm_replacement, 'submission edit role')
+
+create_permission_anchor = """  IF NOT (
+    COALESCE(fn_current_user_has_permission('budget.revision.create'), false)
+    OR COALESCE(fn_current_user_has_permission('all'), false)
+  ) THEN
+    RAISE EXCEPTION 'Permission denied: budget.revision.create is required.';
+  END IF;
+"""
+create_permission_replacement = """  IF NOT EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = v_user_id
+      AND r.name = 'Registrar'
+      AND r.is_active = true
+  ) THEN
+    RAISE EXCEPTION 'Only the Registrar can initiate a budget revision or supplementary budget request.';
+  END IF;
+
+  IF NOT COALESCE(fn_current_user_has_permission('budget.revision.create'), false) THEN
+    RAISE EXCEPTION 'Permission denied: budget.revision.create is required.';
+  END IF;
+"""
+text = replace_once(text, create_permission_anchor, create_permission_replacement, 'Registrar creation role')
+
+create_return_anchor = """  RETURN public.njss_create_budget_revision_base(
+    p_parent_submission_id,
+    p_revision_type,
+    p_reason,
+    p_authority_reference,
+    v_effective_date,
+    p_supporting_reference,
+    p_user_email
+  );
+"""
+create_return_replacement = """  -- Permit only the trusted cloning/recalculation work performed inside the
+  -- base creator. Direct user edits remain protected by the Line Supervisor guard.
+  PERFORM set_config('njss.budget_revision_create', 'on', true);
+
+  RETURN public.njss_create_budget_revision_base(
+    p_parent_submission_id,
+    p_revision_type,
+    p_reason,
+    p_authority_reference,
+    v_effective_date,
+    p_supporting_reference,
+    p_user_email
+  );
+"""
+text = replace_once(text, create_return_anchor, create_return_replacement, 'creation transaction flag')
+
+text = text.replace(
+    '-- 5. Harden transitions. Reviewer/approver cannot be the requester; rejection\n--    must be reasoned; and every mutation is constrained to current strict scope.',
+    '-- 5. Harden transitions. Line Supervisor prepares/submits the Registrar-requested\n--    change. Registrar alone performs final approve/return/reject disposition.',
+)
+
+requester_block = """  IF v_action IN ('REVIEW','APPROVE') AND v_revision.requested_by = v_user_id THEN
+    RAISE EXCEPTION 'Requester cannot review or approve their own budget revision.';
+  END IF;
+
+"""
+text = replace_once(text, requester_block, '', 'requester maker/checker block')
+
+disposition_anchor = """  IF v_action = 'RETURN' AND COALESCE(TRIM(p_comments), '') = '' THEN
+    RAISE EXCEPTION 'Return comments/reason are required.';
+  END IF;
+"""
+disposition_replacement = """  IF v_action IN ('SUBMIT','RESUBMIT') THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM user_roles ur
+      JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = v_user_id
+        AND r.name = 'Line Supervisor'
+        AND r.is_active = true
+    ) THEN
+      RAISE EXCEPTION 'Only the Line Supervisor can submit a budget revision requested for their section.';
+    END IF;
+  ELSIF v_action IN ('APPROVE','RETURN','REJECT') THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM user_roles ur
+      JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = v_user_id
+        AND r.name = 'Registrar'
+        AND r.is_active = true
+    ) THEN
+      RAISE EXCEPTION 'Only the Registrar can approve, return or reject a budget revision.';
+    END IF;
+  ELSIF v_action = 'REVIEW' THEN
+    RAISE EXCEPTION 'A separate revision review action is not used. The Line Supervisor submits and the Registrar approves, returns or rejects.';
+  ELSE
+    RAISE EXCEPTION 'Unsupported budget revision action: %', p_action;
+  END IF;
+
+  IF v_action='APPROVE' AND v_revision.status NOT IN ('SUBMITTED','RESUBMITTED') THEN
+    RAISE EXCEPTION 'Registrar approval requires a budget revision submitted by the Line Supervisor.';
+  END IF;
+
+  IF v_action = 'RETURN' AND COALESCE(TRIM(p_comments), '') = '' THEN
+    RAISE EXCEPTION 'Return comments/reason are required.';
+  END IF;
+"""
+text = replace_once(text, disposition_anchor, disposition_replacement, 'workflow ownership checks')
+
+final_return_anchor = """  RETURN public.njss_transition_budget_revision_base(
+    p_revision_id,
+    p_action,
+    p_comments,
+    p_user_email
+  );
+"""
+final_return_replacement = """  -- The 052 worker expects REVIEWED before APPROVE. Keep that internal state
+  -- transition atomic inside the single Registrar Approve action; the UI/API do
+  -- not expose a separate Review Revision action.
+  IF v_action = 'APPROVE' THEN
+    PERFORM public.njss_transition_budget_revision_base(
+      p_revision_id,
+      'REVIEW',
+      'Registrar final approval review',
+      p_user_email
+    );
+    RETURN public.njss_transition_budget_revision_base(
+      p_revision_id,
+      'APPROVE',
+      p_comments,
+      p_user_email
+    );
+  END IF;
+
+  RETURN public.njss_transition_budget_revision_base(
+    p_revision_id,
+    p_action,
+    p_comments,
+    p_user_email
+  );
+"""
+text = replace_once(text, final_return_anchor, final_return_replacement, 'single-step Registrar approval')
+path.write_text(text)
+
+# API: REVIEW is no longer an external revision action.
+path = Path('app/api/workflows/budget/route.ts')
+text = path.read_text().replace("  REVIEW: ['budget.revision.review'],\n", '')
+path.write_text(text)
+
+# Typed client: remove external REVIEW action.
+path = Path('lib/budget-revision.ts')
+text = path.read_text().replace("  | 'REVIEW'\n", '')
+path.write_text(text)
+
+# Budget UI
+path = Path('app/dashboard/budget-template/page.tsx')
+text = path.read_text()
+text = text.replace('  const canRevisionReview = can("budget.revision.review")\n', '')
+text = text.replace(
+    'const runRevisionAction = async (action: "SUBMIT" | "RESUBMIT" | "RETURN" | "REVIEW" | "APPROVE" | "REJECT") => {',
+    'const runRevisionAction = async (action: "SUBMIT" | "RESUBMIT" | "RETURN" | "APPROVE" | "REJECT") => {',
+)
+review_button = """                      {["SUBMITTED", "RESUBMITTED"].includes(revision.status) && canRevisionReview && (
+                        <button onClick={() => runRevisionAction("REVIEW")} disabled={saving} className="btn-primary">
+                          <ShieldCheck className="h-4 w-4" /> Review Revision
+                        </button>
+                      )}
+"""
+text = replace_once(text, review_button, '', 'Review Revision button')
+text = text.replace(
+    '{revision.status === "REVIEWED" && canRevisionApprove && (',
+    '{["SUBMITTED", "RESUBMITTED"].includes(revision.status) && canRevisionApprove && (',
+)
+text = text.replace(
+    '<Plus className="h-4 w-4" /> Create Budget Revision',
+    '<Plus className="h-4 w-4" /> Request Budget Change',
+)
+text = text.replace(
+    'created as a controlled revision draft. The approved baseline remains locked.',
+    'requested. The Line Supervisor can now review and adjust the controlled revision draft; the approved baseline remains locked.',
+)
+path.write_text(text)
+
+# Dialog language
+path = Path('app/dashboard/budget-template/BudgetRevisionDialog.tsx')
+text = path.read_text()
+text = text.replace('aria-label="Create Budget Revision"', 'aria-label="Request Budget Change"')
+text = text.replace(
+    '<h2 className="mt-1 text-lg font-bold">Create Budget Revision</h2>',
+    '<h2 className="mt-1 text-lg font-bold">Request Budget Change</h2>',
+)
+text = text.replace(
+    'The approved budget remains locked. NJSS creates a new revision version for adjustment and approval.',
+    'The approved budget remains locked. The Registrar opens the change request; the responsible Line Supervisor reviews and adjusts the revision before submitting it back to the Registrar for approval.',
+)
+text = text.replace(
+    '{saving ? "Creating Revision..." : "Create Budget Revision"}',
+    '{saving ? "Creating Request..." : "Request Budget Change"}',
+)
+path.write_text(text)
