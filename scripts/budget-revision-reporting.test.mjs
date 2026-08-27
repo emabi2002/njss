@@ -14,6 +14,7 @@ for (const required of [
   'current_revised_budget',
   'budget_available',
   'released_available',
+  'available_amount',
   'CREATE OR REPLACE VIEW v_budget_revision_history_report',
   'security_invoker',
   'budget-revision-history',
@@ -21,6 +22,14 @@ for (const required of [
 ]) {
   assert.ok(migration53.includes(required), `migration 053 missing ${required}`)
 }
+assert.ok(
+  migration53.includes('Current Revised Budget = Original + Supplementary + Revision Adjustment'),
+  'migration 053 must document the authoritative revision equation',
+)
+assert.ok(
+  migration53.includes('budget_available is budget headroom; available_amount/released_available is released-cash headroom'),
+  'migration 053 must preserve the distinction between budget and released availability',
+)
 
 const apiSource = read('lib/api.ts')
 for (const field of [
@@ -51,5 +60,6 @@ for (const label of [
 assert.ok(budgetControl.includes('getBudgetRevisionHistoryReport'), 'Budget Control must load revision history reporting')
 assert.ok(budgetControl.includes('budget_available'), 'Budget Control must use budget availability from the authoritative view')
 assert.ok(budgetControl.includes('released_available'), 'Budget Control must use released cash availability from the authoritative view')
+assert.ok(budgetControl.includes('can("budget.revision.report")'), 'revision history tab must remain permission-gated')
 
 console.log('budget revision reporting regression checks passed')
