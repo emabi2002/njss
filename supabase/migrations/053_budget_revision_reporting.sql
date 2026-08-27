@@ -6,8 +6,8 @@
 
 -- -----------------------------------------------------------------------------
 -- 1. Authoritative budget position.
---    Existing columns remain in their established order for compatibility.
---    Revision/reporting columns are appended at the end.
+--    Preserve the Phase 2 view signature and commitment-ledger semantics first;
+--    append revision/reporting columns only after all existing columns.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE VIEW v_authoritative_budget_position
 WITH (security_invoker = true) AS
@@ -43,45 +43,25 @@ SELECT
   COALESCE((
     SELECT SUM(h.total_estimated_amount)
     FROM ff3_headers h
-    WHERE h.financial_year = ba.financial_year
-      AND h.status = 'SUBMITTED'
-      AND (
-        h.budget_allocation_id = ba.id
-        OR (
-          h.budget_allocation_id IS NULL
-          AND h.expense_code_registry_id = ba.expense_code_registry_id
-          AND (h.department_id IS NULL OR h.department_id IS NOT DISTINCT FROM ba.department_id)
-          AND (h.section_id IS NULL OR h.section_id IS NOT DISTINCT FROM ba.section_id)
-          AND (h.funding_source_id IS NULL OR h.funding_source_id IS NOT DISTINCT FROM ba.funding_source_id)
-          AND 1 = (
-            SELECT COUNT(*)
-            FROM budget_allocations bx
-            WHERE bx.financial_year = h.financial_year
-              AND bx.is_active = true
-              AND bx.expense_code_registry_id = h.expense_code_registry_id
-              AND (h.department_id IS NULL OR bx.department_id IS NOT DISTINCT FROM h.department_id)
-              AND (h.section_id IS NULL OR bx.section_id IS NOT DISTINCT FROM h.section_id)
-              AND (h.funding_source_id IS NULL OR bx.funding_source_id IS NOT DISTINCT FROM h.funding_source_id)
-          )
-        )
-      )
+    WHERE h.budget_allocation_id = ba.id
+      AND h.status IN ('SUBMITTED','ENDORSED_SUPERVISOR','ENDORSED_SECTION_HEAD')
   ), 0)::NUMERIC(15,2) AS pending_amount,
   COALESCE((
-    SELECT SUM(c.committed_amount - COALESCE(c.paid_amount, 0))
+    SELECT SUM(c.outstanding_amount)
     FROM ff3_commitments c
     WHERE c.budget_allocation_id = ba.id
-      AND c.status IN ('ACTIVE','PARTIALLY_PAID')
+      AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')
   ), 0)::NUMERIC(15,2) AS outstanding_commitment,
   COALESCE((
-    SELECT SUM(COALESCE(c.paid_amount, 0))
+    SELECT SUM(c.paid_amount)
     FROM ff3_commitments c
     WHERE c.budget_allocation_id = ba.id
-      AND c.status <> 'CANCELLED'
+      AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')
   ), 0)::NUMERIC(15,2) AS actual_expenditure,
   (
     COALESCE((SELECT SUM(qr.released_amount) FROM quarterly_releases qr WHERE qr.budget_allocation_id = ba.id), 0)
-    - COALESCE((SELECT SUM(c.committed_amount - COALESCE(c.paid_amount, 0)) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID')), 0)
-    - COALESCE((SELECT SUM(COALESCE(c.paid_amount, 0)) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status <> 'CANCELLED'), 0)
+    - COALESCE((SELECT SUM(c.outstanding_amount) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')), 0)
+    - COALESCE((SELECT SUM(c.paid_amount) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')), 0)
   )::NUMERIC(15,2) AS available_amount,
   (
     ba.revised_budget
@@ -91,6 +71,12 @@ SELECT
     COALESCE((SELECT SUM(fal.allocated_amount) FROM funding_allocations fal WHERE fal.budget_allocation_id = ba.id AND fal.status = 'APPROVED'), 0)
     - COALESCE((SELECT SUM(qr.released_amount) FROM quarterly_releases qr WHERE qr.budget_allocation_id = ba.id), 0)
   )::NUMERIC(15,2) AS unreleased_funding,
+  (
+    COALESCE((SELECT SUM(qr.released_amount) FROM quarterly_releases qr WHERE qr.budget_allocation_id = ba.id), 0)
+    - COALESCE((SELECT SUM(c.outstanding_amount) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')), 0)
+    - COALESCE((SELECT SUM(c.paid_amount) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')), 0)
+    - COALESCE((SELECT SUM(h.total_estimated_amount) FROM ff3_headers h WHERE h.budget_allocation_id = ba.id AND h.status IN ('SUBMITTED','ENDORSED_SUPERVISOR','ENDORSED_SECTION_HEAD')), 0)
+  )::NUMERIC(15,2) AS projected_available_after_pending,
 
   -- Revision-aware lineage appended for Task 6 reporting.
   COALESCE(ba.original_budget, 0)::NUMERIC(15,2) AS original_budget,
@@ -99,13 +85,13 @@ SELECT
   COALESCE(ba.revised_budget, 0)::NUMERIC(15,2) AS current_revised_budget,
   (
     COALESCE(ba.revised_budget, 0)
-    - COALESCE((SELECT SUM(c.committed_amount - COALESCE(c.paid_amount, 0)) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID')), 0)
-    - COALESCE((SELECT SUM(COALESCE(c.paid_amount, 0)) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status <> 'CANCELLED'), 0)
+    - COALESCE((SELECT SUM(c.outstanding_amount) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')), 0)
+    - COALESCE((SELECT SUM(c.paid_amount) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')), 0)
   )::NUMERIC(15,2) AS budget_available,
   (
     COALESCE((SELECT SUM(qr.released_amount) FROM quarterly_releases qr WHERE qr.budget_allocation_id = ba.id), 0)
-    - COALESCE((SELECT SUM(c.committed_amount - COALESCE(c.paid_amount, 0)) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID')), 0)
-    - COALESCE((SELECT SUM(COALESCE(c.paid_amount, 0)) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status <> 'CANCELLED'), 0)
+    - COALESCE((SELECT SUM(c.outstanding_amount) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')), 0)
+    - COALESCE((SELECT SUM(c.paid_amount) FROM ff3_commitments c WHERE c.budget_allocation_id = ba.id AND c.status IN ('ACTIVE','PARTIALLY_PAID','FULLY_PAID','CANCELLED','RELEASED','CLOSED')), 0)
   )::NUMERIC(15,2) AS released_available
 FROM budget_allocations ba
 LEFT JOIN departments d ON d.id = ba.department_id
@@ -126,8 +112,10 @@ GRANT SELECT ON v_authoritative_budget_position TO authenticated;
 
 -- -----------------------------------------------------------------------------
 -- 2. Revision history management report.
---    SECURITY INVOKER ensures the caller remains subject to revision/submission
---    RLS and the four-group data-scope rules.
+--    SECURITY INVOKER keeps the caller subject to revision/submission RLS and
+--    four-group data-scope rules. Submission joins are LEFT JOINs so a caller
+--    who can see revision history is not denied the revision solely because a
+--    separate submission-number lookup is outside their scope.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE VIEW v_budget_revision_history_report
 WITH (security_invoker = true) AS
@@ -166,8 +154,8 @@ SELECT
   COALESCE(SUM(brl.protected_minimum_at_approval), 0)::NUMERIC(15,2) AS protected_minimum_at_approval
 FROM budget_revisions r
 JOIN budget_divisions d ON d.id = r.division_id
-JOIN divisional_budget_submissions parent_submission ON parent_submission.id = r.parent_submission_id
-JOIN divisional_budget_submissions revision_submission ON revision_submission.id = r.revision_submission_id
+LEFT JOIN divisional_budget_submissions parent_submission ON parent_submission.id = r.parent_submission_id
+LEFT JOIN divisional_budget_submissions revision_submission ON revision_submission.id = r.revision_submission_id
 LEFT JOIN budget_revision_lines brl ON brl.budget_revision_id = r.id
 GROUP BY
   r.id,
