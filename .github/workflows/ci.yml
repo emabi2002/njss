@@ -57,6 +57,9 @@ jobs:
       - name: Budget revision hardening regression checks
         run: node scripts/budget-revision-hardening.test.mjs
 
+      - name: Budget revision workspace regression checks
+        run: node scripts/budget-revision-workspace.test.mjs
+
       - name: Lint
         run: bun run lint
 
