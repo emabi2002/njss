@@ -6,6 +6,12 @@ const read = (path) => fs.readFileSync(path, 'utf8')
 assert.ok(fs.existsSync('supabase/migrations/056_operational_budget_activation_finance_master_data.sql'))
 assert.ok(fs.existsSync('lib/budget-activation.ts'))
 assert.ok(fs.existsSync('app/api/budget-activation/route.ts'))
+
+const masterDataPage = read('app/dashboard/master/page.tsx')
+for (const token of ['Finance Code', 'Chart of Accounts', 'expense_ledger_id', 'chart_of_account_id']) {
+  assert.ok(masterDataPage.includes(token), `master-data posting-code builder missing ${token}`)
+}
+
 assert.ok(fs.existsSync('app/dashboard/budget/activation/page.tsx'))
 
 const migration = read('supabase/migrations/056_operational_budget_activation_finance_master_data.sql')
