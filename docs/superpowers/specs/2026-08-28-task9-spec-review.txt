@@ -1,0 +1,8 @@
+Task 9 specification self-review — 2026-08-28
+
+Placeholder scan: PASS — no TBD/TODO placeholders.
+Internal consistency: PASS — approval and activation are separate; System Administrator prepares; Registrar authorises; atomic activation remains the only posting path.
+Scope check: PASS — Task 9 is one subsystem spanning schema, RBAC, activation workflow, master-data mapping, UI, audit, tests and deployment.
+Ambiguity check: RESOLVED — approved budget figures remain authoritative; activation snapshots are validation evidence only; no automatic activation of existing approved submissions; no fallback Chart of Accounts mapping; technical administrator cannot authorise even with broad application permissions.
+
+Implementation remains gated pending user review of the written Task 9 specification.
