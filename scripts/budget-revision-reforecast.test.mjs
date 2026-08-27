@@ -106,4 +106,5 @@ assert.match(
 assert.ok(revisionPanel.includes('proposedTotal'), 'revision summary panel must accept the live spreadsheet proposed total')
 assert.ok(budgetPage.includes('proposedTotal={totalProposed}'), 'budget page must pass live proposed total so new target rows appear immediately')
 
+// Task 5 gate: all assertions above describe the complete revision preparation UI contract.
 console.log('budget revision and reforecast regression checks passed')
