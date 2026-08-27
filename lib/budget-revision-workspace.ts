@@ -153,13 +153,9 @@ export async function getApprovedBudgetCandidates(): Promise<ApprovedBudgetCandi
     : { data: [], error: null }
   if (divisionError) throw divisionError
 
-  const departmentIds = [...new Set((divisions || []).map((row) => row.department_id as string).filter(Boolean))]
   const sectionIds = [...new Set((divisions || []).map((row) => row.section_id as string).filter(Boolean))]
-
   const [{ data: departments, error: departmentError }, { data: sections, error: sectionError }] = await Promise.all([
-    departmentIds.length
-      ? supabase.from('departments').select('id, name').in('id', departmentIds)
-      : Promise.resolve({ data: [], error: null }),
+    supabase.from('departments').select('id, code, name').eq('is_active', true),
     sectionIds.length
       ? supabase.from('sections').select('id, name').in('id', sectionIds)
       : Promise.resolve({ data: [], error: null }),
@@ -169,14 +165,32 @@ export async function getApprovedBudgetCandidates(): Promise<ApprovedBudgetCandi
 
   const divisionMap = new Map((divisions || []).map((row) => [row.id as string, row]))
   const departmentMap = new Map((departments || []).map((row) => [row.id as string, row.name as string]))
+  const departmentByCode = new Map(
+    (departments || [])
+      .filter((row) => Boolean(row.code))
+      .map((row) => [String(row.code), row]),
+  )
   const sectionMap = new Map((sections || []).map((row) => [row.id as string, row.name as string]))
 
   return rows
     .filter((row) => !parentsWithActiveRevision.has(row.id as string))
     .map((row) => {
       const division = divisionMap.get(row.division_id as string)
-      const departmentId = (division?.department_id || row.department_id || null) as string | null
       const sectionId = (division?.section_id || null) as string | null
+      const ownerDepartment = !sectionId && division?.code
+        ? departmentByCode.get(String(division.code))
+        : null
+      const departmentId = (
+        sectionId
+          ? division?.department_id || row.department_id || null
+          : ownerDepartment?.id || division?.department_id || row.department_id || null
+      ) as string | null
+      const departmentName = ownerDepartment?.name
+        ? String(ownerDepartment.name)
+        : departmentId
+          ? departmentMap.get(departmentId) || null
+          : null
+
       return {
         submission_id: row.id as string,
         submission_number: (row.submission_number || null) as string | null,
@@ -186,7 +200,7 @@ export async function getApprovedBudgetCandidates(): Promise<ApprovedBudgetCandi
         division_code: (division?.code || null) as string | null,
         division_name: (division?.name || null) as string | null,
         department_id: departmentId,
-        department_name: departmentId ? departmentMap.get(departmentId) || null : null,
+        department_name: departmentName,
         section_id: sectionId,
         section_name: sectionId ? sectionMap.get(sectionId) || null : null,
         total_proposed_budget: Number(row.total_proposed_budget || 0),
