@@ -51,6 +51,9 @@ jobs:
       - name: Budget revision and reforecast regression checks
         run: node scripts/budget-revision-reforecast.test.mjs
 
+      - name: Budget revision reporting regression checks
+        run: node scripts/budget-revision-reporting.test.mjs
+
       - name: Lint
         run: bun run lint
 
