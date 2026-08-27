@@ -1,0 +1,63 @@
+name: Apply Task 7 Hardening Fixes
+
+on:
+  push:
+    branches: [feature/budget-revision-implementation]
+    paths:
+      - '.github/workflows/apply-task7-hardening-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/budget-revision-implementation
+          fetch-depth: 0
+
+      - name: Apply reviewed SQL hardening fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('supabase/migrations/054_budget_revision_hardening.sql')
+          s = p.read_text()
+
+          old = """  revision_status TEXT;\n  v_division budget_divisions%ROWTYPE;\nBEGIN\n  SELECT br.status, d.*\n  INTO revision_status, v_division\n  FROM budget_revisions br\n  JOIN budget_divisions d ON d.id = br.division_id\n  WHERE br.revision_submission_id = p_submission_id;\n\n  -- Ordinary (non-revision) Budget Preparation rows keep their existing policy.\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n"""
+          new = """  revision_status TEXT;\n  v_division_id UUID;\n  v_division budget_divisions%ROWTYPE;\nBEGIN\n  SELECT br.status, br.division_id\n  INTO revision_status, v_division_id\n  FROM budget_revisions br\n  WHERE br.revision_submission_id = p_submission_id;\n\n  -- Ordinary (non-revision) Budget Preparation rows keep their existing policy.\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  SELECT * INTO v_division\n  FROM budget_divisions\n  WHERE id = v_division_id;\n  IF NOT FOUND THEN\n    RAISE EXCEPTION 'Budget revision division was not found.';\n  END IF;\n"""
+          if old not in s:
+              raise SystemExit('editable helper block not found')
+          s = s.replace(old, new, 1)
+
+          old = """CREATE TRIGGER trg_budget_revision_line_write_guard\n  BEFORE INSERT OR UPDATE OR DELETE ON divisional_budget_lines\n  FOR EACH ROW EXECUTE FUNCTION njss_guard_budget_revision_line_write();\n\nCREATE OR REPLACE FUNCTION njss_guard_budget_revision_monthly_write()\n"""
+          new = """CREATE TRIGGER trg_budget_revision_line_write_guard\n  BEFORE INSERT OR UPDATE OR DELETE ON divisional_budget_lines\n  FOR EACH ROW EXECUTE FUNCTION njss_guard_budget_revision_line_write();\nREVOKE ALL ON FUNCTION njss_guard_budget_revision_line_write() FROM PUBLIC, authenticated;\n\nCREATE OR REPLACE FUNCTION njss_guard_budget_revision_monthly_write()\n"""
+          if old not in s:
+              raise SystemExit('line trigger block not found')
+          s = s.replace(old, new, 1)
+
+          old = """CREATE TRIGGER trg_budget_revision_monthly_write_guard\n  BEFORE INSERT OR UPDATE OR DELETE ON budget_monthly_allocations\n  FOR EACH ROW EXECUTE FUNCTION njss_guard_budget_revision_monthly_write();\n\n-- -----------------------------------------------------------------------------\n-- 3. Harden the internal validator without copying the 052 implementation.\n"""
+          new = """CREATE TRIGGER trg_budget_revision_monthly_write_guard\n  BEFORE INSERT OR UPDATE OR DELETE ON budget_monthly_allocations\n  FOR EACH ROW EXECUTE FUNCTION njss_guard_budget_revision_monthly_write();\nREVOKE ALL ON FUNCTION njss_guard_budget_revision_monthly_write() FROM PUBLIC, authenticated;\n\n-- Revision submissions share the ordinary submission table. This guard prevents\n-- callers from sending a revision version through transition_divisional_budget_submission\n-- (which is the initial-budget path and can create operational allocations).\nCREATE OR REPLACE FUNCTION njss_guard_budget_revision_submission_write()\nRETURNS TRIGGER\nLANGUAGE plpgsql\nSECURITY DEFINER\nSET search_path = public, pg_temp\nAS $$\nDECLARE\n  v_submission_id UUID := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;\n  v_revision budget_revisions%ROWTYPE;\n  v_division budget_divisions%ROWTYPE;\nBEGIN\n  SELECT * INTO v_revision\n  FROM budget_revisions\n  WHERE revision_submission_id = v_submission_id;\n\n  IF NOT FOUND THEN\n    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;\n    RETURN NEW;\n  END IF;\n\n  -- Only the hardened revision transition wrapper sets this local flag. The\n  -- generic budget workflow uses njss.budget_workflow and therefore cannot pass.\n  IF COALESCE(current_setting('njss.budget_revision_workflow', true), '') = 'on' THEN\n    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;\n    RETURN NEW;\n  END IF;\n\n  IF TG_OP = 'DELETE' THEN\n    RAISE EXCEPTION 'Budget revision submissions cannot be deleted; reject or supersede them through the revision workflow.';\n  END IF;\n\n  IF NEW.status IS DISTINCT FROM OLD.status THEN\n    RAISE EXCEPTION 'Budget revision status can only be changed through the dedicated budget revision workflow.';\n  END IF;\n\n  SELECT * INTO v_division FROM budget_divisions WHERE id = v_revision.division_id;\n  IF v_revision.status NOT IN ('DRAFT','RETURNED') THEN\n    RAISE EXCEPTION 'Budget revision submission cannot be edited in status %.', v_revision.status;\n  END IF;\n  IF NOT (\n    COALESCE(fn_current_user_has_permission('budget.revision.edit'), false)\n    OR COALESCE(fn_current_user_has_permission('all'), false)\n  ) THEN\n    RAISE EXCEPTION 'Permission denied: budget.revision.edit is required to modify a revision submission.';\n  END IF;\n  IF NOT fn_current_user_data_scope_allows(v_division.department_id, v_division.section_id, NULL, NULL, NULL) THEN\n    RAISE EXCEPTION 'Budget revision submission edit is outside the current user organisational scope.';\n  END IF;\n\n  RETURN NEW;\nEND;\n$$;\n\nDROP TRIGGER IF EXISTS trg_budget_revision_submission_write_guard ON divisional_budget_submissions;\nCREATE TRIGGER trg_budget_revision_submission_write_guard\n  BEFORE UPDATE OR DELETE ON divisional_budget_submissions\n  FOR EACH ROW EXECUTE FUNCTION njss_guard_budget_revision_submission_write();\nREVOKE ALL ON FUNCTION njss_guard_budget_revision_submission_write() FROM PUBLIC, authenticated;\n\n-- -----------------------------------------------------------------------------\n-- 3. Harden the internal validator without copying the 052 implementation.\n"""
+          if old not in s:
+              raise SystemExit('monthly trigger insertion point not found')
+          s = s.replace(old, new, 1)
+
+          old = """  IF v_action = 'REJECT' AND COALESCE(TRIM(p_comments), '') = '' THEN\n    RAISE EXCEPTION 'Rejection comments/reason are required.';\n  END IF;\n\n  RETURN public.njss_transition_budget_revision_base(\n"""
+          new = """  IF v_action = 'REJECT' AND COALESCE(TRIM(p_comments), '') = '' THEN\n    RAISE EXCEPTION 'Rejection comments/reason are required.';\n  END IF;\n\n  -- Distinguish the dedicated revision transition from the initial-budget\n  -- workflow. The submission guard rejects status changes without this flag.\n  PERFORM set_config('njss.budget_revision_workflow', 'on', true);\n\n  RETURN public.njss_transition_budget_revision_base(\n"""
+          if old not in s:
+              raise SystemExit('transition wrapper insertion point not found')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Commit reviewed fixes and remove helper workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/migrations/054_budget_revision_hardening.sql
+          git rm .github/workflows/apply-task7-hardening-fixes.yml
+          git commit -m "fix: close revision submission workflow bypass"
+          git push origin HEAD:feature/budget-revision-implementation
