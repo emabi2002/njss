@@ -1102,6 +1102,7 @@ export default function BudgetTemplatePage() {
                 position={revisionPosition}
                 history={revisionHistory}
                 currentAuthoritative={Boolean(selected.status === "APPROVED" && !selected.superseded_by_id)}
+                proposedTotal={totalProposed}
               />
 
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
