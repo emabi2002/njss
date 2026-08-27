@@ -139,13 +139,55 @@ export async function getApprovedBudgetCandidates(): Promise<ApprovedBudgetCandi
   if (rows.length === 0) return []
 
   const submissionIds = rows.map((row) => row.id as string)
-  const { data: activeRevisions, error: revisionError } = await supabase
-    .from('budget_revisions')
-    .select('parent_submission_id')
-    .in('parent_submission_id', submissionIds)
-    .in('status', ['DRAFT', 'SUBMITTED', 'RETURNED', 'RESUBMITTED', 'REVIEWED'])
+  const [{ data: activeRevisions, error: revisionError }, { data: budgetLines, error: budgetLineError }] = await Promise.all([
+    supabase
+      .from('budget_revisions')
+      .select('parent_submission_id')
+      .in('parent_submission_id', submissionIds)
+      .in('status', ['DRAFT', 'SUBMITTED', 'RETURNED', 'RESUBMITTED', 'REVIEWED']),
+    supabase
+      .from('divisional_budget_lines')
+      .select('id, submission_id')
+      .in('submission_id', submissionIds),
+  ])
   if (revisionError) throw revisionError
+  if (budgetLineError) throw budgetLineError
+
   const parentsWithActiveRevision = new Set((activeRevisions || []).map((row) => row.parent_submission_id as string))
+  const lines = budgetLines || []
+  const lineIds = lines.map((line) => line.id as string)
+  const lineSubmissionById = new Map(lines.map((line) => [line.id as string, line.submission_id as string]))
+  const lineCountBySubmission = new Map<string, number>()
+  for (const line of lines) {
+    const submissionId = line.submission_id as string
+    lineCountBySubmission.set(submissionId, (lineCountBySubmission.get(submissionId) || 0) + 1)
+  }
+
+  const { data: activeAllocations, error: allocationError } = lineIds.length
+    ? await supabase
+        .from('budget_allocations')
+        .select('id, source_budget_line_id')
+        .eq('is_active', true)
+        .in('source_budget_line_id', lineIds)
+    : { data: [], error: null }
+  if (allocationError) throw allocationError
+
+  const allocationCountBySubmission = new Map<string, number>()
+  for (const allocation of activeAllocations || []) {
+    const sourceLineId = allocation.source_budget_line_id as string | null
+    if (!sourceLineId) continue
+    const submissionId = lineSubmissionById.get(sourceLineId)
+    if (!submissionId) continue
+    allocationCountBySubmission.set(submissionId, (allocationCountBySubmission.get(submissionId) || 0) + 1)
+  }
+
+  const revisionReadySubmissionIds = new Set(
+    submissionIds.filter((submissionId) => {
+      const lineCount = lineCountBySubmission.get(submissionId) || 0
+      const allocationCount = allocationCountBySubmission.get(submissionId) || 0
+      return lineCount > 0 && allocationCount === lineCount
+    }),
+  )
 
   const divisionIds = [...new Set(rows.map((row) => row.division_id as string).filter(Boolean))]
   const { data: divisions, error: divisionError } = divisionIds.length
@@ -173,7 +215,7 @@ export async function getApprovedBudgetCandidates(): Promise<ApprovedBudgetCandi
   const sectionMap = new Map((sections || []).map((row) => [row.id as string, row.name as string]))
 
   return rows
-    .filter((row) => !parentsWithActiveRevision.has(row.id as string))
+    .filter((row) => !parentsWithActiveRevision.has(row.id as string) && revisionReadySubmissionIds.has(row.id as string))
     .map((row) => {
       const division = divisionMap.get(row.division_id as string)
       const sectionId = (division?.section_id || null) as string | null
