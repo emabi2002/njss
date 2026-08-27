@@ -196,7 +196,7 @@ function allocationsFor(row: GridRow): BudgetMonthlyAllocation[] {
 }
 
 export default function BudgetTemplatePage() {
-  const { profile, can } = useAuth()
+  const { profile, roles, can } = useAuth()
   const gridRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -229,12 +229,14 @@ export default function BudgetTemplatePage() {
   const canEdit = can("budget.template.edit") || can("budget.template.create") || can("budget.template") || can("budget.template.submit")
   const canReview = can("budget.template.review")
   const canApprove = can("budget.template.approve")
-  const canRevisionCreate = can("budget.revision.create")
-  const canRevisionEdit = can("budget.revision.edit")
-  const canRevisionSubmit = can("budget.revision.submit")
-  const canRevisionReturn = can("budget.revision.return")
-  const canRevisionReject = can("budget.revision.reject")
-  const canRevisionApprove = can("budget.revision.approve")
+  const isRegistrar = roles.includes("Registrar")
+  const isLineSupervisor = roles.includes("Line Supervisor")
+  const canRevisionCreate = isRegistrar && can("budget.revision.create")
+  const canRevisionEdit = isLineSupervisor && can("budget.revision.edit")
+  const canRevisionSubmit = isLineSupervisor && can("budget.revision.submit")
+  const canRevisionReturn = isRegistrar && can("budget.revision.return")
+  const canRevisionReject = isRegistrar && can("budget.revision.reject")
+  const canRevisionApprove = isRegistrar && can("budget.revision.approve")
   const revisionEditable = Boolean(revision && ["DRAFT", "RETURNED"].includes(revision.status) && canRevisionEdit)
   const selectedLocked = revision
     ? !revisionEditable
