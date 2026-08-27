@@ -45,7 +45,7 @@ type Props = {
 }
 
 export function BudgetRevisionRequestDialog({ candidates, initialParentId, onClose, onCreated }: Props) {
-  const initialCandidate = candidates.find((item) => item.submission_id === initialParentId) || candidates[0] || null
+  const initialCandidate = (initialParentId ? candidates.find((item) => item.submission_id === initialParentId) : candidates[0]) || null
   const [budgetYear, setBudgetYear] = useState(initialCandidate ? String(initialCandidate.budget_year) : "")
   const [departmentId, setDepartmentId] = useState(initialCandidate?.department_id || "")
   const [divisionId, setDivisionId] = useState(initialCandidate?.division_id || "")
@@ -87,6 +87,24 @@ export function BudgetRevisionRequestDialog({ candidates, initialParentId, onClo
     [departmentCandidates, divisionId],
   )
   const selectedCandidate = candidates.find((item) => item.submission_id === parentSubmissionId) || null
+
+  useEffect(() => {
+    if (parentSubmissionId || candidates.length === 0) return
+    const next = (initialParentId ? candidates.find((item) => item.submission_id === initialParentId) : candidates[0]) || null
+    if (!next) {
+      if (initialParentId) {
+        Promise.resolve().then(() => setError("The selected approved budget is no longer eligible for a new revision request. Refresh the workspace and select the current authoritative budget."))
+      }
+      return
+    }
+    Promise.resolve().then(() => {
+      setBudgetYear(String(next.budget_year))
+      setDepartmentId(next.department_id || "")
+      setDivisionId(next.division_id || "")
+      setParentSubmissionId(next.submission_id)
+      setEffectiveDate(dateForBudgetYear(next.budget_year))
+    })
+  }, [candidates, initialParentId, parentSubmissionId])
 
   useEffect(() => {
     if (!selectedCandidate) {
