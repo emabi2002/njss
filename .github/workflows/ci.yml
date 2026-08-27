@@ -60,6 +60,9 @@ jobs:
       - name: Budget revision workspace regression checks
         run: node scripts/budget-revision-workspace.test.mjs
 
+      - name: Budget activation control regression checks
+        run: node scripts/budget-activation-control.test.mjs
+
       - name: Lint
         run: bun run lint
 
