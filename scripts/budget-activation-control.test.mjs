@@ -4,12 +4,18 @@ import assert from 'node:assert/strict'
 const read = (path) => fs.readFileSync(path, 'utf8')
 
 assert.ok(fs.existsSync('supabase/migrations/056_operational_budget_activation_finance_master_data.sql'))
+assert.ok(fs.existsSync('supabase/migrations/057_finance_mapping_admin.sql'))
 assert.ok(fs.existsSync('lib/budget-activation.ts'))
 assert.ok(fs.existsSync('app/api/budget-activation/route.ts'))
 assert.ok(fs.existsSync('app/dashboard/master/finance-mapping/page.tsx'))
 
+const financeMappingMigration = read('supabase/migrations/057_finance_mapping_admin.sql')
+for (const token of ['njss_set_finance_posting_mapping', 'System Administrator', 'expense_ledger_id', 'chart_of_account_id', 'FINANCE_POSTING_MAPPING_UPDATED']) {
+  assert.ok(financeMappingMigration.includes(token), `finance mapping migration missing ${token}`)
+}
+
 const financeMappingPage = read('app/dashboard/master/finance-mapping/page.tsx')
-for (const token of ['Finance Code', 'Posting Code', 'Chart of Accounts', 'expense_ledger_id', 'chart_of_account_id']) {
+for (const token of ['Finance Code', 'Posting Code', 'Chart of Accounts', 'expense_ledger_id', 'chart_of_account_id', 'njss_set_finance_posting_mapping']) {
   assert.ok(financeMappingPage.includes(token), `finance mapping master-data page missing ${token}`)
 }
 
