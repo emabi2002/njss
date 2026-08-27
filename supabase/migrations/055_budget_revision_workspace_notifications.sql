@@ -215,7 +215,7 @@ BEGIN
     AND r.name = 'Line Supervisor'
     AND r.is_active = true
     AND u.section_id = v_division.section_id
-  ORDER BY u.full_name NULLS LAST, u.email;
+  ORDER BY u.full_name::TEXT NULLS LAST, u.email::TEXT;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.njss_get_eligible_line_supervisors(UUID) FROM PUBLIC;
