@@ -10,8 +10,8 @@ import { useRealtimeNotifications, type RealtimeNotification } from "@/hooks/use
 import { useAuth } from "@/contexts/AuthContext"
 
 export default function NotificationsPage() {
-  const { user } = useAuth()
-  const { notifications, loading, markAsRead, markAllAsRead, refresh } = useRealtimeNotifications(user?.id)
+  const { profile } = useAuth()
+  const { notifications, loading, markAsRead, markAllAsRead, refresh } = useRealtimeNotifications(profile?.id)
   const [filter, setFilter] = useState<'all' | 'unread' | 'read'>('all')
   const [typeFilter, setTypeFilter] = useState<string>('')
 
