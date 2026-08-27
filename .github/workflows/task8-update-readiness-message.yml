@@ -1,0 +1,36 @@
+name: Task 8 update readiness message
+
+on:
+  push:
+    branches: [feature/budget-revision-workspace]
+    paths: [.github/workflows/task8-update-readiness-message.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/budget-revision-workspace
+          fetch-depth: 0
+      - name: Update revision-ready guidance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/dashboard/budget/revisions/BudgetRevisionRequestDialog.tsx')
+          s = p.read_text()
+          old = 'No current approved budget is available for a new revision request. A budget must be approved, locked, unsuperseded and have no other active revision.'
+          new = 'No revision-ready approved budget is available. The approved budget must be locked and current, have no active revision, and each approved budget line must already have one active operational allocation before a post-approval change can be requested.'
+          if old not in s:
+              raise SystemExit('readiness message not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard/budget/revisions/BudgetRevisionRequestDialog.tsx
+          git rm .github/workflows/task8-update-readiness-message.yml
+          git commit -m "fix: explain revision operational-allocation prerequisite"
+          git push origin HEAD:feature/budget-revision-workspace
