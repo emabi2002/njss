@@ -38,6 +38,7 @@ export const MENU_ITEMS: RbacMenuItem[] = [
   { code: 'dashboard.home', module_code: 'njss_operations', label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard', sort_order: 10, required_permissions: ['dashboard.view'], is_active: true },
   { code: 'budget.template', module_code: 'njss_operations', label: 'Planning', href: '/dashboard/budget-template', icon: 'Calculator', sort_order: 20, required_permissions: ['budget.template.view', 'budget.template.create', 'budget.template.edit', 'budget.template.submit', 'budget.template.review', 'budget.template.approve', 'budget.template'], is_active: true },
   { code: 'budget.control', module_code: 'njss_operations', label: 'Budget', href: '/dashboard/budget', icon: 'Wallet', sort_order: 30, required_permissions: ['budget.view', 'budget.module.view'], is_active: true },
+  { code: 'budget.revisions', module_code: 'njss_operations', label: 'Budget Revision & Supplementary Budget', href: '/dashboard/budget/revisions', icon: 'ClipboardList', sort_order: 35, required_permissions: ['budget.revision.view', 'budget.revision.create', 'budget.revision.edit', 'budget.revision.submit', 'budget.revision.approve', 'budget.revision.return', 'budget.revision.reject', 'budget.revision.report'], is_active: true },
   { code: 'budget.funding', module_code: 'njss_operations', label: 'Funding', href: '/dashboard/budget/funding', icon: 'Banknote', sort_order: 40, required_permissions: ['funding.view'], is_active: true },
   { code: 'finance.ff3', module_code: 'njss_operations', label: 'FF3', href: '/dashboard/ff3', icon: 'FileText', sort_order: 50, required_permissions: ['ff3.view', 'ff3.create', 'ff3.endorse', 'ff3.approve', 'ff3.reject'], is_active: true },
   { code: 'finance.ff3.new', module_code: 'njss_operations', parent_code: 'finance.ff3', label: 'New FF3', href: '/dashboard/ff3/new', icon: 'FileText', sort_order: 51, required_permissions: ['ff3.create'], is_active: true },
@@ -193,8 +194,9 @@ export const ICONS: Record<string, LucideIcon> = {
 
 export const ROUTE_PERMISSIONS: Array<{ pattern: RegExp; permissions: PermissionCode[] }> = [
   { pattern: /^\/dashboard$/, permissions: ['dashboard.view'] },
-  { pattern: /^\/dashboard\/budget($|\/)/, permissions: ['budget.view', 'budget.module.view'] },
+  { pattern: /^\/dashboard\/budget\/revisions($|\/)/, permissions: ['budget.revision.view', 'budget.revision.create', 'budget.revision.edit', 'budget.revision.submit', 'budget.revision.approve', 'budget.revision.return', 'budget.revision.reject', 'budget.revision.report'] },
   { pattern: /^\/dashboard\/budget\/funding($|\/)/, permissions: ['funding.view'] },
+  { pattern: /^\/dashboard\/budget($|\/)/, permissions: ['budget.view', 'budget.module.view'] },
   { pattern: /^\/dashboard\/budget-template($|\/)/, permissions: ['budget.template.view', 'budget.template.create', 'budget.template.edit', 'budget.template.submit', 'budget.template.review', 'budget.template.approve', 'budget.template'] },
   { pattern: /^\/dashboard\/plans($|\/)/, permissions: ['all'] },
   { pattern: /^\/dashboard\/commitments($|\/)/, permissions: ['commitment.view', 'budget.control.view', 'budget.view'] },

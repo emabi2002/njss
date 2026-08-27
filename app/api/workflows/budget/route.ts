@@ -36,7 +36,10 @@ export async function POST(request: NextRequest) {
   }
   if (operation === 'create-quarterly-release') return createRelease(request, body)
   if (operation === 'transition-submission') return transitionSubmission(request, body)
-  if (operation === 'create-budget-revision') return createBudgetRevision(request, body)
+  if (operation === 'create-budget-revision-request') return createBudgetRevisionRequest(request, body)
+  if (operation === 'create-budget-revision') {
+    return NextResponse.json({ error: 'Unassigned budget revisions are retired. Use the Budget Revision & Supplementary Budget workspace.' }, { status: 410 })
+  }
   if (operation === 'transition-budget-revision') return transitionBudgetRevision(request, body)
   if (operation === 'create-funding-authority') return createFundingAuthority(request, body)
   if (operation === 'transition-funding-authority') return transitionFundingAuthority(request, body)
@@ -48,7 +51,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ error: 'Unsupported budget workflow operation' }, { status: 400 })
 }
 
-async function createBudgetRevision(request: NextRequest, body: Record<string, unknown>) {
+async function createBudgetRevisionRequest(request: NextRequest, body: Record<string, unknown>) {
   const guard = await requirePermission(request, ['budget.revision.create'])
   if (guard.response) return guard.response
 
@@ -58,23 +61,32 @@ async function createBudgetRevision(request: NextRequest, body: Record<string, u
   const authorityReference = (body.authorityReference as string | null | undefined) || null
   const effectiveDate = (body.effectiveDate as string | null | undefined) || null
   const supportingReference = (body.supportingReference as string | null | undefined) || null
+  const assignedLineSupervisorId = body.assignedLineSupervisorId as string
+  const requestInstruction = (body.requestInstruction as string | null | undefined) || null
+  const requestedChangeAmount = body.requestedChangeAmount == null ? null : Number(body.requestedChangeAmount)
 
-  if (!parentSubmissionId || !revisionType || !reason?.trim()) {
-    return NextResponse.json({ error: 'Parent submission, revision type and reason are required.' }, { status: 400 })
+  if (!parentSubmissionId || !revisionType || !reason?.trim() || !assignedLineSupervisorId) {
+    return NextResponse.json({ error: 'Parent submission, revision type, reason and responsible Line Supervisor are required.' }, { status: 400 })
   }
   if (revisionType === 'SUPPLEMENTARY' && !authorityReference?.trim()) {
     return NextResponse.json({ error: 'Supplementary authority reference is required.' }, { status: 400 })
   }
+  if (requestedChangeAmount !== null && (!Number.isFinite(requestedChangeAmount) || requestedChangeAmount < 0)) {
+    return NextResponse.json({ error: 'Indicative requested change amount must be zero or greater.' }, { status: 400 })
+  }
 
   const response = NextResponse.next()
   const supabase = createRequestSupabaseClient(request, response)
-  const { data, error } = await supabase.rpc('njss_create_budget_revision', {
+  const { data, error } = await supabase.rpc('njss_create_budget_revision_request', {
     p_parent_submission_id: parentSubmissionId,
     p_revision_type: revisionType,
     p_reason: reason.trim(),
     p_authority_reference: authorityReference,
     p_effective_date: effectiveDate || new Date().toISOString().split('T')[0],
     p_supporting_reference: supportingReference,
+    p_assigned_line_supervisor_id: assignedLineSupervisorId,
+    p_request_instruction: requestInstruction,
+    p_requested_change_amount: requestedChangeAmount,
     p_user_email: guard.context?.email || '',
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })

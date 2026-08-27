@@ -90,12 +90,13 @@ assert.ok(budgetModule.includes('superseded_by_id: string | null'), 'BudgetSubmi
 
 const budgetRoute = read('app/api/workflows/budget/route.ts')
 for (const required of [
-  'REVISION_PERMISSION', "operation === 'create-budget-revision'", "operation === 'transition-budget-revision'",
+  'REVISION_PERMISSION', "operation === 'create-budget-revision-request'", "operation === 'create-budget-revision'", "operation === 'transition-budget-revision'",
   "SUBMIT: ['budget.revision.submit']", "RETURN: ['budget.revision.return']",
   "REJECT: ['budget.revision.reject']", "APPROVE: ['budget.revision.approve']",
-  "['budget.revision.create']", "supabase.rpc('njss_create_budget_revision'", "supabase.rpc('njss_transition_budget_revision'",
+  "['budget.revision.create']", "supabase.rpc('njss_create_budget_revision_request'", "supabase.rpc('njss_transition_budget_revision'",
   "p_user_email: guard.context?.email || ''",
 ]) assert.ok(budgetRoute.includes(required), `budget API route missing ${required}`)
+assert.ok(budgetRoute.includes('Unassigned budget revisions are retired'), 'Task 8 must retire the old unassigned creation route')
 assert.ok(!budgetRoute.includes("REVIEW: ['budget.revision.review']"), 'revision API must not expose a separate REVIEW action')
 
 const revisionPanelPath = 'app/dashboard/budget-template/BudgetRevisionPanel.tsx'
