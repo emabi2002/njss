@@ -56,6 +56,7 @@ for (const required of [
   'getBudgetRevisionHistory', 'createBudgetRevision', 'transitionBudgetRevision',
   "operation: 'create-budget-revision'", "operation: 'transition-budget-revision'",
 ]) assert.ok(service.includes(required), `budget revision service missing ${required}`)
+assert.ok(!service.includes("| 'REVIEW'"), 'separate revision REVIEW action must not be exposed by the typed client')
 
 const budgetModule = read('lib/budget-module.ts')
 assert.ok(budgetModule.includes('parent_submission_id: string | null'), 'BudgetSubmission must type parent_submission_id')
@@ -64,11 +65,12 @@ assert.ok(budgetModule.includes('superseded_by_id: string | null'), 'BudgetSubmi
 const budgetRoute = read('app/api/workflows/budget/route.ts')
 for (const required of [
   'REVISION_PERMISSION', "operation === 'create-budget-revision'", "operation === 'transition-budget-revision'",
-  "SUBMIT: ['budget.revision.submit']", "REVIEW: ['budget.revision.review']", "RETURN: ['budget.revision.return']",
+  "SUBMIT: ['budget.revision.submit']", "RETURN: ['budget.revision.return']",
   "REJECT: ['budget.revision.reject']", "APPROVE: ['budget.revision.approve']",
   "['budget.revision.create']", "supabase.rpc('njss_create_budget_revision'", "supabase.rpc('njss_transition_budget_revision'",
   "p_user_email: guard.context?.email || ''",
 ]) assert.ok(budgetRoute.includes(required), `budget API route missing ${required}`)
+assert.ok(!budgetRoute.includes("REVIEW: ['budget.revision.review']"), 'revision API must not expose a separate REVIEW action')
 
 const revisionPanelPath = 'app/dashboard/budget-template/BudgetRevisionPanel.tsx'
 const revisionDialogPath = 'app/dashboard/budget-template/BudgetRevisionDialog.tsx'
@@ -83,14 +85,21 @@ for (const label of [
   'Protected Minimum', 'Available After Revision', 'Current Authoritative',
 ]) assert.ok(revisionPanel.includes(label) || budgetPage.includes(label), `budget revision UI missing ${label}`)
 
-for (const label of ['Create Budget Revision', 'Revision Type']) {
+for (const label of ['Request Budget Change', 'Revision Type']) {
   assert.ok(revisionDialog.includes(label) || budgetPage.includes(label), `budget revision UI missing ${label}`)
 }
 
 for (const permission of [
   'budget.revision.create', 'budget.revision.edit', 'budget.revision.submit',
-  'budget.revision.review', 'budget.revision.return', 'budget.revision.reject', 'budget.revision.approve',
+  'budget.revision.return', 'budget.revision.reject', 'budget.revision.approve',
 ]) assert.ok(budgetPage.includes(permission), `budget page missing ${permission} permission check`)
+assert.ok(!budgetPage.includes('canRevisionReview'), 'revision page must not expose a separate Registrar review permission/action')
+assert.ok(!budgetPage.includes('Review Revision'), 'revision page must not expose a separate Review Revision button')
+assert.match(
+  budgetPage,
+  /\["SUBMITTED",\s*"RESUBMITTED"\]\.includes\(revision\.status\).*canRevisionApprove/s,
+  'Registrar Approve must be available directly after Line Supervisor submission/resubmission',
+)
 
 assert.ok(budgetPage.includes('getBudgetRevisionPosition'), 'budget page must load revision position')
 assert.ok(budgetPage.includes('getBudgetRevisionHistory'), 'budget page must load revision history')
@@ -106,5 +115,4 @@ assert.match(
 assert.ok(revisionPanel.includes('proposedTotal'), 'revision summary panel must accept the live spreadsheet proposed total')
 assert.ok(budgetPage.includes('proposedTotal={totalProposed}'), 'budget page must pass live proposed total so new target rows appear immediately')
 
-// Task 5 gate: all assertions above describe the complete revision preparation UI contract.
 console.log('budget revision and reforecast regression checks passed')
