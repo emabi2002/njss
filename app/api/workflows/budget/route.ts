@@ -180,6 +180,7 @@ async function createFundingAuthority(request: NextRequest, body: Record<string,
     p_supporting_document_url: input.supporting_document_url || null,
     p_supporting_document_name: input.supporting_document_name || null,
     p_restricted_project_id: input.restricted_project_id || null,
+    p_restricted_department_id: input.restricted_department_id || null,
     p_restricted_section_id: input.restricted_section_id || null,
     p_restricted_cost_centre_id: input.restricted_cost_centre_id || null,
     p_restricted_expense_code_registry_id: input.restricted_expense_code_registry_id || null,
@@ -237,7 +238,7 @@ async function createFundingReceipt(request: NextRequest, body: Record<string, u
 async function transitionFundingReceipt(request: NextRequest, body: Record<string, unknown>) {
   const id = body.id as string
   const action = body.action as string
-  if (!id || !FUNDING_RECEIPT_PERMISSION[action]) return NextResponse.json({ error: 'Invalid funding authority workflow request' }, { status: 400 })
+  if (!id || !FUNDING_RECEIPT_PERMISSION[action]) return NextResponse.json({ error: 'Invalid funding receipt workflow request' }, { status: 400 })
   const guard = await requirePermission(request, FUNDING_RECEIPT_PERMISSION[action])
   if (guard.response) return guard.response
   const response = NextResponse.next()
