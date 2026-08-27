@@ -39,7 +39,37 @@ assert.ok(budgetRoute.includes("Invalid funding receipt workflow request"), 'Tas
 assert.ok(budgetRoute.includes("operation === 'create-budget-revision-request'"), 'assigned revision request operation must be registered')
 assert.ok(budgetRoute.includes("supabase.rpc('njss_create_budget_revision_request'"), 'assigned request API must call the workspace RPC')
 
+const workspaceService = read('lib/budget-revision-workspace.ts')
+for (const token of [
+  'getBudgetRevisionWorkQueue',
+  'getEligibleLineSupervisors',
+  'getApprovedBudgetSummary',
+  'getApprovedBudgetCandidates',
+  'createBudgetRevisionRequest',
+  "operation: 'create-budget-revision-request'",
+]) assert.ok(workspaceService.includes(token), `workspace service missing ${token}`)
+
 assert.ok(fs.existsSync('app/dashboard/budget/revisions/page.tsx'))
+assert.ok(fs.existsSync('app/dashboard/budget/revisions/BudgetRevisionRequestDialog.tsx'))
+assert.ok(fs.existsSync('app/dashboard/budget/revisions/BudgetRevisionQueue.tsx'))
+const workspacePage = read('app/dashboard/budget/revisions/page.tsx')
+const requestDialog = read('app/dashboard/budget/revisions/BudgetRevisionRequestDialog.tsx')
+for (const label of [
+  'Budget Revision & Supplementary Budget',
+  'Initiate Budget Change',
+  'Awaiting Registrar Action',
+  'My Revision Requests',
+]) assert.ok(workspacePage.includes(label), `workspace page missing ${label}`)
+for (const label of [
+  'Budget Year', 'Department', 'Section / Division', 'Current Approved Budget',
+  'Change Type', 'Indicative Change Amount', 'Reason / Justification',
+  'Authority Reference', 'Effective Date', 'Supporting Reference',
+  'Instruction to Line Supervisor', 'Responsible Line Supervisor',
+]) assert.ok(requestDialog.includes(label), `request dialog missing ${label}`)
+assert.ok(requestDialog.includes('No active Line Supervisor is assigned to this section'), 'request dialog must block missing supervisor configuration')
+assert.ok(workspacePage.includes('roles.includes("Registrar")') || workspacePage.includes("roles.includes('Registrar')"), 'workspace must explicitly identify Registrar role')
+assert.ok(workspacePage.includes('roles.includes("Line Supervisor")') || workspacePage.includes("roles.includes('Line Supervisor')"), 'workspace must explicitly identify Line Supervisor role')
+assert.ok(workspacePage.includes('/dashboard/budget-template?submission='), 'supervisor queue must open the exact revision submission in Budget Preparation')
 
 const dropdown = read('components/NotificationsDropdown.tsx')
 const notificationsPage = read('app/dashboard/notifications/page.tsx')
