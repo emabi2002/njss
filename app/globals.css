@@ -35,6 +35,15 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Budget Preparation: suppress the redundant division search row while retaining the authoritative division selector. */
+div:has(> input[placeholder="Search division"]) {
+  display: none !important;
+}
+
+div:has(> input[placeholder="Search division"]) + .mt-2 {
+  margin-top: 0 !important;
+}
+
 /* Print: render the User Guide (and any dashboard page) as a clean document */
 @media print {
   * {
