@@ -27,6 +27,8 @@ assert.match(migration, /ALTER TABLE notifications ENABLE ROW LEVEL SECURITY/i)
 assert.match(migration, /REVOKE INSERT, DELETE ON notifications FROM authenticated/i)
 assert.match(migration, /REVOKE EXECUTE ON FUNCTION public\.njss_create_budget_revision\(/i)
 assert.ok(!/SELECT DISTINCT[\s\S]*ORDER BY COALESCE\(u\.full_name, u\.email\)/i.test(migration), 'eligible supervisor query must use PostgreSQL-valid DISTINCT ordering')
+assert.ok(!/SELECT DISTINCT[\s\S]*u\.full_name::TEXT[\s\S]*ORDER BY u\.full_name NULLS LAST, u\.email/i.test(migration), 'DISTINCT supervisor ordering must use the same cast expressions present in the select list')
+assert.match(migration, /ORDER BY u\.full_name::TEXT NULLS LAST, u\.email::TEXT/i, 'eligible supervisor ordering must match the DISTINCT text projections')
 
 const config = read('lib/rbac/config.ts')
 assert.ok(config.includes("code: 'budget.revisions'"))
