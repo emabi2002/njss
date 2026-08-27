@@ -201,6 +201,7 @@ export default function BudgetTemplatePage() {
   const [history, setHistory] = useState<WorkflowRow[]>([])
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [selectedRow, setSelectedRow] = useState("")
+  const [selectedRows, setSelectedRows] = useState<string[]>([])
   const [divisionSearch, setDivisionSearch] = useState("")
   const [showDivisionForm, setShowDivisionForm] = useState(false)
   const [newDivision, setNewDivision] = useState({ code: "", name: "", cost_centre_code: "", cost_centre_name: "" })
@@ -300,6 +301,7 @@ export default function BudgetTemplatePage() {
     if (!id) {
       setSelected(null)
       setGridRows([])
+      setSelectedRows([])
       setHistory([])
       return
     }
@@ -309,6 +311,7 @@ export default function BudgetTemplatePage() {
       setSelected(detail.submission)
       const rows = (detail.lines || []).map(rowFromBudgetLine)
       setGridRows(rows.length > 0 ? rows : [newRow(1)])
+      setSelectedRows([])
       setHistory(detail.history || [])
       setSelectedRow(rows[0]?.clientId || "")
     } catch (err) {
@@ -512,22 +515,38 @@ export default function BudgetTemplatePage() {
     setGridRows((rows) => [...rows, { ...source, id: undefined, clientId: clientId(), line_number: rows.length + 1 }])
   }
 
-  const removeSelectedRow = async () => {
-    const row = gridRows.find((item) => item.clientId === selectedRow)
-    if (!row) return
-    if (row.id && selected && !confirm("Delete this saved budget line?")) return
+  const allRowsSelected = gridRows.length > 0 && gridRows.every((row) => selectedRows.includes(row.clientId))
+
+  const toggleSelectedRow = (clientIdValue: string) => {
+    setSelectedRows((rows) => (rows.includes(clientIdValue) ? rows.filter((id) => id !== clientIdValue) : [...rows, clientIdValue]))
+  }
+
+  const toggleSelectAllRows = () => {
+    setSelectedRows(allRowsSelected ? [] : gridRows.map((row) => row.clientId))
+  }
+
+  const removeSelectedRows = async () => {
+    if (selectedRows.length === 0) return
+    const rowsToDelete = gridRows.filter((item) => selectedRows.includes(item.clientId))
+    if (rowsToDelete.length === 0) return
+    const savedRows = rowsToDelete.filter((row) => row.id)
+    if (savedRows.length > 0 && selected && !confirm(`Delete ${rowsToDelete.length} selected budget row${rowsToDelete.length === 1 ? "" : "s"}?`)) return
     setSaving(true)
     try {
-      if (row.id) {
+      for (const row of savedRows) {
+        if (!row.id) continue
         await deleteBudgetLine(row.id)
         await createAuditEvent({ action: "DELETE", entity_type: "BUDGET_LINE", entity_id: row.id, entity_reference: selected?.submission_number || null, user_email: profile?.email || null, user_name: profile?.name || null })
       }
-      setGridRows((rows) => rows.filter((item) => item.clientId !== selectedRow).map((item, index) => ({ ...item, line_number: index + 1 })))
-      setSelectedRow("")
+      const selectedIds = new Set(rowsToDelete.map((row) => row.clientId))
+      setGridRows((rows) => rows.filter((item) => !selectedIds.has(item.clientId)).map((item, index) => ({ ...item, line_number: index + 1 })))
+      if (selectedRows.includes(selectedRow)) setSelectedRow("")
+      setSelectedRows([])
       if (selected) await loadSubmission(selected.id)
       await loadDashboard()
+      setMessage({ type: "ok", text: `${rowsToDelete.length} budget row${rowsToDelete.length === 1 ? "" : "s"} deleted.` })
     } catch (err) {
-      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not delete the row." })
+      setMessage({ type: "err", text: err instanceof Error ? err.message : "Could not delete the selected rows." })
     } finally {
       setSaving(false)
     }
@@ -940,8 +959,8 @@ export default function BudgetTemplatePage() {
                   <button onClick={duplicateRow} disabled={selectedLocked || !selectedRow} className="btn-light">
                     <Copy className="h-4 w-4" /> Duplicate Row
                   </button>
-                  <button onClick={removeSelectedRow} disabled={selectedLocked || !selectedRow} className="btn-light text-red-700">
-                    <Trash2 className="h-4 w-4" /> Delete Row
+                  <button onClick={removeSelectedRows} disabled={selectedLocked || selectedRows.length === 0} className="btn-light text-red-700">
+                    <Trash2 className="h-4 w-4" /> Delete Selected Rows{selectedRows.length > 0 ? ` (${selectedRows.length})` : ""}
                   </button>
                   <button onClick={allocateEvenly} disabled={selectedLocked || !selectedRow} className="btn-light">
                     Allocate Evenly
@@ -979,7 +998,18 @@ export default function BudgetTemplatePage() {
                   <thead>
                     <tr>
                       <SheetTh sticky left={0} width={70}>
-                        Line No.
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={allRowsSelected}
+                            onChange={toggleSelectAllRows}
+                            onClick={(event) => event.stopPropagation()}
+                            disabled={selectedLocked || gridRows.length === 0}
+                            aria-label="Select all budget rows"
+                            className="h-4 w-4 shrink-0 accent-[#1f4e79]"
+                          />
+                          <span>Line No.</span>
+                        </div>
                       </SheetTh>
                       <SheetTh sticky left={70} width={130}>
                         Activity Ref.
@@ -1027,7 +1057,21 @@ export default function BudgetTemplatePage() {
                       return (
                         <tr key={row.clientId} onClick={() => setSelectedRow(row.clientId)} className={`${rowTone} ${selectedRow === row.clientId ? "outline outline-2 outline-[#1f4e79]" : ""}`}>
                           <SheetTd sticky left={0} readOnly>
-                            {row.line_number}
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={selectedRows.includes(row.clientId)}
+                                onChange={() => {
+                                  setSelectedRow(row.clientId)
+                                  toggleSelectedRow(row.clientId)
+                                }}
+                                onClick={(event) => event.stopPropagation()}
+                                disabled={selectedLocked}
+                                aria-label={`Select budget row ${row.line_number}`}
+                                className="h-4 w-4 shrink-0 accent-[#1f4e79]"
+                              />
+                              <span>{row.line_number}</span>
+                            </div>
                           </SheetTd>
                           <SheetTd sticky left={70}>
                             <LookupSelect
