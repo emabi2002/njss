@@ -1,0 +1,33 @@
+name: Apply Task 6 Budget Reporting
+
+on:
+  push:
+    branches: [feature/budget-revision-implementation]
+    paths:
+      - '.github/workflows/apply-task6-budget-reporting.yml'
+      - 'scripts/apply-task6-budget-reporting.mjs'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/budget-revision-implementation
+          fetch-depth: 0
+
+      - name: Apply Task 6 source transformations
+        run: node scripts/apply-task6-budget-reporting.mjs
+
+      - name: Commit application changes and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/api.ts app/dashboard/budget/page.tsx
+          git rm .github/workflows/apply-task6-budget-reporting.yml scripts/apply-task6-budget-reporting.mjs
+          git commit -m "feat: add revision-aware Budget Control reporting"
+          git push origin HEAD:feature/budget-revision-implementation
