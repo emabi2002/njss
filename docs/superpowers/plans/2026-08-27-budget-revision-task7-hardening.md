@@ -2,54 +2,67 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Harden the approved NJSS budget-revision workflow against scope bypasses, segregation-of-duties conflicts, invalid financial movements, ambiguous allocation lineage, and direct-table mutation paths before UAT migration.
+**Goal:** Harden the approved NJSS budget-revision workflow against scope bypasses, invalid financial movements, ambiguous allocation lineage, and direct-table mutation paths while enforcing the approved business sequence: Registrar requests the post-approval change, the responsible Line Supervisor reviews/adjusts and submits their section budget, and the Registrar performs the final approve/return/reject decision.
 
-**Architecture:** Keep migrations 051–053 intact and add migration 054 as an additive hardening layer. Wrap the existing SECURITY DEFINER revision RPCs and validator so authenticated callers must pass stricter organisational-scope, maker/checker, financial, and master-data checks, while trigger guards protect revision draft rows from direct writes outside the controlled edit state.
+**Architecture:** Keep migrations 051–053 intact and use migration 054 as the additive hardening/correction layer. The existing SECURITY DEFINER revision RPCs remain internal workers behind hardened public wrappers. Business-role ownership is enforced at the database boundary, not only in the UI: Registrar-only initiation; Line-Supervisor-only draft preparation/submission within SECTION_WIDE scope; Registrar-only final disposition. There is no externally exposed separate revision REVIEW action. The single Registrar Approve action may use the legacy REVIEWED state internally and atomically because migration 052 expects it before approval.
 
-**Tech Stack:** PostgreSQL/Supabase RLS and SECURITY DEFINER RPCs, Next.js API routing, Node source-level regression checks, GitHub Actions CI.
+**Tech Stack:** PostgreSQL/Supabase RLS and SECURITY DEFINER RPCs, Next.js API routing, React/Next.js Budget Preparation UI, Node source-level regression checks, GitHub Actions CI.
 
-**Spec:** Approved NJSS Budget Revision / Reforecast design implemented in PR #11 through Tasks 1–6.
+**Spec:** Approved NJSS Budget Revision / Reforecast design implemented in PR #11 through Tasks 1–6, with the Task 7 workflow correction approved on 27 August 2026.
 
 ## Global Constraints
 
 - Preserve the four operational RBAC groups and existing SECTION_WIDE / SYSTEM_WIDE data-scope model.
 - Preserve existing approved budget history and FF3/FF4/funding transaction lineage.
+- **Registrar alone initiates** a revision, supplementary budget, virement, reduction, reclassification or reforecast request.
+- The **Line Supervisor for the affected section** can edit the requested DRAFT/RETURNED revision and SUBMIT/RESUBMIT it.
+- The Line Supervisor cannot approve the revision.
+- The Registrar does not prepare the revised line figures; after submission the Registrar can APPROVE, RETURN or REJECT.
+- Requisition Officer and Payment/Reconciliation Officer remain view/report only for revision workflow purposes.
 - Do not apply migrations 051–054 to live Supabase during Task 7.
 - Do not merge PR #11 during Task 7.
 - Correct Netlify preview gate is `netlify/njsscrem/deploy-preview`.
-- Use TDD: regression contract must fail before migration 054 is added, then pass after hardening.
+- Use TDD: the corrected workflow contract must fail against the previous Task 7 implementation before the workflow correction is applied.
 
 ---
 
 ### Task 1: Define the hardening regression contract
 
 **Files:**
-- Create: `scripts/budget-revision-hardening.test.mjs`
-- Modify: `.github/workflows/ci.yml`
+- `scripts/budget-revision-hardening.test.mjs`
+- `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: migrations 051–053 and current revision API/RPC names.
-- Produces: an executable CI contract for migration 054 security and financial invariants.
+- Consumes: migrations 051–053, migration 054, current revision API/RPC names, Budget Preparation UI.
+- Produces: executable CI contract for security, financial invariants, and workflow ownership.
 
-- [ ] **Step 1: Write the failing test** asserting migration 054, strict scope checks, authenticated-user checks, RPC base-function revocations, revision-edit guards, maker/checker rules, exact source-allocation mapping, effective-year validation, revision-type financial rules, funded-floor protection, and exact master-data mapping.
-- [ ] **Step 2: Add the regression to CI** immediately after the Task 6 reporting regression.
-- [ ] **Step 3: Run CI and verify RED**: all pre-existing regression stages pass and `Budget revision hardening regression checks` fails because migration 054 is absent.
+- [x] **Step 1: Write the failing hardening test** for migration 054, strict scope, authenticated-user checks, internal RPC revocations, revision-edit guards, exact source-allocation mapping, effective-year validation, revision-type rules, funded-floor protection and exact master-data mapping.
+- [x] **Step 2: Add the regression to CI** after Task 6 reporting regression.
+- [x] **Step 3: Verify original RED** when migration 054 was absent.
+- [x] **Step 4: Extend the regression for the approved workflow correction**: Registrar-only initiation; Line-Supervisor-only preparation/submission; Registrar approve/return/reject; no external Review Revision button/action.
+- [x] **Step 5: Verify corrected-workflow RED** against the prior maker/checker implementation.
 
-### Task 2: Add additive migration 054 hardening
+### Task 2: Migration 054 hardening and workflow correction
 
 **Files:**
-- Create: `supabase/migrations/054_budget_revision_hardening.sql`
+- `supabase/migrations/054_budget_revision_hardening.sql`
+- `app/api/workflows/budget/route.ts`
+- `lib/budget-revision.ts`
+- `app/dashboard/budget-template/page.tsx`
+- `app/dashboard/budget-template/BudgetRevisionDialog.tsx`
 
 **Interfaces:**
 - Consumes: `njss_validate_budget_revision`, `njss_create_budget_revision`, `njss_transition_budget_revision` from migration 052.
-- Produces: hardened wrappers under the same public RPC/function signatures so application code requires no API change.
+- Produces: hardened wrappers under the same public RPC/function signatures and a simplified user-facing revision workflow.
 
-- [ ] **Step 1: Harden allocation lineage** by rejecting zero or multiple active operational allocations for an approved source budget line and enforce one active allocation per non-null `source_budget_line_id`.
-- [ ] **Step 2: Wrap revision creation** so the caller must have an NJSS user profile, the effective date is inside the budget year, and data scope is checked with ownership arguments set to NULL so own-record logic cannot bypass SECTION_WIDE boundaries.
-- [ ] **Step 3: Wrap revision transitions** so organisational scope is strict, the requester cannot REVIEW or APPROVE their own revision, and RETURN/REJECT require comments.
-- [ ] **Step 4: Wrap revision validation** to enforce: REFORECAST is annual-value neutral; REDUCTION contains no positive rows and has a negative net; VIREMENT/RECLASSIFICATION contain both positive and negative movements and balance to zero; non-supplementary revisions cannot expand the total envelope; no proposed source amount falls below approved funded value; new targets require exact active cost-centre, posting-code, and Chart-of-Accounts mappings.
-- [ ] **Step 5: Add direct-write trigger guards** on revision `divisional_budget_lines` and `budget_monthly_allocations`, allowing edits only in DRAFT/RETURNED status with `budget.revision.edit` (or `all`) and strict current organisational scope.
-- [ ] **Step 6: Revoke execution on renamed base functions** from PUBLIC and authenticated, granting only the hardened wrapper signatures to authenticated.
+- [x] **Step 1: Harden allocation lineage** by rejecting zero or multiple active operational allocations for an approved source budget line and enforce one active allocation per non-null `source_budget_line_id`.
+- [x] **Step 2: Enforce Registrar-only initiation** with both role and `budget.revision.create` checks, and explicitly disable the legacy Line Supervisor create grant introduced in migration 051.
+- [x] **Step 3: Permit trusted Registrar creation cloning only through a transaction-local creation flag**, while ordinary revision-row/header/month edits remain Line-Supervisor-only.
+- [x] **Step 4: Enforce Line Supervisor preparation/submission** with strict organisational scope, DRAFT/RETURNED edit states, `budget.revision.edit`, and SUBMIT/RESUBMIT role checks.
+- [x] **Step 5: Enforce Registrar final disposition** for APPROVE/RETURN/REJECT. Remove the previous rule preventing the Registrar requester from approving, because the Line Supervisor is the preparer/submitter in the approved model.
+- [x] **Step 6: Remove externally exposed revision REVIEW action** from API/client/UI. Registrar Approve is available directly after SUBMITTED/RESUBMITTED and performs any legacy REVIEWED transition internally and atomically.
+- [x] **Step 7: Preserve financial validation**: REFORECAST annual neutrality; REDUCTION one-way negative movement; balanced VIREMENT/RECLASSIFICATION; only Supplementary may increase the total envelope; funded-floor protection; exact active cost-centre/posting-code/Chart-of-Accounts mappings for new targets.
+- [x] **Step 8: Preserve direct-write trigger guards** and base-function revocations so UI/API bypasses do not weaken database controls.
 
 ### Task 3: Verify and review
 
@@ -58,11 +71,11 @@
 - Test: existing CI suite
 
 **Interfaces:**
-- Consumes: migration 054.
-- Produces: Task 7 hardening gate ready for controlled UAT migration planning.
+- Consumes: corrected migration 054 and UI/API workflow.
+- Produces: Task 7 gate ready for controlled UAT migration planning.
 
-- [ ] **Step 1: Verify GREEN** on the Task 7 regression.
-- [ ] **Step 2: Run the full CI suite** including RBAC, prior budget regression gates, lint, typecheck, and build.
-- [ ] **Step 3: Review migration 054 against migrations 023, 036, 046, 051–053** to ensure no previous commitment, report-scope, or preparation workflow semantics regress.
+- [ ] **Step 1: Verify GREEN** on the corrected Task 7 regression.
+- [ ] **Step 2: Run the full CI suite** including RBAC, prior budget regressions, lint, typecheck and production build.
+- [ ] **Step 3: Review migration 054 against migrations 023, 036, 046, 051–053** to ensure commitment, funding, report-scope and preparation semantics do not regress.
 - [ ] **Step 4: Verify the correct `njsscrem` Netlify deploy preview succeeds.**
-- [ ] **Step 5: Leave migrations unapplied and PR #11 draft/open** pending the final controlled migration/UAT stage.
+- [ ] **Step 5: Leave migrations unapplied and PR #11 draft/open** pending controlled migration/UAT.
