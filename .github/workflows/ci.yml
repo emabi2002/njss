@@ -48,6 +48,15 @@ jobs:
       - name: Budget checkbox row-selection regression checks
         run: node scripts/budget-row-selection.test.mjs
 
+      - name: Budget revision and reforecast regression checks
+        run: node scripts/budget-revision-reforecast.test.mjs
+
+      - name: Budget revision reporting regression checks
+        run: node scripts/budget-revision-reporting.test.mjs
+
+      - name: Budget revision hardening regression checks
+        run: node scripts/budget-revision-hardening.test.mjs
+
       - name: Lint
         run: bun run lint
 

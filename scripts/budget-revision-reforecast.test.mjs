@@ -1,0 +1,144 @@
+import fs from 'node:fs'
+import assert from 'node:assert/strict'
+
+const read = (path) => fs.readFileSync(path, 'utf8')
+const config = read('lib/rbac/config.ts')
+
+for (const permission of [
+  'budget.revision.view',
+  'budget.revision.create',
+  'budget.revision.edit',
+  'budget.revision.submit',
+  'budget.revision.review',
+  'budget.revision.approve',
+  'budget.revision.reject',
+  'budget.revision.return',
+  'budget.revision.report',
+]) {
+  assert.ok(config.includes(permission), `missing ${permission}`)
+}
+
+const migration51Path = 'supabase/migrations/051_budget_revision_reforecast_schema.sql'
+assert.ok(fs.existsSync(migration51Path), 'migration 051 must exist')
+const migration51 = read(migration51Path)
+for (const required of [
+  'CREATE TABLE budget_revisions', 'CREATE TABLE budget_revision_lines', 'revision_adjustment',
+  'ALTER COLUMN revised_budget DROP EXPRESSION', 'budget.revision.create', 'budget.revision.approve',
+  'ux_budget_revisions_one_active_parent', 'Requisition Officer', 'Line Supervisor', 'Registrar',
+  'Payment/Reconciliation Officer',
+]) assert.ok(migration51.includes(required), `migration 051 missing ${required}`)
+assert.ok(migration51.includes("revision_type IN ('VIREMENT','SUPPLEMENTARY','REDUCTION','RECLASSIFICATION','REFORECAST')"), 'revision types must be constrained')
+assert.ok(migration51.includes('fn_current_user_data_scope_allows'), 'revision RLS must enforce data scope')
+assert.ok(migration51.includes('fn_current_user_has_permission'), 'revision RLS must enforce permission')
+
+// Database FK contract: live modules use `budget` for operational budget permissions
+// and `reports` for report permissions. `njss_operations` is a front-end grouping,
+// not a row in the database modules catalogue.
+for (const permission of [
+  'budget.revision.view',
+  'budget.revision.create',
+  'budget.revision.edit',
+  'budget.revision.submit',
+  'budget.revision.review',
+  'budget.revision.approve',
+  'budget.revision.reject',
+  'budget.revision.return',
+]) {
+  assert.match(
+    migration51,
+    new RegExp(`\\('${permission}',\\s*'budget'`),
+    `${permission} must use the live budget module code`,
+  )
+}
+assert.match(
+  migration51,
+  /\('budget\.revision\.report',\s*'reports'/,
+  'budget.revision.report must use the live reports module code',
+)
+assert.ok(!migration51.includes("'njss_operations'"), 'migration 051 must not reference non-existent database module njss_operations')
+
+const migration52Path = 'supabase/migrations/052_budget_revision_workflow.sql'
+assert.ok(fs.existsSync(migration52Path), 'migration 052 must exist')
+const migration52 = read(migration52Path)
+const migration52Lower = migration52.toLowerCase()
+for (const required of [
+  'CREATE OR REPLACE VIEW v_budget_revision_position', 'njss_create_budget_revision', 'njss_transition_budget_revision',
+  'FOR UPDATE', 'protected_minimum', 'actual_expenditure_at_submission', 'actual_expenditure_at_approval',
+  'superseded_by_id', 'VIREMENT', 'SUPPLEMENTARY', 'REDUCTION', 'RECLASSIFICATION', 'REFORECAST',
+]) assert.ok(migration52.includes(required), `migration 52 missing ${required}`)
+assert.ok(migration52Lower.includes('active revision already exists'), 'workflow must reject a second active revision')
+assert.ok(migration52.includes("fn_current_user_has_permission('budget.revision.create')"), 'create RPC must enforce create permission')
+assert.ok(migration52.includes("'APPROVE' THEN 'budget.revision.approve'"), 'approval action must map to budget.revision.approve')
+assert.ok(migration52.includes('fn_current_user_has_permission(v_permission)'), 'transition RPC must enforce its action-specific permission')
+assert.ok(migration52.includes('fn_current_user_data_scope_allows'), 'workflow RPCs must enforce data scope')
+assert.match(migration52, /set_config\(\s*'njss\.budget_workflow'\s*,\s*'on'\s*,\s*true\s*\)/, 'revision workflow must use budget workflow privileged context')
+assert.ok(!/transition_divisional_budget_submission\s*\([^;]*'APPROVE'/s.test(migration52), 'revision approval must not call initial-budget allocation creation path')
+
+assert.ok(fs.existsSync('lib/budget-revision.ts'), 'budget revision service must exist')
+const service = read('lib/budget-revision.ts')
+for (const required of [
+  "export type BudgetRevisionType", "'VIREMENT'", "'SUPPLEMENTARY'", "'REDUCTION'", "'RECLASSIFICATION'", "'REFORECAST'",
+  'export type BudgetRevisionAction', 'getRevisionForSubmission', 'getBudgetRevisionPosition',
+  'getBudgetRevisionHistory', 'createBudgetRevision', 'transitionBudgetRevision',
+  "operation: 'create-budget-revision'", "operation: 'transition-budget-revision'",
+]) assert.ok(service.includes(required), `budget revision service missing ${required}`)
+assert.ok(!service.includes("| 'REVIEW'"), 'separate revision REVIEW action must not be exposed by the typed client')
+
+const budgetModule = read('lib/budget-module.ts')
+assert.ok(budgetModule.includes('parent_submission_id: string | null'), 'BudgetSubmission must type parent_submission_id')
+assert.ok(budgetModule.includes('superseded_by_id: string | null'), 'BudgetSubmission must type superseded_by_id')
+
+const budgetRoute = read('app/api/workflows/budget/route.ts')
+for (const required of [
+  'REVISION_PERMISSION', "operation === 'create-budget-revision'", "operation === 'transition-budget-revision'",
+  "SUBMIT: ['budget.revision.submit']", "RETURN: ['budget.revision.return']",
+  "REJECT: ['budget.revision.reject']", "APPROVE: ['budget.revision.approve']",
+  "['budget.revision.create']", "supabase.rpc('njss_create_budget_revision'", "supabase.rpc('njss_transition_budget_revision'",
+  "p_user_email: guard.context?.email || ''",
+]) assert.ok(budgetRoute.includes(required), `budget API route missing ${required}`)
+assert.ok(!budgetRoute.includes("REVIEW: ['budget.revision.review']"), 'revision API must not expose a separate REVIEW action')
+
+const revisionPanelPath = 'app/dashboard/budget-template/BudgetRevisionPanel.tsx'
+const revisionDialogPath = 'app/dashboard/budget-template/BudgetRevisionDialog.tsx'
+assert.ok(fs.existsSync(revisionPanelPath), 'BudgetRevisionPanel must exist')
+assert.ok(fs.existsSync(revisionDialogPath), 'BudgetRevisionDialog must exist')
+const revisionPanel = read(revisionPanelPath)
+const revisionDialog = read(revisionDialogPath)
+const budgetPage = read('app/dashboard/budget-template/page.tsx')
+
+for (const label of [
+  'Original Approved', 'Current Revised', 'Actual Paid', 'Outstanding Commitments',
+  'Protected Minimum', 'Available After Revision', 'Current Authoritative',
+]) assert.ok(revisionPanel.includes(label) || budgetPage.includes(label), `budget revision UI missing ${label}`)
+
+for (const label of ['Request Budget Change', 'Revision Type']) {
+  assert.ok(revisionDialog.includes(label) || budgetPage.includes(label), `budget revision UI missing ${label}`)
+}
+
+for (const permission of [
+  'budget.revision.create', 'budget.revision.edit', 'budget.revision.submit',
+  'budget.revision.return', 'budget.revision.reject', 'budget.revision.approve',
+]) assert.ok(budgetPage.includes(permission), `budget page missing ${permission} permission check`)
+assert.ok(!budgetPage.includes('canRevisionReview'), 'revision page must not expose a separate Registrar review permission/action')
+assert.ok(!budgetPage.includes('Review Revision'), 'revision page must not expose a separate Review Revision button')
+assert.match(
+  budgetPage,
+  /\["SUBMITTED",\s*"RESUBMITTED"\]\.includes\(revision\.status\).*canRevisionApprove/s,
+  'Registrar Approve must be available directly after Line Supervisor submission/resubmission',
+)
+
+assert.ok(budgetPage.includes('getBudgetRevisionPosition'), 'budget page must load revision position')
+assert.ok(budgetPage.includes('getBudgetRevisionHistory'), 'budget page must load revision history')
+assert.ok(budgetPage.includes('closed_month_numbers'), 'budget page must protect closed revision months')
+assert.ok(budgetPage.includes('source_budget_allocation_id'), 'budget page must distinguish protected baseline rows')
+assert.ok(budgetPage.includes('isRevisionMonthLocked'), 'budget page must disable closed/actual revision months')
+assert.ok(budgetPage.includes('protectedBaseline'), 'budget page must disable destructive changes to baseline rows')
+assert.match(
+  budgetPage,
+  /const allocateEvenly[\s\S]*?isRevisionMonthLocked\(row, index\)[\s\S]*?updateRow\(row\.clientId, \{ months \}\)/,
+  'Allocate Evenly must preserve closed/actual months when editing a revision',
+)
+assert.ok(revisionPanel.includes('proposedTotal'), 'revision summary panel must accept the live spreadsheet proposed total')
+assert.ok(budgetPage.includes('proposedTotal={totalProposed}'), 'budget page must pass live proposed total so new target rows appear immediately')
+
+console.log('budget revision and reforecast regression checks passed')

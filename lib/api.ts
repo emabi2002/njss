@@ -32,12 +32,53 @@ export type AuthoritativeBudgetPosition = {
   pending_amount: number
   outstanding_commitment: number
   actual_expenditure: number
+  original_budget: number
+  supplemental_budget: number
+  revision_adjustment: number
+  current_revised_budget: number
+  budget_available: number
+  released_available: number
   available_amount: number
   projected_available_after_pending?: number
   unfunded_amount: number
   unreleased_funding: number
   revised_budget?: number
   committed_amount?: number
+}
+
+export type BudgetRevisionHistoryReportRow = {
+  budget_revision_id: string
+  revision_number: string
+  budget_year: number
+  division_id: string
+  division_code: string | null
+  division_name: string | null
+  revision_type: string
+  status: string
+  reason: string
+  authority_reference: string | null
+  supporting_reference: string | null
+  effective_date: string
+  parent_submission_id: string
+  parent_submission_number: string | null
+  revision_submission_id: string
+  revision_submission_number: string | null
+  requested_by: string | null
+  requested_by_email: string | null
+  approved_by: string | null
+  created_at: string
+  approved_at: string | null
+  line_count: number
+  original_budget: number
+  current_revised_budget_before: number
+  revision_adjustment: number
+  proposed_revised_budget: number
+  actual_expenditure_at_submission: number
+  outstanding_commitment_at_submission: number
+  protected_minimum_at_submission: number
+  actual_expenditure_at_approval: number
+  outstanding_commitment_at_approval: number
+  protected_minimum_at_approval: number
 }
 
 export type CommitmentTransaction = {
@@ -1014,10 +1055,20 @@ export async function getBudgetByCode(financialYear: number) {
     const r = row as AuthoritativeBudgetPosition
     return {
       ...r,
-      revised_budget: r.approved_budget || 0,
+      revised_budget: r.current_revised_budget ?? r.approved_budget ?? 0,
       committed_amount: r.outstanding_commitment || 0,
     }
   })
+}
+
+export async function getBudgetRevisionHistoryReport(financialYear: number) {
+  const { data, error } = await supabase
+    .from('v_budget_revision_history_report')
+    .select('*')
+    .eq('budget_year', financialYear)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data || []) as BudgetRevisionHistoryReportRow[]
 }
 
 // ==========================================
