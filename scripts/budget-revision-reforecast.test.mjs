@@ -39,7 +39,7 @@ for (const required of [
   'CREATE OR REPLACE VIEW v_budget_revision_position', 'njss_create_budget_revision', 'njss_transition_budget_revision',
   'FOR UPDATE', 'protected_minimum', 'actual_expenditure_at_submission', 'actual_expenditure_at_approval',
   'superseded_by_id', 'VIREMENT', 'SUPPLEMENTARY', 'REDUCTION', 'RECLASSIFICATION', 'REFORECAST',
-]) assert.ok(migration52.includes(required), `migration 052 missing ${required}`)
+]) assert.ok(migration52.includes(required), `migration 52 missing ${required}`)
 assert.ok(migration52Lower.includes('active revision already exists'), 'workflow must reject a second active revision')
 assert.ok(migration52.includes("fn_current_user_has_permission('budget.revision.create')"), 'create RPC must enforce create permission')
 assert.ok(migration52.includes("'APPROVE' THEN 'budget.revision.approve'"), 'approval action must map to budget.revision.approve')
@@ -98,5 +98,10 @@ assert.ok(budgetPage.includes('closed_month_numbers'), 'budget page must protect
 assert.ok(budgetPage.includes('source_budget_allocation_id'), 'budget page must distinguish protected baseline rows')
 assert.ok(budgetPage.includes('isRevisionMonthLocked'), 'budget page must disable closed/actual revision months')
 assert.ok(budgetPage.includes('protectedBaseline'), 'budget page must disable destructive changes to baseline rows')
+assert.match(
+  budgetPage,
+  /const allocateEvenly[\s\S]*?isRevisionMonthLocked\(row, index\)[\s\S]*?updateRow\(row\.clientId, \{ months \}\)/,
+  'Allocate Evenly must preserve closed/actual months when editing a revision',
+)
 
 console.log('budget revision and reforecast regression checks passed')
