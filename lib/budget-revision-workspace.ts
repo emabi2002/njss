@@ -9,6 +9,21 @@ export type EligibleLineSupervisor = {
   section_id: string | null
 }
 
+export type ApprovedBudgetCandidate = {
+  submission_id: string
+  submission_number: string | null
+  budget_year: number
+  version: number
+  division_id: string
+  division_code: string | null
+  division_name: string | null
+  department_id: string | null
+  department_name: string | null
+  section_id: string | null
+  section_name: string | null
+  total_proposed_budget: number
+}
+
 export type BudgetRevisionQueueState = 'SUPERVISOR_ACTION' | 'REGISTRAR_ACTION' | 'COMPLETED'
 
 export type BudgetRevisionQueueItem = {
@@ -107,6 +122,76 @@ export async function getEligibleLineSupervisors(divisionId: string): Promise<El
   })
   if (error) throw error
   return (data || []) as EligibleLineSupervisor[]
+}
+
+export async function getApprovedBudgetCandidates(): Promise<ApprovedBudgetCandidate[]> {
+  const { data: submissions, error: submissionError } = await supabase
+    .from('divisional_budget_submissions')
+    .select('id, submission_number, budget_year, version, division_id, department_id, total_proposed_budget')
+    .eq('status', 'APPROVED')
+    .eq('is_locked', true)
+    .is('superseded_by_id', null)
+    .order('budget_year', { ascending: false })
+    .order('version', { ascending: false })
+  if (submissionError) throw submissionError
+
+  const rows = submissions || []
+  if (rows.length === 0) return []
+
+  const submissionIds = rows.map((row) => row.id as string)
+  const { data: activeRevisions, error: revisionError } = await supabase
+    .from('budget_revisions')
+    .select('parent_submission_id')
+    .in('parent_submission_id', submissionIds)
+    .in('status', ['DRAFT', 'SUBMITTED', 'RETURNED', 'RESUBMITTED', 'REVIEWED'])
+  if (revisionError) throw revisionError
+  const parentsWithActiveRevision = new Set((activeRevisions || []).map((row) => row.parent_submission_id as string))
+
+  const divisionIds = [...new Set(rows.map((row) => row.division_id as string).filter(Boolean))]
+  const { data: divisions, error: divisionError } = divisionIds.length
+    ? await supabase.from('budget_divisions').select('id, code, name, department_id, section_id').in('id', divisionIds)
+    : { data: [], error: null }
+  if (divisionError) throw divisionError
+
+  const departmentIds = [...new Set((divisions || []).map((row) => row.department_id as string).filter(Boolean))]
+  const sectionIds = [...new Set((divisions || []).map((row) => row.section_id as string).filter(Boolean))]
+
+  const [{ data: departments, error: departmentError }, { data: sections, error: sectionError }] = await Promise.all([
+    departmentIds.length
+      ? supabase.from('departments').select('id, name').in('id', departmentIds)
+      : Promise.resolve({ data: [], error: null }),
+    sectionIds.length
+      ? supabase.from('sections').select('id, name').in('id', sectionIds)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  if (departmentError) throw departmentError
+  if (sectionError) throw sectionError
+
+  const divisionMap = new Map((divisions || []).map((row) => [row.id as string, row]))
+  const departmentMap = new Map((departments || []).map((row) => [row.id as string, row.name as string]))
+  const sectionMap = new Map((sections || []).map((row) => [row.id as string, row.name as string]))
+
+  return rows
+    .filter((row) => !parentsWithActiveRevision.has(row.id as string))
+    .map((row) => {
+      const division = divisionMap.get(row.division_id as string)
+      const departmentId = (division?.department_id || row.department_id || null) as string | null
+      const sectionId = (division?.section_id || null) as string | null
+      return {
+        submission_id: row.id as string,
+        submission_number: (row.submission_number || null) as string | null,
+        budget_year: Number(row.budget_year),
+        version: Number(row.version || 1),
+        division_id: row.division_id as string,
+        division_code: (division?.code || null) as string | null,
+        division_name: (division?.name || null) as string | null,
+        department_id: departmentId,
+        department_name: departmentId ? departmentMap.get(departmentId) || null : null,
+        section_id: sectionId,
+        section_name: sectionId ? sectionMap.get(sectionId) || null : null,
+        total_proposed_budget: Number(row.total_proposed_budget || 0),
+      }
+    })
 }
 
 export async function getApprovedBudgetSummary(parentSubmissionId: string): Promise<ApprovedBudgetSummary> {
