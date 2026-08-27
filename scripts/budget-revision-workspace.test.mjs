@@ -71,11 +71,21 @@ assert.ok(workspacePage.includes('roles.includes("Registrar")') || workspacePage
 assert.ok(workspacePage.includes('roles.includes("Line Supervisor")') || workspacePage.includes("roles.includes('Line Supervisor')"), 'workspace must explicitly identify Line Supervisor role')
 assert.ok(workspacePage.includes('/dashboard/budget-template?submission='), 'supervisor queue must open the exact revision submission in Budget Preparation')
 
+const budgetTemplatePage = read('app/dashboard/budget-template/page.tsx')
+assert.ok(budgetTemplatePage.includes('new URLSearchParams(window.location.search)'), 'Budget Preparation must read deep-link query parameters')
+assert.ok(budgetTemplatePage.includes('params.get("submission")') || budgetTemplatePage.includes("params.get('submission')"), 'Budget Preparation must open the exact submission supplied by the workspace')
+assert.ok(budgetTemplatePage.includes('/dashboard/budget/revisions?parent=${selected.id}&action=request'), 'Request Budget Change must route to the dedicated workspace with the approved parent')
+assert.ok(!budgetTemplatePage.includes('<BudgetRevisionDialog'), 'Budget Preparation must not retain a second inline revision-request workflow')
+
 const dropdown = read('components/NotificationsDropdown.tsx')
 const notificationsPage = read('app/dashboard/notifications/page.tsx')
 assert.ok(dropdown.includes("reference_type === 'BUDGET_REVISION'"))
 assert.ok(notificationsPage.includes("reference_type === 'BUDGET_REVISION'"))
 assert.ok(dropdown.includes('/dashboard/budget/revisions?revision='))
 assert.ok(notificationsPage.includes('/dashboard/budget/revisions?revision='))
+assert.ok(dropdown.includes('useRealtimeNotifications(profile?.id)'), 'notification dropdown must filter by NJSS users.id profile, not auth user id')
+assert.ok(notificationsPage.includes('useRealtimeNotifications(profile?.id)'), 'notifications page must filter by NJSS users.id profile, not auth user id')
+assert.ok(!dropdown.includes('useRealtimeNotifications(user?.id)'), 'notification dropdown must not pass auth.uid to notifications.user_id filter')
+assert.ok(!notificationsPage.includes('useRealtimeNotifications(user?.id)'), 'notifications page must not pass auth.uid to notifications.user_id filter')
 
 console.log('budget revision workspace regression checks passed')
