@@ -254,7 +254,7 @@ BEGIN
 
   SELECT
     u.email,
-    COALESCE(NULLIF(trim(concat_ws(' ', u.first_name, u.last_name)), ''), u.email)
+    COALESCE(NULLIF(trim(u.full_name), ''), u.email)
   INTO v_user_email, v_user_name
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
@@ -560,7 +560,7 @@ BEGIN
 
   SELECT
     u.email,
-    COALESCE(NULLIF(trim(concat_ws(' ', u.first_name, u.last_name)), ''), u.email)
+    COALESCE(NULLIF(trim(u.full_name), ''), u.email)
   INTO v_user_email, v_user_name
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
@@ -707,7 +707,7 @@ BEGIN
 
   SELECT
     u.email,
-    COALESCE(NULLIF(trim(concat_ws(' ', u.first_name, u.last_name)), ''), u.email)
+    COALESCE(NULLIF(trim(u.full_name), ''), u.email)
   INTO v_user_email, v_user_name
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
