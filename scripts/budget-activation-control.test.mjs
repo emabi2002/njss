@@ -6,6 +6,7 @@ const read = (path) => fs.readFileSync(path, 'utf8')
 assert.ok(fs.existsSync('supabase/migrations/056_operational_budget_activation_finance_master_data.sql'))
 assert.ok(fs.existsSync('supabase/migrations/057_finance_mapping_admin.sql'))
 assert.ok(fs.existsSync('supabase/migrations/058_budget_activation_organizational_guard.sql'))
+assert.ok(fs.existsSync('supabase/migrations/059_finance_posting_one_to_one_integrity.sql'))
 assert.ok(fs.existsSync('lib/budget-activation.ts'))
 assert.ok(fs.existsSync('app/api/budget-activation/route.ts'))
 assert.ok(fs.existsSync('app/dashboard/master/finance-mapping/page.tsx'))
@@ -25,6 +26,16 @@ for (const token of [
   'Operational activation is a separate dual-control step',
 ]) {
   assert.ok(organizationalGuardMigration.includes(token), `organisational activation guard missing ${token}`)
+}
+
+const oneToOneMigration = read('supabase/migrations/059_finance_posting_one_to_one_integrity.sql')
+for (const token of [
+  'ux_expense_code_registry_active_expense_ledger',
+  'ux_expense_ledger_active_expense_code_registry',
+  'Duplicate active Posting Code mappings exist for a Finance Code',
+  'Duplicate active Finance Code mappings exist for a Posting Code',
+]) {
+  assert.ok(oneToOneMigration.includes(token), `one-to-one Finance mapping integrity missing ${token}`)
 }
 
 const financeMappingPage = read('app/dashboard/master/finance-mapping/page.tsx')
