@@ -1,11 +1,13 @@
 -- =============================================================================
 -- NJSS 062 — BUDGET ACTIVATION FINGERPRINT & IMMUTABLE SNAPSHOT
 -- Approved Task 9 conformance hardening.
+-- Production-schema compatible Supabase implementation.
 -- =============================================================================
 
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 -- 1. Extend activation metadata and canonical mapping lineage.
 ALTER TABLE public.budget_activation_batches
@@ -22,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_budget_activation_lines_finance_mapping
   ON public.budget_activation_lines(finance_posting_mapping_id)
   WHERE finance_posting_mapping_id IS NOT NULL;
 
--- 2. Immutable post-activation evidence. This is distinct from mutable validation staging.
+-- 2. Immutable post-activation evidence, separate from mutable staging.
 CREATE TABLE IF NOT EXISTS public.budget_activation_line_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   activation_batch_id UUID NOT NULL REFERENCES public.budget_activation_batches(id) ON DELETE RESTRICT,
@@ -86,7 +88,7 @@ GRANT SELECT ON TABLE public.budget_activation_line_snapshots TO authenticated;
 REVOKE ALL ON FUNCTION public.njss_block_activation_snapshot_mutation()
   FROM PUBLIC, anon, authenticated;
 
--- 3. One authoritative monthly snapshot helper used by posting and audit capture.
+-- 3. Authoritative monthly snapshot helper.
 CREATE OR REPLACE FUNCTION public.njss_budget_line_monthly_snapshot(
   p_budget_line_id UUID
 )
@@ -133,12 +135,11 @@ AS $$
     COALESCE(SUM(amount) FILTER (WHERE month_number BETWEEN 10 AND 12), 0)::NUMERIC(15,2)
   FROM months;
 $$;
-
 REVOKE ALL ON FUNCTION public.njss_budget_line_monthly_snapshot(UUID)
   FROM PUBLIC, anon, authenticated;
 
--- 4. Deterministic activation fingerprint. Current canonical mapping values and
---    activity flags are included so an in-place master-data change is detected.
+-- 4. Deterministic SHA-256 fingerprint. Supabase exposes pgcrypto in the
+-- extensions schema, so digest is explicitly schema-qualified.
 CREATE OR REPLACE FUNCTION public.njss_budget_activation_fingerprint(
   p_activation_batch_id UUID
 )
@@ -149,7 +150,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT encode(
-    digest(
+    extensions.digest(
       convert_to(
         jsonb_build_object(
           'submission_id', s.id,
@@ -217,13 +218,10 @@ AS $$
   GROUP BY
     s.id, s.version, s.updated_at, s.status, s.division_id, bd.cost_centre_id;
 $$;
-
 REVOKE ALL ON FUNCTION public.njss_budget_activation_fingerprint(UUID)
   FROM PUBLIC, anon, authenticated;
 
--- 5. System Administrator preparation: exact approved Division Cost Centre +
---    canonical finance_posting_mappings only. No legacy reciprocal-pointer
---    inference is authoritative in this activation path.
+-- 5. System Administrator preparation: canonical mapping only.
 CREATE OR REPLACE FUNCTION public.njss_prepare_budget_activation(
   p_activation_batch_id UUID,
   p_user_email TEXT DEFAULT NULL
@@ -252,13 +250,10 @@ BEGIN
     RAISE EXCEPTION 'Only a System Administrator may prepare operational budget activation.';
   END IF;
 
-  SELECT
-    u.email,
-    COALESCE(NULLIF(trim(u.full_name), ''), u.email)
+  SELECT u.email, COALESCE(NULLIF(trim(u.full_name), ''), u.email)
   INTO v_user_email, v_user_name
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
-
   IF v_user_email IS NULL THEN
     RAISE EXCEPTION 'Active System Administrator user record is required.';
   END IF;
@@ -269,15 +264,9 @@ BEGIN
   WHERE id = p_activation_batch_id
   FOR UPDATE;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Budget activation batch not found.';
-  END IF;
-  IF v_batch.status = 'ACTIVATED' THEN
-    RAISE EXCEPTION 'Activated budgets are immutable and cannot be prepared again.';
-  END IF;
-  IF v_batch.status = 'CANCELLED' THEN
-    RAISE EXCEPTION 'Cancelled activation batches cannot be prepared.';
-  END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Budget activation batch not found.'; END IF;
+  IF v_batch.status = 'ACTIVATED' THEN RAISE EXCEPTION 'Activated budgets are immutable and cannot be prepared again.'; END IF;
+  IF v_batch.status = 'CANCELLED' THEN RAISE EXCEPTION 'Cancelled activation batches cannot be prepared.'; END IF;
   IF NOT EXISTS (
     SELECT 1 FROM public.divisional_budget_submissions s
     WHERE s.id = v_batch.submission_id
@@ -535,8 +524,7 @@ BEGIN
 END;
 $$;
 
--- 6. System Administrator submission stores the cryptographic fingerprint only
---    after preparation is fully reconciled.
+-- 6. System Administrator submit: revalidate and store fingerprint.
 CREATE OR REPLACE FUNCTION public.njss_submit_budget_activation(
   p_activation_batch_id UUID,
   p_user_email TEXT DEFAULT NULL
@@ -558,9 +546,7 @@ BEGIN
     RAISE EXCEPTION 'Only a System Administrator may submit operational budget activation.';
   END IF;
 
-  SELECT
-    u.email,
-    COALESCE(NULLIF(trim(u.full_name), ''), u.email)
+  SELECT u.email, COALESCE(NULLIF(trim(u.full_name), ''), u.email)
   INTO v_user_email, v_user_name
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
@@ -607,7 +593,7 @@ BEGIN
       prepared_against_submission_updated_at = (
         SELECT s.updated_at
         FROM public.divisional_budget_submissions s
-        WHERE s.id = submission_id
+        WHERE s.id = v_batch.submission_id
       ),
       submitted_for_activation_by = v_user_id,
       submitted_for_activation_at = NOW(),
@@ -630,7 +616,7 @@ BEGIN
     'Approved budget ready for activation',
     'A fully validated approved budget is ready for Registrar authorisation.',
     'BUDGET_ACTIVATION',
-    p_activation_batch_id,
+    p_activation_batch_id::TEXT,
     false,
     false,
     'HIGH'
@@ -645,7 +631,7 @@ BEGIN
       WHERE n.user_id = u.id
         AND n.notification_type = 'BUDGET_ACTIVATION_READY'
         AND n.reference_type = 'BUDGET_ACTIVATION'
-        AND n.reference_id = p_activation_batch_id
+        AND n.reference_id = p_activation_batch_id::TEXT
     );
 
   PERFORM public.log_audit_event(
@@ -670,8 +656,8 @@ BEGIN
 END;
 $$;
 
--- 7. Registrar-only final activation. Stale fingerprints are a committed
---    VALIDATION_FAILED state, not an exception that would roll the state back.
+-- 7. Registrar-only atomic activation. Stale fingerprints become a committed
+-- VALIDATION_FAILED state rather than rolling back the detection.
 CREATE OR REPLACE FUNCTION public.njss_activate_approved_budget(
   p_activation_batch_id UUID,
   p_user_email TEXT DEFAULT NULL
@@ -705,9 +691,7 @@ BEGIN
     RAISE EXCEPTION 'Only a Registrar may authorise activation.';
   END IF;
 
-  SELECT
-    u.email,
-    COALESCE(NULLIF(trim(u.full_name), ''), u.email)
+  SELECT u.email, COALESCE(NULLIF(trim(u.full_name), ''), u.email)
   INTO v_user_email, v_user_name
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
@@ -721,15 +705,9 @@ BEGIN
   WHERE id = p_activation_batch_id
   FOR UPDATE;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Budget activation batch not found.';
-  END IF;
-  IF v_batch.status = 'ACTIVATED' THEN
-    RAISE EXCEPTION 'Approved budget has already been activated.';
-  END IF;
-  IF v_batch.status <> 'READY_FOR_ACTIVATION' THEN
-    RAISE EXCEPTION 'Only a READY_FOR_ACTIVATION batch can be activated.';
-  END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Budget activation batch not found.'; END IF;
+  IF v_batch.status = 'ACTIVATED' THEN RAISE EXCEPTION 'Approved budget has already been activated.'; END IF;
+  IF v_batch.status <> 'READY_FOR_ACTIVATION' THEN RAISE EXCEPTION 'Only a READY_FOR_ACTIVATION batch can be activated.'; END IF;
   IF NOT EXISTS (
     SELECT 1 FROM public.divisional_budget_submissions s
     WHERE s.id = v_batch.submission_id
@@ -850,6 +828,9 @@ BEGIN
       OR (fpm.section_id IS NOT NULL AND (sec.id IS NULL OR sec.is_active IS DISTINCT FROM true))
       OR cc.department_id IS DISTINCT FROM fpm.department_id
       OR (fpm.section_id IS NOT NULL AND cc.section_id IS NOT NULL AND cc.section_id IS DISTINCT FROM fpm.section_id)
+      OR ecr.department_id IS DISTINCT FROM fpm.department_id
+      OR ecr.cost_centre_id IS DISTINCT FROM fpm.cost_centre_id
+      OR (ecr.section_id IS NOT NULL AND ecr.section_id IS DISTINCT FROM fpm.section_id)
       OR ABS(COALESCE(l.allocation_variance,0)) > 0.009
       OR ABS(COALESCE(l.monthly_allocation_total,0) - COALESCE(l.annual_estimate,0)) > 0.009
       OR EXISTS (
@@ -1005,7 +986,7 @@ BEGIN
       'Approved budget activated',
       'Registrar authorisation is complete and the approved budget is now operational for FF3/FF4 and revision controls.',
       'BUDGET_ACTIVATION',
-      p_activation_batch_id,
+      p_activation_batch_id::TEXT,
       false,
       false,
       'HIGH'
@@ -1014,7 +995,7 @@ BEGIN
       WHERE n.user_id = v_out.prepared_by
         AND n.notification_type = 'BUDGET_ACTIVATED'
         AND n.reference_type = 'BUDGET_ACTIVATION'
-        AND n.reference_id = p_activation_batch_id
+        AND n.reference_id = p_activation_batch_id::TEXT
     );
   END IF;
 
@@ -1022,7 +1003,7 @@ BEGIN
 END;
 $$;
 
--- 8. Keep direct mutation restricted to secured RPCs.
+-- 8. RPC execute permissions remain role-enforced inside the functions.
 REVOKE ALL ON FUNCTION public.njss_prepare_budget_activation(UUID,TEXT) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.njss_submit_budget_activation(UUID,TEXT) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.njss_activate_approved_budget(UUID,TEXT) FROM PUBLIC, anon;
@@ -1033,7 +1014,7 @@ GRANT EXECUTE ON FUNCTION public.njss_activate_approved_budget(UUID,TEXT) TO aut
 INSERT INTO public.system_settings (setting_key, setting_value, description)
 VALUES (
   'latest_database_migration',
-  '062_budget_activation_fingerprint_and_immutable_snapshot',
+  to_jsonb('062_budget_activation_fingerprint_and_immutable_snapshot'::TEXT),
   'Latest applied NJSS migration identifier.'
 )
 ON CONFLICT (setting_key) DO UPDATE SET
