@@ -38,6 +38,37 @@ export type FinancePostingMapping = {
   updated_at: string
 }
 
+export type BudgetActivationMappingWorklistRow = {
+  submission_id: string
+  submission_number: string
+  financial_year: number
+  budget_line_id: string
+  line_number: number
+  annual_estimate: number
+  budget_division_id: string
+  division_code: string
+  division_name: string
+  department_id: string | null
+  section_id: string | null
+  cost_centre_id: string | null
+  cost_centre_code: string | null
+  cost_centre_name: string | null
+  expense_ledger_id: string
+  finance_code: string
+  finance_description: string | null
+  finance_expense_category: string | null
+  legacy_posting_code_id: string | null
+  legacy_posting_code: string | null
+  legacy_posting_description: string | null
+  canonical_mapping_id: string | null
+  canonical_posting_code_id: string | null
+  canonical_posting_code: string | null
+  chart_of_account_id: string | null
+  chart_account_code: string | null
+  chart_account_name: string | null
+  mapping_status: 'READY' | 'MAPPING_REQUIRED' | 'COST_CENTRE_REQUIRED' | 'COST_CENTRE_INACTIVE' | 'POSTING_CODE_INACTIVE' | 'CHART_ACCOUNT_INACTIVE' | string
+}
+
 export type SaveFinancePostingMappingInput = {
   mappingId: string | null
   financialYear: number | null
@@ -59,6 +90,12 @@ export async function getFinancePostingMappings(): Promise<FinancePostingMapping
     .order('financial_year', { ascending: false, nullsFirst: false })
   if (error) throw error
   return (data || []) as FinancePostingMapping[]
+}
+
+export async function getBudgetActivationMappingWorklist(): Promise<BudgetActivationMappingWorklistRow[]> {
+  const { data, error } = await supabase.rpc('njss_budget_activation_mapping_worklist')
+  if (error) throw error
+  return (data || []) as BudgetActivationMappingWorklistRow[]
 }
 
 export async function saveFinancePostingMapping(input: SaveFinancePostingMappingInput) {
