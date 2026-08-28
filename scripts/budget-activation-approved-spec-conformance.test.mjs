@@ -4,14 +4,16 @@ import assert from 'node:assert/strict'
 const read = (path) => fs.readFileSync(path, 'utf8')
 const migration061 = 'supabase/migrations/061_explicit_finance_posting_mapping_and_cost_centre_fk.sql'
 const migration062 = 'supabase/migrations/062_budget_activation_fingerprint_and_immutable_snapshot.sql'
+const migration0625 = 'supabase/migrations/0625_budget_activation_queue_view_reset.sql'
 const migration063 = 'supabase/migrations/063_budget_activation_fk_only_guards.sql'
 
-for (const path of [migration061, migration062, migration063]) {
+for (const path of [migration061, migration062, migration0625, migration063]) {
   assert.ok(fs.existsSync(path), `missing ${path}`)
 }
 
 const m61 = read(migration061)
 const m62 = read(migration062)
+const m625 = read(migration0625)
 const m63 = read(migration063)
 
 for (const token of [
@@ -39,6 +41,10 @@ assert.match(m62, /digest\s*\(/i, 'fingerprint must be cryptographic and determi
 assert.match(m62, /WITH\s+inserted_allocations\s+AS\s*\([\s\S]*INSERT\s+INTO\s+(?:public\.)?budget_allocations[\s\S]*RETURNING[\s\S]*source_budget_line_id/i)
 assert.match(m62, /INSERT\s+INTO\s+(?:public\.)?budget_activation_line_snapshots/i)
 assert.match(m62, /UPDATE\s+(?:public\.)?budget_activation_batches[\s\S]*status\s*=\s*'VALIDATION_FAILED'[\s\S]*validation_fingerprint\s*=\s*NULL/i)
+
+assert.match(m625, /DROP\s+VIEW\s+IF\s+EXISTS\s+public\.v_budget_activation_queue\s*;/i, 'migration 0625 must safely reset the pre-fingerprint queue view before migration 063 recreates it')
+assert.doesNotMatch(m625, /CASCADE/i, 'queue-view reset must fail safely when unexpected database dependencies exist')
+assert.match(m63, /CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+public\.v_budget_activation_queue/i, 'migration 063 must recreate the activation queue after the safety reset')
 
 assert.ok(m62.includes('cost_centre_name_snapshot'), 'immutable snapshots must retain descriptive Cost Centre name evidence')
 assert.doesNotMatch(m62, /submission_cost_centre/i, 'activation staging must not resolve Cost Centre from free-text submission value')
