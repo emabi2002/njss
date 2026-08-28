@@ -104,11 +104,26 @@ assert.match(m62, /WITH\s+inserted_allocations\s+AS\s*\([\s\S]*INSERT\s+INTO\s+b
 assert.match(m62, /INSERT\s+INTO\s+budget_activation_line_snapshots/i)
 assert.match(m62, /UPDATE\s+budget_activation_batches[\s\S]*status\s*=\s*'VALIDATION_FAILED'[\s\S]*validation_fingerprint\s*=\s*NULL/i)
 
-for (const source of [m62, m63]) {
-  assert.doesNotMatch(source, /cost_centre_name/i, 'activation hardening must not resolve Cost Centre by name')
-  assert.doesNotMatch(source, /submission_cost_centre/i, 'activation hardening must not resolve Cost Centre from free-text submission value')
-  assert.doesNotMatch(source, /cc\.name\s*=|lower\s*\(\s*trim\s*\(\s*coalesce\s*\(\s*[^)]*cc\.name/i, 'no Cost Centre name fallback is allowed')
-}
+// Migration 062 deliberately stores descriptive Cost Centre names in immutable
+// audit snapshots. What is prohibited is using a name/free-text value as the
+// resolver predicate for an operational Cost Centre.
+assert.ok(m62.includes('cost_centre_name_snapshot'), 'immutable snapshots must retain descriptive Cost Centre name evidence')
+assert.doesNotMatch(m62, /submission_cost_centre/i, 'activation staging must not resolve Cost Centre from free-text submission value')
+assert.doesNotMatch(
+  m62,
+  /(?:JOIN|WHERE|AND|OR)[^\n]*cost_centre_name\s*(?:=|ILIKE|LIKE)/i,
+  'migration 062 must not use Cost Centre name as a resolver predicate',
+)
+
+// The live transaction-boundary guard has no need for descriptive name fields;
+// it must be id/canonical-mapping only.
+assert.doesNotMatch(m63, /cost_centre_name/i, 'live activation guards must rely on Cost Centre ids only')
+assert.doesNotMatch(m63, /submission_cost_centre/i, 'live guards must not resolve Cost Centre from free-text submission value')
+assert.doesNotMatch(
+  m63,
+  /cc\.name\s*=|lower\s*\(\s*trim\s*\(\s*coalesce\s*\(\s*[^)]*cc\.name/i,
+  'no Cost Centre name fallback is allowed in live guards',
+)
 
 const service = read('lib/budget-activation.ts')
 for (const token of ['validation_fingerprint', 'finance_posting_mapping_id', 'getBudgetActivationSnapshots']) {
@@ -408,7 +423,7 @@ VALUES ('budget.activation.report','budget','budget.activation','report','Report
 ON CONFLICT (code) DO UPDATE SET is_active = true, label = EXCLUDED.label, description = EXCLUDED.description;
 ```
 
-Grant `budget.activation.report` to System Administrator and Registrar. Keep mutation RPC role checks exact; `all` is never Registrar authority.
+Grant `budget.activation.report` explicitly to Registrar. Do **not** add a new direct `role_permissions` row for System Administrator in migration 061; the protected technical Administrator already receives this capability through its global `all` permission. Keep mutation RPC role checks exact; `all` is never Registrar authority.
 
 - [ ] **Step 7: Harden grants/RLS and commit**
 
