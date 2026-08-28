@@ -42,7 +42,7 @@ for (const token of [
 const allocationGuardMigration = read('supabase/migrations/060_operational_allocation_organizational_guard.sql')
 for (const token of [
   'njss_guard_operational_allocation_org',
-  "source_module = 'EXCEL_BUDGET'",
+  "NEW.source_module IS DISTINCT FROM 'EXCEL_BUDGET'",
   'Operational allocation Department does not match approved budget organisational unit.',
   'Operational allocation Section does not match approved budget organisational unit.',
   'Operational allocation Cost Centre does not match approved budget organisational unit.',
