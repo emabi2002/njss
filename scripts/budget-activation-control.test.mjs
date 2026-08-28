@@ -46,6 +46,8 @@ for (const token of [
   'Operational allocation Department does not match approved budget organisational unit.',
   'Operational allocation Section does not match approved budget organisational unit.',
   'Operational allocation Cost Centre does not match approved budget organisational unit.',
+  'Operational allocation financial year does not match approved budget.',
+  'Operational allocation source budget is no longer APPROVED.',
   'BEFORE INSERT OR UPDATE',
 ]) {
   assert.ok(allocationGuardMigration.includes(token), `operational allocation guard missing ${token}`)
