@@ -20,10 +20,16 @@ export type BudgetActivationBatch = {
   activation_total: number
   variance: number
   status: BudgetActivationStatus
+  validation_fingerprint: string | null
+  validation_error_count: number
+  prepared_against_submission_updated_at: string | null
+  fingerprint_state?: 'NOT_VALIDATED' | 'VALIDATED' | 'ACTIVATED'
+  activation_snapshot_count?: number
   prepared_by: string | null
   prepared_by_email: string | null
   prepared_at: string | null
   validated_at: string | null
+  submitted_for_activation_by: string | null
   submitted_for_activation_at: string | null
   authorised_by: string | null
   authorised_by_email: string | null
@@ -35,6 +41,8 @@ export type BudgetActivationBatch = {
   submission_number: string | null
   submission_status: string
   approved_at: string | null
+  approved_by?: string | null
+  approved_by_name?: string | null
   division_code: string | null
   division_name: string | null
   department_code: string | null
@@ -50,6 +58,7 @@ export type BudgetActivationLine = {
   budget_line_id: string
   expense_ledger_id: string | null
   finance_code: string | null
+  finance_posting_mapping_id: string | null
   expense_code_registry_id: string | null
   chart_of_account_id: string | null
   department_id: string | null
@@ -75,6 +84,30 @@ export type BudgetActivationLine = {
   section_name?: string | null
   cost_centre_code?: string | null
   cost_centre_name?: string | null
+}
+
+export type BudgetActivationSnapshot = {
+  id: string
+  activation_batch_id: string
+  source_budget_submission_id: string
+  source_budget_line_id: string
+  budget_allocation_id: string
+  finance_posting_mapping_id: string
+  expense_ledger_id: string
+  finance_code_snapshot: string
+  finance_description_snapshot: string | null
+  expense_code_registry_id: string
+  posting_code_snapshot: string
+  posting_description_snapshot: string | null
+  chart_of_account_id: string
+  chart_account_code_snapshot: string
+  chart_account_name_snapshot: string | null
+  cost_centre_id: string
+  cost_centre_code_snapshot: string
+  cost_centre_name_snapshot: string | null
+  approved_amount: number
+  monthly_cashflow_snapshot: Record<string, number>
+  created_at: string
 }
 
 type LookupRow = Record<string, unknown> & { id: string }
@@ -151,6 +184,16 @@ export async function getBudgetActivationLines(batchId: string): Promise<BudgetA
       cost_centre_name: (costCentre?.name as string | null | undefined) ?? null,
     }
   })
+}
+
+export async function getBudgetActivationSnapshots(batchId: string): Promise<BudgetActivationSnapshot[]> {
+  const { data, error } = await supabase
+    .from('budget_activation_line_snapshots')
+    .select('*')
+    .eq('activation_batch_id', batchId)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data || []) as BudgetActivationSnapshot[]
 }
 
 async function mutateBudgetActivation(operation: 'prepare' | 'submit' | 'activate', batchId: string) {
