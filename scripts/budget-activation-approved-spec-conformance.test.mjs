@@ -27,16 +27,30 @@ for (const token of [
   'budget.activation.report',
 ]) assert.ok(m61.includes(token), `migration 061 missing ${token}`)
 
+// Deployed NJSS user identity schema is full_name + email.
 for (const [name, sql] of [['061', m61], ['062', m62], ['063', m63]]) {
   assert.doesNotMatch(
     sql,
     /\b(?:u|creator|updater|approver|prep|auth)\.(?:first_name|last_name)\b/i,
-    `migration ${name} must use the deployed users.full_name schema rather than nonexistent first_name/last_name columns`,
+    `migration ${name} must not reference nonexistent users.first_name/last_name columns`,
   )
 }
-assert.match(m61, /\b(?:u|creator|updater)\.full_name\b/i, 'migration 061 must use users.full_name for audit/display names')
-assert.match(m62, /\bu\.full_name\b/i, 'migration 062 must use users.full_name for audit/display names')
-assert.match(m63, /\b(?:approver|prep|auth)\.full_name\b/i, 'migration 063 must use users.full_name for queue display names')
+assert.match(m61, /\b(?:u|creator|updater)\.full_name\b/i, 'migration 061 must use users.full_name')
+assert.match(m62, /\bu\.full_name\b/i, 'migration 062 must use users.full_name')
+assert.match(m63, /\b(?:prep|auth)\.full_name\b/i, 'migration 063 must use users.full_name for UUID-backed activation actors')
+
+// reviewed_by / approved_by are deployed as text audit labels; UUID workflow
+// actor fields remain submitted_by / rejected_by.
+assert.match(m61, /reviewed_by\s*=\s*CASE[\s\S]*v_actor_label/i, 'REVIEW must store the actor label in reviewed_by')
+assert.match(m61, /approved_by\s*=\s*CASE[\s\S]*v_actor_label/i, 'APPROVE must store the actor label in approved_by')
+assert.match(m61, /submitted_by\s*=\s*CASE[\s\S]*v_user_id/i, 'SUBMIT must continue using the UUID actor')
+assert.match(m61, /rejected_by\s*=\s*CASE[\s\S]*v_user_id/i, 'REJECT must continue using the UUID actor')
+assert.doesNotMatch(
+  m63,
+  /JOIN\s+public\.users\s+approver\s+ON\s+approver\.id\s*=\s*s\.approved_by/i,
+  'approved_by is VARCHAR and must never be joined to users.id as a UUID',
+)
+assert.match(m63, /s\.approved_by\s+AS\s+approved_by_name/i, 'queue must preserve the deployed approved_by audit label')
 
 for (const token of [
   'validation_fingerprint',
@@ -48,10 +62,21 @@ for (const token of [
   'VALIDATION_FAILED',
 ]) assert.ok(m62.includes(token), `migration 062 missing ${token}`)
 
-assert.match(m62, /digest\s*\(/i, 'fingerprint must be cryptographic and deterministic')
+assert.match(m62, /extensions\.digest\s*\(/i, 'Supabase pgcrypto digest must be schema-qualified')
+assert.doesNotMatch(m62, /(?<!extensions\.)\bdigest\s*\(/i, 'unqualified digest is unsafe with the restricted SECURITY DEFINER search_path')
 assert.match(m62, /WITH\s+inserted_allocations\s+AS\s*\([\s\S]*INSERT\s+INTO\s+(?:public\.)?budget_allocations[\s\S]*RETURNING[\s\S]*source_budget_line_id/i)
 assert.match(m62, /INSERT\s+INTO\s+(?:public\.)?budget_activation_line_snapshots/i)
 assert.match(m62, /UPDATE\s+(?:public\.)?budget_activation_batches[\s\S]*status\s*=\s*'VALIDATION_FAILED'[\s\S]*validation_fingerprint\s*=\s*NULL/i)
+assert.match(m62, /p_activation_batch_id::TEXT/i, 'activation notification reference_id must use deployed TEXT storage')
+
+// system_settings.setting_value is JSONB in the deployed NJSS schema.
+for (const [name, sql] of [['061', m61], ['062', m62], ['063', m63]]) {
+  assert.match(
+    sql,
+    /latest_database_migration[\s\S]*to_jsonb\s*\(/i,
+    `migration ${name} must store latest_database_migration as JSONB`,
+  )
+}
 
 assert.match(m625, /DROP\s+VIEW\s+IF\s+EXISTS\s+public\.v_budget_activation_queue\s*;/i, 'migration 0625 must safely reset the pre-fingerprint queue view before migration 063 recreates it')
 assert.doesNotMatch(
