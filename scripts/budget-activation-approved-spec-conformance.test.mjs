@@ -36,13 +36,10 @@ for (const token of [
 ]) assert.ok(m62.includes(token), `migration 062 missing ${token}`)
 
 assert.match(m62, /digest\s*\(/i, 'fingerprint must be cryptographic and deterministic')
-assert.match(m62, /WITH\s+inserted_allocations\s+AS\s*\([\s\S]*INSERT\s+INTO\s+budget_allocations[\s\S]*RETURNING[\s\S]*source_budget_line_id/i)
-assert.match(m62, /INSERT\s+INTO\s+budget_activation_line_snapshots/i)
-assert.match(m62, /UPDATE\s+budget_activation_batches[\s\S]*status\s*=\s*'VALIDATION_FAILED'[\s\S]*validation_fingerprint\s*=\s*NULL/i)
+assert.match(m62, /WITH\s+inserted_allocations\s+AS\s*\([\s\S]*INSERT\s+INTO\s+(?:public\.)?budget_allocations[\s\S]*RETURNING[\s\S]*source_budget_line_id/i)
+assert.match(m62, /INSERT\s+INTO\s+(?:public\.)?budget_activation_line_snapshots/i)
+assert.match(m62, /UPDATE\s+(?:public\.)?budget_activation_batches[\s\S]*status\s*=\s*'VALIDATION_FAILED'[\s\S]*validation_fingerprint\s*=\s*NULL/i)
 
-// Migration 062 deliberately stores descriptive Cost Centre names in immutable
-// audit snapshots. What is prohibited is using a name/free-text value as the
-// resolver predicate for an operational Cost Centre.
 assert.ok(m62.includes('cost_centre_name_snapshot'), 'immutable snapshots must retain descriptive Cost Centre name evidence')
 assert.doesNotMatch(m62, /submission_cost_centre/i, 'activation staging must not resolve Cost Centre from free-text submission value')
 assert.doesNotMatch(
@@ -51,8 +48,6 @@ assert.doesNotMatch(
   'migration 062 must not use Cost Centre name as a resolver predicate',
 )
 
-// The live transaction-boundary guard has no need for descriptive name fields;
-// it must be id/canonical-mapping only.
 assert.doesNotMatch(m63, /cost_centre_name/i, 'live activation guards must rely on Cost Centre ids only')
 assert.doesNotMatch(m63, /submission_cost_centre/i, 'live guards must not resolve Cost Centre from free-text submission value')
 assert.doesNotMatch(
