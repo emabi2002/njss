@@ -1,12 +1,13 @@
 -- =============================================================================
 -- NJSS 063 — BUDGET ACTIVATION FK-ONLY TRANSACTION GUARDS
 -- Approved Task 9 conformance hardening.
+-- Production-schema compatible: approved_by is a text audit label.
 -- =============================================================================
 
 BEGIN;
 
--- 1. Activation-line staging guard: approved organisation is resolved only from
---    immutable identifiers on the approved submission/division and canonical map.
+-- 1. Activation-line staging guard. Organisation is resolved only from exact
+-- identifiers on the approved submission/division and canonical mapping.
 CREATE OR REPLACE FUNCTION public.njss_guard_budget_activation_line_org()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -146,9 +147,8 @@ CREATE TRIGGER trg_budget_activation_line_org_guard
 REVOKE ALL ON FUNCTION public.njss_guard_budget_activation_line_org()
   FROM PUBLIC, anon, authenticated;
 
--- 2. Operational allocation guard: verify the actual insert/update against the
---    approved line, exact division FK, READY activation staging and active
---    canonical mapping.
+-- 2. Operational allocation guard: validate the actual INSERT/UPDATE against
+-- the approved line, exact Cost Centre FK, READY staging and canonical mapping.
 CREATE OR REPLACE FUNCTION public.njss_guard_operational_allocation_org()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -223,12 +223,10 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Operational allocation source budget line could not be resolved.';
   END IF;
-
   IF v_submission_status IS DISTINCT FROM 'APPROVED'
      OR v_submission_locked IS DISTINCT FROM true THEN
     RAISE EXCEPTION 'Operational allocation source budget is no longer APPROVED and locked.';
   END IF;
-
   IF NEW.source_budget_submission_id IS DISTINCT FROM v_submission_id THEN
     RAISE EXCEPTION 'Operational allocation source submission does not match the approved budget line.';
   END IF;
@@ -238,7 +236,6 @@ BEGIN
   IF NEW.financial_year IS DISTINCT FROM v_financial_year THEN
     RAISE EXCEPTION 'Operational allocation financial year does not match approved budget.';
   END IF;
-
   IF v_expected_department_id IS NULL
      OR NEW.department_id IS DISTINCT FROM v_expected_department_id THEN
     RAISE EXCEPTION 'Operational allocation Department does not match approved budget organisational unit.';
@@ -253,7 +250,6 @@ BEGIN
   IF NEW.cost_centre_id IS DISTINCT FROM v_expected_cost_centre_id THEN
     RAISE EXCEPTION 'Operational allocation Cost Centre does not match budget_divisions.cost_centre_id.';
   END IF;
-
   IF NEW.funding_source_id IS DISTINCT FROM v_line_funding_source_id THEN
     RAISE EXCEPTION 'Operational allocation funding source does not match the approved budget line.';
   END IF;
@@ -292,7 +288,6 @@ BEGIN
   FROM public.finance_posting_mappings
   WHERE id = v_finance_posting_mapping_id
     AND is_active = true;
-
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Operational allocation has no matching active canonical Finance posting mapping.';
   END IF;
@@ -322,8 +317,13 @@ BEGIN
       AND cc.is_active = true
       AND dep.is_active = true
       AND cc.department_id = v_mapping.department_id
-      AND (v_mapping.section_id IS NULL OR (sec.is_active = true
-           AND (cc.section_id IS NULL OR cc.section_id = v_mapping.section_id)))
+      AND (
+        v_mapping.section_id IS NULL
+        OR (
+          sec.is_active = true
+          AND (cc.section_id IS NULL OR cc.section_id = v_mapping.section_id)
+        )
+      )
       AND ecr.department_id = v_mapping.department_id
       AND ecr.cost_centre_id = v_mapping.cost_centre_id
       AND (ecr.section_id IS NULL OR ecr.section_id = v_mapping.section_id)
@@ -342,10 +342,8 @@ BEGIN
     RAISE EXCEPTION 'An active operational allocation already exists for this approved source budget line.';
   END IF;
 
-  SELECT
-    monthly_cashflow, q1, q2, q3, q4
-  INTO
-    v_monthly_cashflow, v_q1, v_q2, v_q3, v_q4
+  SELECT monthly_cashflow, q1, q2, q3, q4
+  INTO v_monthly_cashflow, v_q1, v_q2, v_q3, v_q4
   FROM public.njss_budget_line_monthly_snapshot(NEW.source_budget_line_id);
 
   SELECT COALESCE(SUM(bma.amount),0)::NUMERIC(15,2)
@@ -397,8 +395,8 @@ CREATE TRIGGER trg_operational_allocation_org_guard
 REVOKE ALL ON FUNCTION public.njss_guard_operational_allocation_org()
   FROM PUBLIC, anon, authenticated;
 
--- 3. Queue exposes validation/fingerprint and immutable evidence counts without
---    adding a second authority model.
+-- 3. Queue exposes validation/fingerprint and immutable evidence counts. The
+-- deployed approved_by field is an audit label (VARCHAR), not a user UUID.
 CREATE OR REPLACE VIEW public.v_budget_activation_queue
 WITH (security_invoker = true)
 AS
@@ -408,7 +406,7 @@ SELECT
   s.status AS submission_status,
   s.approved_at,
   s.approved_by,
-  COALESCE(NULLIF(trim(approver.full_name), ''), approver.email) AS approved_by_name,
+  s.approved_by AS approved_by_name,
   bd.code AS division_code,
   bd.name AS division_name,
   d.code AS department_code,
@@ -425,7 +423,6 @@ FROM public.budget_activation_batches bab
 JOIN public.divisional_budget_submissions s ON s.id = bab.submission_id
 LEFT JOIN public.budget_divisions bd ON bd.id = bab.budget_division_id
 LEFT JOIN public.departments d ON d.id = bab.department_id
-LEFT JOIN public.users approver ON approver.id = s.approved_by
 LEFT JOIN public.users prep ON prep.id = bab.prepared_by
 LEFT JOIN public.users auth ON auth.id = bab.authorised_by
 LEFT JOIN LATERAL (
@@ -440,7 +437,7 @@ GRANT SELECT ON public.v_budget_activation_queue TO authenticated;
 INSERT INTO public.system_settings (setting_key, setting_value, description)
 VALUES (
   'latest_database_migration',
-  '063_budget_activation_fk_only_guards',
+  to_jsonb('063_budget_activation_fk_only_guards'::TEXT),
   'Latest applied NJSS migration identifier.'
 )
 ON CONFLICT (setting_key) DO UPDATE SET
