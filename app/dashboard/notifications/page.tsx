@@ -3,7 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import {
-  Bell, Check, CheckCheck, FileText, DollarSign,
+  BadgeCheck, Bell, Check, CheckCheck, FileText, DollarSign,
   Clock, ChevronRight, Filter, Loader2
 } from "lucide-react"
 import { useRealtimeNotifications, type RealtimeNotification } from "@/hooks/useRealtimeNotifications"
@@ -18,7 +18,8 @@ export default function NotificationsPage() {
   const filteredNotifications = notifications.filter(n => {
     if (filter === 'unread' && n.is_read) return false
     if (filter === 'read' && !n.is_read) return false
-    if (typeFilter && !n.notification_type.startsWith(typeFilter)) return false
+    if (typeFilter === 'BUDGET_ACTIVATION' && n.reference_type !== 'BUDGET_ACTIVATION') return false
+    if (typeFilter && typeFilter !== 'BUDGET_ACTIVATION' && !n.notification_type.startsWith(typeFilter)) return false
     return true
   })
 
@@ -27,6 +28,7 @@ export default function NotificationsPage() {
   const getNotificationIcon = (type: string) => {
     if (type.startsWith('FF3')) return <FileText className="h-5 w-5 text-blue-600" />
     if (type.startsWith('FF4')) return <DollarSign className="h-5 w-5 text-green-600" />
+    if (type.startsWith('BUDGET_ACTIVATION') || type === 'BUDGET_ACTIVATED') return <BadgeCheck className="h-5 w-5 text-emerald-700" />
     return <Bell className="h-5 w-5 text-slate-600" />
   }
 
@@ -47,6 +49,9 @@ export default function NotificationsPage() {
     }
     if (notification.reference_type === 'FF4') {
       return `/dashboard/ff4/${notification.reference_id}`
+    }
+    if (notification.reference_type === 'BUDGET_ACTIVATION') {
+      return `/dashboard/budget/activation?batch=${encodeURIComponent(notification.reference_id)}`
     }
     if (notification.reference_type === 'BUDGET_REVISION') {
       return `/dashboard/budget/revisions?revision=${encodeURIComponent(notification.reference_id)}`
@@ -75,10 +80,10 @@ export default function NotificationsPage() {
     })
   }
 
-  const groupNotificationsByDate = (notifications: RealtimeNotification[]) => {
+  const groupNotificationsByDate = (items: RealtimeNotification[]) => {
     const groups: Record<string, RealtimeNotification[]> = {}
 
-    notifications.forEach(n => {
+    items.forEach(n => {
       const date = new Date(n.created_at)
       const today = new Date()
       const yesterday = new Date(today)
@@ -106,7 +111,6 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -136,7 +140,6 @@ export default function NotificationsPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div className="bg-white rounded-lg border border-slate-200 p-4">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
@@ -181,12 +184,12 @@ export default function NotificationsPage() {
               <option value="FF3">FF3 Requisitions</option>
               <option value="FF4">FF4 Expenses</option>
               <option value="BUDGET_REVISION">Budget Revisions</option>
+              <option value="BUDGET_ACTIVATION">Budget Activation</option>
             </select>
           </div>
         </div>
       </div>
 
-      {/* Notifications List */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-12">
@@ -218,7 +221,8 @@ export default function NotificationsPage() {
                       <div className="flex items-start gap-4">
                         <div className={`p-2 rounded-full ${
                           notification.notification_type.startsWith('FF3') ? 'bg-blue-100' :
-                          notification.notification_type.startsWith('FF4') ? 'bg-green-100' : 'bg-slate-100'
+                          notification.notification_type.startsWith('FF4') ? 'bg-green-100' :
+                          notification.reference_type === 'BUDGET_ACTIVATION' ? 'bg-emerald-100' : 'bg-slate-100'
                         }`}>
                           {getNotificationIcon(notification.notification_type)}
                         </div>
@@ -279,7 +283,6 @@ export default function NotificationsPage() {
         )}
       </div>
 
-      {/* Notification Settings Link */}
       <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-slate-900">Notification Preferences</p>
