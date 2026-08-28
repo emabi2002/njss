@@ -90,4 +90,9 @@ for (const label of ['Section', 'Category', 'Expense Item', 'Financial Year', 'L
   assert.ok(mappingPage.includes(label), `finance mapping page missing ${label}`)
 }
 
+const masterPage = read('app/dashboard/master/page.tsx')
+for (const token of ['saveFinancePostingMapping', 'Finance Code (optional)', 'Chart of Accounts (optional)', 'expenseCodeRegistryId: createdPosting.id']) {
+  assert.ok(masterPage.includes(token), `Posting Code builder missing canonical linkage token ${token}`)
+}
+
 console.log('approved Task 9 spec conformance checks passed')
