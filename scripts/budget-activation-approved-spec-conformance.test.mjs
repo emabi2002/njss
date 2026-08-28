@@ -27,6 +27,13 @@ for (const token of [
   'budget.activation.report',
 ]) assert.ok(m61.includes(token), `migration 061 missing ${token}`)
 
+assert.doesNotMatch(
+  m61,
+  /\b(?:u|creator|updater)\.(?:first_name|last_name)\b/i,
+  'migration 061 must use the deployed users.full_name schema rather than nonexistent first_name/last_name columns',
+)
+assert.match(m61, /\b(?:u|creator|updater)\.full_name\b/i, 'migration 061 must use users.full_name for audit/display names')
+
 for (const token of [
   'validation_fingerprint',
   'prepared_against_submission_updated_at',
