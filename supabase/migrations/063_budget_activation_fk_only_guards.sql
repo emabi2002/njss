@@ -408,22 +408,13 @@ SELECT
   s.status AS submission_status,
   s.approved_at,
   s.approved_by,
-  COALESCE(
-    NULLIF(trim(concat_ws(' ', approver.first_name, approver.last_name)), ''),
-    approver.email
-  ) AS approved_by_name,
+  COALESCE(NULLIF(trim(approver.full_name), ''), approver.email) AS approved_by_name,
   bd.code AS division_code,
   bd.name AS division_name,
   d.code AS department_code,
   d.name AS department_name,
-  COALESCE(
-    NULLIF(trim(concat_ws(' ', prep.first_name, prep.last_name)), ''),
-    prep.email
-  ) AS prepared_by_name,
-  COALESCE(
-    NULLIF(trim(concat_ws(' ', auth.first_name, auth.last_name)), ''),
-    auth.email
-  ) AS authorised_by_name,
+  COALESCE(NULLIF(trim(prep.full_name), ''), prep.email) AS prepared_by_name,
+  COALESCE(NULLIF(trim(auth.full_name), ''), auth.email) AS authorised_by_name,
   COALESCE(snapshot_counts.snapshot_count, 0)::INTEGER AS activation_snapshot_count,
   CASE
     WHEN bab.status = 'ACTIVATED' THEN 'ACTIVATED'
