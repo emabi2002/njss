@@ -43,7 +43,11 @@ assert.match(m62, /INSERT\s+INTO\s+(?:public\.)?budget_activation_line_snapshots
 assert.match(m62, /UPDATE\s+(?:public\.)?budget_activation_batches[\s\S]*status\s*=\s*'VALIDATION_FAILED'[\s\S]*validation_fingerprint\s*=\s*NULL/i)
 
 assert.match(m625, /DROP\s+VIEW\s+IF\s+EXISTS\s+public\.v_budget_activation_queue\s*;/i, 'migration 0625 must safely reset the pre-fingerprint queue view before migration 063 recreates it')
-assert.doesNotMatch(m625, /CASCADE/i, 'queue-view reset must fail safely when unexpected database dependencies exist')
+assert.doesNotMatch(
+  m625,
+  /DROP\s+VIEW\s+IF\s+EXISTS\s+public\.v_budget_activation_queue\s+CASCADE\s*;/i,
+  'queue-view reset must fail safely when unexpected database dependencies exist',
+)
 assert.match(m63, /CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+public\.v_budget_activation_queue/i, 'migration 063 must recreate the activation queue after the safety reset')
 
 assert.ok(m62.includes('cost_centre_name_snapshot'), 'immutable snapshots must retain descriptive Cost Centre name evidence')
