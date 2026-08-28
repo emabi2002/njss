@@ -7,6 +7,7 @@ assert.ok(fs.existsSync('supabase/migrations/056_operational_budget_activation_f
 assert.ok(fs.existsSync('supabase/migrations/057_finance_mapping_admin.sql'))
 assert.ok(fs.existsSync('supabase/migrations/058_budget_activation_organizational_guard.sql'))
 assert.ok(fs.existsSync('supabase/migrations/059_finance_posting_one_to_one_integrity.sql'))
+assert.ok(fs.existsSync('supabase/migrations/060_operational_allocation_organizational_guard.sql'))
 assert.ok(fs.existsSync('lib/budget-activation.ts'))
 assert.ok(fs.existsSync('app/api/budget-activation/route.ts'))
 assert.ok(fs.existsSync('app/dashboard/master/finance-mapping/page.tsx'))
@@ -36,6 +37,18 @@ for (const token of [
   'Duplicate active Finance Code mappings exist for a Posting Code',
 ]) {
   assert.ok(oneToOneMigration.includes(token), `one-to-one Finance mapping integrity missing ${token}`)
+}
+
+const allocationGuardMigration = read('supabase/migrations/060_operational_allocation_organizational_guard.sql')
+for (const token of [
+  'njss_guard_operational_allocation_org',
+  "source_module = 'EXCEL_BUDGET'",
+  'Operational allocation Department does not match approved budget organisational unit.',
+  'Operational allocation Section does not match approved budget organisational unit.',
+  'Operational allocation Cost Centre does not match approved budget organisational unit.',
+  'BEFORE INSERT OR UPDATE',
+]) {
+  assert.ok(allocationGuardMigration.includes(token), `operational allocation guard missing ${token}`)
 }
 
 const financeMappingPage = read('app/dashboard/master/finance-mapping/page.tsx')
