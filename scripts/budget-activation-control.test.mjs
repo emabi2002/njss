@@ -5,6 +5,7 @@ const read = (path) => fs.readFileSync(path, 'utf8')
 
 assert.ok(fs.existsSync('supabase/migrations/056_operational_budget_activation_finance_master_data.sql'))
 assert.ok(fs.existsSync('supabase/migrations/057_finance_mapping_admin.sql'))
+assert.ok(fs.existsSync('supabase/migrations/058_budget_activation_organizational_guard.sql'))
 assert.ok(fs.existsSync('lib/budget-activation.ts'))
 assert.ok(fs.existsSync('app/api/budget-activation/route.ts'))
 assert.ok(fs.existsSync('app/dashboard/master/finance-mapping/page.tsx'))
@@ -12,6 +13,18 @@ assert.ok(fs.existsSync('app/dashboard/master/finance-mapping/page.tsx'))
 const financeMappingMigration = read('supabase/migrations/057_finance_mapping_admin.sql')
 for (const token of ['njss_set_finance_posting_mapping', 'System Administrator', 'expense_ledger_id', 'chart_of_account_id', 'FINANCE_POSTING_MAPPING_UPDATED']) {
   assert.ok(financeMappingMigration.includes(token), `finance mapping migration missing ${token}`)
+}
+
+const organizationalGuardMigration = read('supabase/migrations/058_budget_activation_organizational_guard.sql')
+for (const token of [
+  'njss_guard_budget_activation_line_org',
+  'Mapped Department does not match the approved budget organisational unit.',
+  'Mapped Section does not match the approved budget organisational unit.',
+  'Mapped Cost Centre does not match the approved budget organisational unit.',
+  "budget.template.approve",
+  'Operational activation is a separate dual-control step',
+]) {
+  assert.ok(organizationalGuardMigration.includes(token), `organisational activation guard missing ${token}`)
 }
 
 const financeMappingPage = read('app/dashboard/master/finance-mapping/page.tsx')
