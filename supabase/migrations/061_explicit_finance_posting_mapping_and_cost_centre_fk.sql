@@ -1,6 +1,8 @@
 -- =============================================================================
 -- NJSS 061 — EXPLICIT FINANCE POSTING MAPPING & COST CENTRE FK
 -- Approved Task 9 conformance hardening.
+-- Production-schema compatible: users.full_name, text REVIEW/APPROVE actors,
+-- JSONB system settings, exact Cost Centre identifiers only.
 -- =============================================================================
 
 BEGIN;
@@ -13,7 +15,7 @@ CREATE INDEX IF NOT EXISTS idx_budget_divisions_cost_centre_id
   ON public.budget_divisions(cost_centre_id)
   WHERE cost_centre_id IS NOT NULL;
 
--- Backfill only exact active Cost Centre CODE matches. Never use the name field.
+-- Deterministic backfill by active exact CODE only. Never resolve by name.
 UPDATE public.budget_divisions bd
 SET cost_centre_id = (
       SELECT cc.id
@@ -38,8 +40,6 @@ WHERE bd.cost_centre_id IS NULL
       AND (bd.section_id IS NULL OR cc2.section_id IS NULL OR cc2.section_id = bd.section_id)
   );
 
--- Migration 020 historically populated cost_centre_id by code OR name. Fail if
--- a legacy FK contradicts a stored non-blank code or approved organisation.
 DO $$
 BEGIN
   IF EXISTS (
@@ -109,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_finance_posting_mappings_org
 COMMENT ON TABLE public.finance_posting_mappings IS
   'Task 9 canonical bridge from approved Finance Code to Posting Code, Chart of Accounts and exact Cost Centre. Initial budget activation must resolve through this table.';
 
--- 3. Deterministic reciprocal legacy backfill only.
+-- Backfill only reciprocal, active, fully scoped legacy mappings.
 INSERT INTO public.finance_posting_mappings (
   financial_year, expense_ledger_id, expense_code_registry_id,
   chart_of_account_id, cost_centre_id, department_id, section_id,
@@ -129,8 +129,7 @@ JOIN public.cost_centres cc
   ON cc.id = ecr.cost_centre_id AND cc.is_active = true
 JOIN public.departments d
   ON d.id = ecr.department_id AND d.is_active = true
-LEFT JOIN public.sections sec
-  ON sec.id = ecr.section_id
+LEFT JOIN public.sections sec ON sec.id = ecr.section_id
 WHERE el.is_active = true
   AND el.is_posting = true
   AND ecr.is_active = true
@@ -142,7 +141,7 @@ WHERE el.is_active = true
   AND (ecr.section_id IS NULL OR cc.section_id IS NULL OR cc.section_id = ecr.section_id)
 ON CONFLICT DO NOTHING;
 
--- 4. Exact-year-first canonical resolver.
+-- 3. Exact-year-first canonical resolver.
 CREATE OR REPLACE FUNCTION public.njss_resolve_finance_posting_mapping(
   p_expense_ledger_id UUID,
   p_financial_year INTEGER,
@@ -164,7 +163,8 @@ BEGIN
   END IF;
 
   SELECT EXISTS (
-    SELECT 1 FROM public.finance_posting_mappings fpm
+    SELECT 1
+    FROM public.finance_posting_mappings fpm
     WHERE fpm.is_active = true
       AND fpm.expense_ledger_id = p_expense_ledger_id
       AND fpm.cost_centre_id = p_cost_centre_id
@@ -204,7 +204,7 @@ $$;
 REVOKE ALL ON FUNCTION public.njss_resolve_finance_posting_mapping(UUID,INTEGER,UUID)
   FROM PUBLIC, anon, authenticated;
 
--- 5. System Administrator-only mapping maintenance.
+-- 4. System Administrator-only canonical mapping maintenance.
 CREATE OR REPLACE FUNCTION public.njss_upsert_finance_posting_mapping(
   p_mapping_id UUID,
   p_financial_year INTEGER,
@@ -279,7 +279,10 @@ BEGIN
     RAISE EXCEPTION 'Cost Centre must be active.';
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM public.departments d WHERE d.id = p_department_id AND d.is_active = true) THEN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.departments d
+    WHERE d.id = p_department_id AND d.is_active = true
+  ) THEN
     RAISE EXCEPTION 'Department must be active.';
   END IF;
   IF p_section_id IS NOT NULL AND NOT EXISTS (
@@ -316,7 +319,8 @@ BEGIN
   END IF;
 
   IF p_mapping_id IS NOT NULL THEN
-    SELECT * INTO v_existing FROM public.finance_posting_mappings
+    SELECT * INTO v_existing
+    FROM public.finance_posting_mappings
     WHERE id = p_mapping_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Finance posting mapping not found.'; END IF;
   END IF;
@@ -435,7 +439,8 @@ BEGIN
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
 
-  SELECT * INTO v_existing FROM public.finance_posting_mappings
+  SELECT * INTO v_existing
+  FROM public.finance_posting_mappings
   WHERE id = p_mapping_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Finance posting mapping not found.'; END IF;
   IF v_existing.is_active IS DISTINCT FROM true THEN
@@ -469,7 +474,7 @@ REVOKE ALL ON FUNCTION public.njss_deactivate_finance_posting_mapping(UUID,TEXT)
 GRANT EXECUTE ON FUNCTION public.njss_deactivate_finance_posting_mapping(UUID,TEXT)
   TO authenticated;
 
--- 6. RLS and administration read model.
+-- 5. RLS and administration read model.
 ALTER TABLE public.finance_posting_mappings ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS finance_posting_mappings_select_authorised ON public.finance_posting_mappings;
 CREATE POLICY finance_posting_mappings_select_authorised
@@ -551,8 +556,7 @@ LEFT JOIN public.users updater ON updater.id = fpm.updated_by;
 REVOKE ALL ON public.v_finance_posting_mapping_admin FROM PUBLIC, anon;
 GRANT SELECT ON public.v_finance_posting_mapping_admin TO authenticated;
 
--- 7. Explicit reporting permission for Registrar. System Administrator already
--- receives this capability through the protected global `all` permission.
+-- 6. Explicit reporting permission for Registrar.
 INSERT INTO public.permissions (code, module_code, menu_code, action, label, description, is_active)
 VALUES (
   'budget.activation.report', 'budget', 'budget.activation', 'report',
@@ -574,10 +578,156 @@ FROM public.roles r
 WHERE r.name = 'Registrar' AND r.is_active = true
 ON CONFLICT (role_id, permission) DO UPDATE SET is_allowed = true;
 
+-- 7. Deployed NJSS stores REVIEW/APPROVE actor labels as text, while
+-- SUBMIT/REJECT actor fields are UUIDs. Preserve that schema deliberately.
+CREATE OR REPLACE FUNCTION public.transition_divisional_budget_submission(
+  p_submission_id UUID,
+  p_action TEXT,
+  p_comments TEXT DEFAULT NULL,
+  p_user_email TEXT DEFAULT NULL
+)
+RETURNS public.divisional_budget_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_old public.divisional_budget_submissions;
+  v_new_status VARCHAR(40);
+  v_out public.divisional_budget_submissions;
+  v_user_id UUID;
+  v_actor_email TEXT;
+  v_actor_label TEXT;
+BEGIN
+  SELECT * INTO v_old
+  FROM public.divisional_budget_submissions
+  WHERE id = p_submission_id
+  FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Budget submission not found'; END IF;
+
+  v_user_id := public.fn_current_app_user_id();
+  IF v_user_id IS NULL AND COALESCE(trim(p_user_email), '') <> '' THEN
+    SELECT id INTO v_user_id
+    FROM public.users
+    WHERE lower(email) = lower(trim(p_user_email)) AND is_active = true
+    LIMIT 1;
+  END IF;
+
+  IF v_user_id IS NOT NULL THEN
+    SELECT u.email, COALESCE(NULLIF(trim(u.full_name), ''), u.email)
+    INTO v_actor_email, v_actor_label
+    FROM public.users u
+    WHERE u.id = v_user_id AND u.is_active = true;
+  END IF;
+  v_actor_email := COALESCE(v_actor_email, NULLIF(trim(p_user_email), ''));
+  v_actor_label := COALESCE(v_actor_label, v_actor_email);
+
+  IF UPPER(p_action) = 'SUBMIT' AND v_old.status NOT IN ('DRAFT') THEN RAISE EXCEPTION 'Only DRAFT budgets can be submitted'; END IF;
+  IF UPPER(p_action) = 'RESUBMIT' AND v_old.status NOT IN ('RETURNED') THEN RAISE EXCEPTION 'Only RETURNED budgets can be resubmitted'; END IF;
+  IF UPPER(p_action) = 'RETURN' AND v_old.status NOT IN ('SUBMITTED','RESUBMITTED') THEN RAISE EXCEPTION 'Only submitted budgets can be returned'; END IF;
+  IF UPPER(p_action) = 'RETURN' AND COALESCE(trim(p_comments), '') = '' THEN RAISE EXCEPTION 'Return comments/reason are required'; END IF;
+  IF UPPER(p_action) = 'REVIEW' AND v_old.status NOT IN ('SUBMITTED','RESUBMITTED') THEN RAISE EXCEPTION 'Only SUBMITTED or RESUBMITTED budgets can be reviewed'; END IF;
+  IF UPPER(p_action) = 'APPROVE' AND v_old.status <> 'REVIEWED' THEN RAISE EXCEPTION 'Only REVIEWED budgets can be approved'; END IF;
+
+  v_new_status := CASE UPPER(p_action)
+    WHEN 'SUBMIT' THEN 'SUBMITTED'
+    WHEN 'RESUBMIT' THEN 'RESUBMITTED'
+    WHEN 'RETURN' THEN 'RETURNED'
+    WHEN 'REVIEW' THEN 'REVIEWED'
+    WHEN 'APPROVE' THEN 'APPROVED'
+    WHEN 'REJECT' THEN 'REJECTED'
+    WHEN 'ARCHIVE' THEN 'ARCHIVED'
+    ELSE NULL
+  END;
+  IF v_new_status IS NULL THEN RAISE EXCEPTION 'Unsupported budget workflow action: %', p_action; END IF;
+
+  IF UPPER(p_action) IN ('SUBMIT','RESUBMIT','APPROVE') THEN
+    PERFORM public.validate_divisional_budget_submission(p_submission_id);
+    SELECT * INTO v_old FROM public.divisional_budget_submissions WHERE id = p_submission_id FOR UPDATE;
+  END IF;
+
+  PERFORM set_config('njss.budget_workflow', 'on', true);
+
+  UPDATE public.divisional_budget_submissions
+  SET status = v_new_status,
+      validation_status = CASE WHEN ABS(COALESCE(unallocated_variance,0)) <= 0.009 THEN 'VALID' ELSE 'VARIANCE' END,
+      is_locked = v_new_status IN ('SUBMITTED','RESUBMITTED','REVIEWED','APPROVED','ARCHIVED'),
+      submitted_by = CASE WHEN UPPER(p_action) IN ('SUBMIT','RESUBMIT') THEN COALESCE(v_user_id, submitted_by) ELSE submitted_by END,
+      reviewed_by = CASE WHEN UPPER(p_action) = 'REVIEW' THEN COALESCE(v_actor_label, reviewed_by) ELSE reviewed_by END,
+      approved_by = CASE WHEN UPPER(p_action) = 'APPROVE' THEN COALESCE(v_actor_label, approved_by) ELSE approved_by END,
+      rejected_by = CASE WHEN UPPER(p_action) = 'REJECT' THEN COALESCE(v_user_id, rejected_by) ELSE rejected_by END,
+      submitted_at = CASE WHEN UPPER(p_action) IN ('SUBMIT','RESUBMIT') THEN NOW() ELSE submitted_at END,
+      reviewed_at = CASE WHEN UPPER(p_action) = 'REVIEW' THEN NOW() ELSE reviewed_at END,
+      approved_at = CASE WHEN UPPER(p_action) = 'APPROVE' THEN NOW() ELSE approved_at END,
+      rejected_at = CASE WHEN UPPER(p_action) = 'REJECT' THEN NOW() ELSE rejected_at END,
+      return_reason = CASE WHEN UPPER(p_action) = 'RETURN' THEN p_comments ELSE return_reason END,
+      approval_comments = CASE WHEN UPPER(p_action) IN ('REVIEW','APPROVE','REJECT') THEN p_comments ELSE approval_comments END,
+      updated_at = NOW()
+  WHERE id = p_submission_id
+  RETURNING * INTO v_out;
+
+  IF UPPER(p_action) = 'APPROVE' THEN
+    INSERT INTO public.budget_activation_batches (
+      submission_id, financial_year, department_id, budget_division_id,
+      status, approved_line_count, approved_total, mapped_line_count,
+      unmapped_line_count, activation_total, variance, validation_snapshot,
+      created_at, updated_at
+    )
+    SELECT
+      s.id, s.budget_year, s.department_id, s.division_id,
+      'DRAFT_MAPPING', COUNT(l.id), COALESCE(SUM(l.annual_estimate),0),
+      0, COUNT(l.id), 0, COALESCE(SUM(l.annual_estimate),0),
+      jsonb_build_object(
+        'approval_status', s.status,
+        'approved_at', s.approved_at,
+        'approved_total', COALESCE(SUM(l.annual_estimate),0),
+        'approved_line_count', COUNT(l.id)
+      ),
+      NOW(), NOW()
+    FROM public.divisional_budget_submissions s
+    JOIN public.divisional_budget_lines l ON l.submission_id = s.id
+    WHERE s.id = p_submission_id
+    GROUP BY s.id, s.budget_year, s.department_id, s.division_id, s.status, s.approved_at
+    ON CONFLICT (submission_id) DO UPDATE SET
+      financial_year = EXCLUDED.financial_year,
+      department_id = EXCLUDED.department_id,
+      budget_division_id = EXCLUDED.budget_division_id,
+      status = CASE WHEN public.budget_activation_batches.status = 'ACTIVATED' THEN 'ACTIVATED' ELSE 'DRAFT_MAPPING' END,
+      approved_line_count = EXCLUDED.approved_line_count,
+      approved_total = EXCLUDED.approved_total,
+      mapped_line_count = CASE WHEN public.budget_activation_batches.status = 'ACTIVATED' THEN public.budget_activation_batches.mapped_line_count ELSE 0 END,
+      unmapped_line_count = CASE WHEN public.budget_activation_batches.status = 'ACTIVATED' THEN public.budget_activation_batches.unmapped_line_count ELSE EXCLUDED.unmapped_line_count END,
+      activation_total = CASE WHEN public.budget_activation_batches.status = 'ACTIVATED' THEN public.budget_activation_batches.activation_total ELSE 0 END,
+      variance = CASE WHEN public.budget_activation_batches.status = 'ACTIVATED' THEN public.budget_activation_batches.variance ELSE EXCLUDED.approved_total END,
+      validation_snapshot = CASE WHEN public.budget_activation_batches.status = 'ACTIVATED' THEN public.budget_activation_batches.validation_snapshot ELSE EXCLUDED.validation_snapshot END,
+      updated_at = NOW();
+  END IF;
+
+  INSERT INTO public.budget_workflow_history (
+    submission_id, from_status, to_status, action, comments, changed_by, changed_by_email
+  ) VALUES (
+    p_submission_id, v_old.status, v_new_status, UPPER(p_action), p_comments, v_user_id, v_actor_email
+  );
+
+  PERFORM public.log_audit_event(
+    v_user_id, v_actor_email, COALESCE(v_actor_label, v_actor_email, 'System'),
+    'BUDGET_' || UPPER(p_action), 'BUDGET_SUBMISSION', p_submission_id, v_out.submission_number,
+    jsonb_build_object('status', v_old.status),
+    jsonb_build_object('status', v_new_status),
+    jsonb_build_object('old_status', v_old.status, 'new_status', v_new_status, 'activation_required', UPPER(p_action) = 'APPROVE'),
+    NULL
+  );
+
+  RETURN v_out;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.transition_divisional_budget_submission(UUID,TEXT,TEXT,TEXT) TO authenticated;
+
+-- 8. JSONB migration marker for deployed NJSS system_settings schema.
 INSERT INTO public.system_settings (setting_key, setting_value, description)
 VALUES (
   'latest_database_migration',
-  '061_explicit_finance_posting_mapping_and_cost_centre_fk',
+  to_jsonb('061_explicit_finance_posting_mapping_and_cost_centre_fk'::TEXT),
   'Latest applied NJSS migration identifier.'
 )
 ON CONFLICT (setting_key) DO UPDATE SET
