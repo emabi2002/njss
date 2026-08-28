@@ -16,6 +16,8 @@ AS $$
 DECLARE
   v_submission_id UUID;
   v_division_id UUID;
+  v_financial_year INTEGER;
+  v_submission_status VARCHAR(40);
   v_submission_department_id UUID;
   v_division_department_id UUID;
   v_division_code_department_id UUID;
@@ -42,6 +44,8 @@ BEGIN
   SELECT
     s.id,
     s.division_id,
+    s.budget_year,
+    s.status,
     s.department_id,
     bd.department_id,
     code_department.id,
@@ -57,6 +61,8 @@ BEGIN
   INTO
     v_submission_id,
     v_division_id,
+    v_financial_year,
+    v_submission_status,
     v_submission_department_id,
     v_division_department_id,
     v_division_code_department_id,
@@ -90,6 +96,14 @@ BEGIN
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Operational allocation source line or active Finance mapping is no longer valid.';
+  END IF;
+
+  IF v_submission_status IS DISTINCT FROM 'APPROVED' THEN
+    RAISE EXCEPTION 'Operational allocation source budget is no longer APPROVED.';
+  END IF;
+
+  IF NEW.financial_year IS DISTINCT FROM v_financial_year THEN
+    RAISE EXCEPTION 'Operational allocation financial year does not match approved budget.';
   END IF;
 
   v_expected_department_id := COALESCE(
