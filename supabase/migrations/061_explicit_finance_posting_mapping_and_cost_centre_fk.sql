@@ -236,7 +236,7 @@ BEGIN
     RAISE EXCEPTION 'Only a System Administrator may maintain canonical Finance posting mappings.';
   END IF;
 
-  SELECT u.email, COALESCE(NULLIF(trim(concat_ws(' ', u.first_name, u.last_name)), ''), u.email)
+  SELECT u.email, COALESCE(NULLIF(trim(u.full_name), ''), u.email)
   INTO v_user_email, v_user_name
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
@@ -430,7 +430,7 @@ BEGIN
     RAISE EXCEPTION 'Mapping and deactivation reason are required.';
   END IF;
 
-  SELECT u.email, COALESCE(NULLIF(trim(concat_ws(' ', u.first_name, u.last_name)), ''), u.email)
+  SELECT u.email, COALESCE(NULLIF(trim(u.full_name), ''), u.email)
   INTO v_user_email, v_user_name
   FROM public.users u
   WHERE u.id = v_user_id AND u.is_active = true;
@@ -515,10 +515,10 @@ SELECT
   fpm.is_active,
   fpm.mapping_notes,
   fpm.created_by,
-  COALESCE(NULLIF(trim(concat_ws(' ', creator.first_name, creator.last_name)), ''), creator.email) AS created_by_name,
+  COALESCE(NULLIF(trim(creator.full_name), ''), creator.email) AS created_by_name,
   fpm.created_at,
   fpm.updated_by,
-  COALESCE(NULLIF(trim(concat_ws(' ', updater.first_name, updater.last_name)), ''), updater.email) AS updated_by_name,
+  COALESCE(NULLIF(trim(updater.full_name), ''), updater.email) AS updated_by_name,
   fpm.updated_at,
   CASE
     WHEN fpm.is_active IS DISTINCT FROM true THEN 'INACTIVE'
