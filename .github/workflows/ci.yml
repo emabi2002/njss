@@ -63,6 +63,9 @@ jobs:
       - name: Budget activation control regression checks
         run: node scripts/budget-activation-control.test.mjs
 
+      - name: Approved Task 9 spec conformance checks
+        run: node scripts/budget-activation-approved-spec-conformance.test.mjs
+
       - name: Lint
         run: bun run lint
 
