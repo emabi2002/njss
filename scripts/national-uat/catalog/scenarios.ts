@@ -100,8 +100,8 @@ export const TRANSACTION_SCENARIOS: readonly TransactionScenario[] = [
   {
     code: 'UAT-TXN-MHG',
     locationCode: 'WHP-MHG',
-    description: 'Courthouse maintenance, fuel and operational materials including an attempted budget overrun.',
-    financeCodes: ['233-01', '225-01', '224-01'],
+    description: 'Courthouse maintenance, fuel, vehicle operating costs and operational materials including an attempted budget overrun.',
+    financeCodes: ['233-01', '225-01', '225-02', '224-01'],
     expectedWorkflowCoverage: ['FF3', 'BUDGET_OVERRUN_REJECTION'],
   },
   {
