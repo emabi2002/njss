@@ -81,6 +81,8 @@ for (const token of [
   'ENABLE TRIGGER',
   'afterResetBeforeCommit',
   'Refusing committed reset without an atomic retained-user remap',
+  "set_config('njss.budget_workflow', 'on', true)",
+  "set_config('njss.budget_revision_workflow', 'on', true)",
 ]) assert.ok(resetSource.includes(token), `reset execution source missing ${token}`)
 
 assert.ok(!/TRUNCATE\s+/i.test(safetySource), 'reset must not use TRUNCATE')
