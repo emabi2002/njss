@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { FUNDING_SOURCES, SUPPLIER_SCENARIOS, TRANSACTION_SCENARIOS } from './catalog/scenarios.ts'
 import { buildNationalMasterPlan, RETAINED_USER_ASSIGNMENTS } from './seed-master.ts'
 import { buildFinanceMasterPlan } from './seed-finance.ts'
@@ -9,6 +10,7 @@ const organisation = buildNationalMasterPlan()
 const finance = buildFinanceMasterPlan(organisation)
 const budgets = buildBudgetSeedPlan(organisation, finance)
 const plan = buildTransactionSeedPlan(organisation, finance, budgets)
+const transactionSeederSource = readFileSync(new URL('./seed-transactions.ts', import.meta.url), 'utf8')
 
 assert.equal(plan.fundingSources.length, FUNDING_SOURCES.length)
 assert.equal(plan.suppliers.length, SUPPLIER_SCENARIOS.length)
@@ -22,6 +24,27 @@ assert.equal(authorityTypeForFundingSource('DEVELOPMENT_PARTNER'), 'DEVELOPMENT_
 assert.equal(authorityTypeForFundingSource('SPECIAL_PURPOSE'), 'PROJECT_FUNDING')
 assert.equal(authorityTypeForFundingSource('OTHER'), 'OTHER')
 assert.throws(() => authorityTypeForFundingSource('UNSUPPORTED_UAT_TYPE'), /Unsupported funding source type/i)
+
+assert.doesNotMatch(
+  transactionSeederSource,
+  /insert\s+into\s+public\.ff3_items\s*\([^)]*\btotal_amount\b/is,
+  'FF3 UAT seeding must not write the generated ff3_items.total_amount column',
+)
+assert.match(
+  transactionSeederSource,
+  /quotation_amount,is_selected,supplier_id[\s\S]*?values\s*\([^)]*?\$5,false,\$6/is,
+  'selected FF3 quotations must first be inserted unselected so the quotation row exists before the header FK is updated',
+)
+assert.match(
+  transactionSeederSource,
+  /update\s+public\.ff3_quotations\s+set\s+is_selected=true\s+where\s+id=\$1/i,
+  'FF3 quotation selection must be performed as a second statement after insertion',
+)
+assert.doesNotMatch(
+  transactionSeederSource,
+  /update\s+public\.ff3_headers\s+set\s+selected_quotation_id=\$1/i,
+  'the quotation selection trigger must own the selected_quotation_id header update',
+)
 
 assert.equal(plan.ff3.filter((row) => row.targetStatus === 'COMMITTED').length, 20)
 assert.equal(plan.ff3.filter((row) => row.targetStatus === 'SUBMITTED').length, 4)
