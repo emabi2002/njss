@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import assert from 'node:assert/strict'
 
 const layoutPath = 'app/dashboard/layout.tsx'
+const authContextPath = 'contexts/AuthContext.tsx'
 const configPath = 'lib/rbac/config.ts'
 const clientPath = 'lib/rbac/client.ts'
 const ff3ListPath = 'app/dashboard/ff3/page.tsx'
@@ -9,11 +10,12 @@ const ff3DetailPath = 'app/dashboard/ff3/[ff3_number]/page.tsx'
 const ff4ListPath = 'app/dashboard/ff4/page.tsx'
 const ff4DetailPath = 'app/dashboard/ff4/[ff4_number]/page.tsx'
 
-for (const path of [layoutPath, configPath, clientPath, ff3ListPath, ff3DetailPath, ff4ListPath, ff4DetailPath]) {
+for (const path of [layoutPath, authContextPath, configPath, clientPath, ff3ListPath, ff3DetailPath, ff4ListPath, ff4DetailPath]) {
   assert.ok(fs.existsSync(path), `UAT readiness source missing: ${path}`)
 }
 
 const layout = fs.readFileSync(layoutPath, 'utf8')
+const authContext = fs.readFileSync(authContextPath, 'utf8')
 const config = fs.readFileSync(configPath, 'utf8')
 const client = fs.readFileSync(clientPath, 'utf8')
 const ff3List = fs.readFileSync(ff3ListPath, 'utf8')
@@ -33,9 +35,18 @@ assert.match(
   'RBAC route map must explicitly allow the authenticated no-access landing page',
 )
 
-// Dashboard layout must enforce route permissions in addition to menu filtering.
+// Auth must expose an explicit readiness boundary so route authorization never runs
+// against the temporary session profile before database-backed permissions are loaded.
+assert.match(authContext, /accessReady:\s*boolean/, 'auth context must expose RBAC access readiness')
+assert.match(authContext, /const \[accessReady,\s*setAccessReady\]\s*=\s*useState\(false\)/, 'RBAC access readiness must start false')
+assert.match(authContext, /setAccessReady\(false\)/, 'RBAC access loading must explicitly reset readiness')
+assert.match(authContext, /setAccessReady\(true\)/, 'RBAC access loading must explicitly mark completion')
+
+// Dashboard layout must enforce route permissions in addition to menu filtering, but
+// only after the effective database-backed RBAC context is ready.
 assert.match(layout, /canAccessRoute/, 'dashboard layout must import/use canAccessRoute')
 assert.match(layout, /permissions/, 'dashboard layout must use effective RBAC permissions')
+assert.match(layout, /accessReady/, 'dashboard route guard must wait for RBAC access readiness')
 assert.match(layout, /pathname\s*!==\s*["']\/dashboard\/no-access["']/, 'route guard must exempt the no-access landing page')
 assert.match(layout, /!canAccessRoute\(permissions,\s*pathname\)/, 'dashboard layout must deny unauthorized direct URLs')
 assert.match(layout, /router\.replace\(["']\/dashboard\/no-access["']\)/, 'unauthorized dashboard routes must redirect to no-access')
