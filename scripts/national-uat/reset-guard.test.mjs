@@ -6,6 +6,7 @@ import {
   NULLABLE_CYCLE_DETACHMENTS,
   topologicalPurgeOrder,
 } from './reset.ts'
+import { APPEND_ONLY_PROTECTED_TABLES } from './preflight.ts'
 
 const protectedSet = new Set(PROTECTED_TABLES)
 const rebuildableSet = new Set(REBUILDABLE_TABLES)
@@ -30,6 +31,7 @@ for (const required of [
 for (const table of protectedSet) {
   assert.ok(!rebuildableSet.has(table), `protected/rebuildable overlap: ${table}`)
 }
+assert.ok(APPEND_ONLY_PROTECTED_TABLES.has('audit_logs'), 'audit_logs must be protected as append-only history')
 
 assert.ok(NULLABLE_CYCLE_DETACHMENTS.some((item) => item.table === 'expense_ledger' && item.column === 'expense_code_registry_id'))
 assert.ok(NULLABLE_CYCLE_DETACHMENTS.some((item) => item.table === 'expense_code_registry' && item.column === 'expense_ledger_id'))
@@ -59,21 +61,27 @@ assert.throws(
 for (const file of ['scripts/national-uat/preflight.ts', 'scripts/national-uat/reset.ts']) {
   assert.ok(fs.existsSync(file), `missing ${file}`)
 }
-const source = fs.readFileSync('scripts/national-uat/reset.ts', 'utf8')
+const resetSource = fs.readFileSync('scripts/national-uat/reset.ts', 'utf8')
+const preflightSource = fs.readFileSync('scripts/national-uat/preflight.ts', 'utf8')
+const safetySource = `${preflightSource}\n${resetSource}`
+
 for (const token of [
-  '--execute-reset',
   'njss_backup_full_snapshot',
   'system_backup_registry',
+]) assert.ok(safetySource.includes(token), `combined reset safety layer missing ${token}`)
+
+for (const token of [
+  '--execute-reset',
   'BEGIN',
   'ROLLBACK',
   'COMMIT',
   'UPDATE public.users SET department_id = NULL, section_id = NULL',
-]) assert.ok(source.includes(token), `reset safety source missing ${token}`)
+]) assert.ok(resetSource.includes(token), `reset execution source missing ${token}`)
 
-assert.ok(!/TRUNCATE\s+/i.test(source), 'reset must not use TRUNCATE')
-assert.ok(!/DELETE\s+FROM\s+public\.users/i.test(source), 'reset must never delete users')
-assert.ok(!/DELETE\s+FROM\s+public\.roles/i.test(source), 'reset must never delete roles')
-assert.ok(!/DELETE\s+FROM\s+public\.permissions/i.test(source), 'reset must never delete permissions')
-assert.ok(!/DELETE\s+FROM\s+public\.audit_logs/i.test(source), 'reset must preserve audit_logs')
+assert.ok(!/TRUNCATE\s+/i.test(safetySource), 'reset must not use TRUNCATE')
+assert.ok(!/DELETE\s+FROM\s+public\.users/i.test(resetSource), 'reset must never delete users')
+assert.ok(!/DELETE\s+FROM\s+public\.roles/i.test(resetSource), 'reset must never delete roles')
+assert.ok(!/DELETE\s+FROM\s+public\.permissions/i.test(resetSource), 'reset must never delete permissions')
+assert.ok(!/DELETE\s+FROM\s+public\.audit_logs/i.test(resetSource), 'reset must preserve audit_logs')
 
 console.log('national UAT reset safety checks passed')
