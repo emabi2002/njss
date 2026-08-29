@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { FUNDING_SOURCES, SUPPLIERS, TRANSACTION_SCENARIOS } from './catalog/scenarios.ts'
+import { FUNDING_SOURCES, SUPPLIER_SCENARIOS, TRANSACTION_SCENARIOS } from './catalog/scenarios.ts'
 import { buildNationalMasterPlan, RETAINED_USER_ASSIGNMENTS } from './seed-master.ts'
 import { buildFinanceMasterPlan } from './seed-finance.ts'
 import { buildBudgetSeedPlan } from './seed-budgets.ts'
@@ -11,7 +11,7 @@ const budgets = buildBudgetSeedPlan(organisation, finance)
 const plan = buildTransactionSeedPlan(organisation, finance, budgets)
 
 assert.equal(plan.fundingSources.length, FUNDING_SOURCES.length)
-assert.equal(plan.suppliers.length, SUPPLIERS.length)
+assert.equal(plan.suppliers.length, SUPPLIER_SCENARIOS.length)
 assert.equal(plan.ff3.length, TRANSACTION_SCENARIOS.length * 4)
 assert.equal(plan.ff4.length, TRANSACTION_SCENARIOS.length * 2)
 assert.equal(plan.revisions.length, TRANSACTION_SCENARIOS.length)
