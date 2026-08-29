@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Client } from 'pg'
-import { buildTransactionSeedPlan } from './catalog/scenarios'
 import { DATASET_VERSION, runIdFor } from './constants'
 import { connectNjss, withTransaction } from './db'
 import {
@@ -17,7 +16,7 @@ import { dryRunReset, executeReset } from './reset'
 import { buildBudgetSeedPlan, seedAndActivateNationalBudgets } from './seed-budgets'
 import { buildFinanceMasterPlan, seedFinanceMasters } from './seed-finance'
 import { buildNationalMasterPlan, seedNationalOrganisation } from './seed-master'
-import { seedNationalTransactions } from './seed-transactions'
+import { buildTransactionSeedPlan, seedNationalTransactions } from './seed-transactions'
 import {
   validateLiveDatabase,
   validateReplacementPlans,
@@ -141,18 +140,14 @@ async function appendPhaseEvent(
   const notes = parseNotes(run.notes, runId)
   notes.phaseHistory.push({ phase, outcome, at: isoNow(), ...(message ? { message } : {}) })
   await client.query(
-    `update public.uat_seed_runs
-     set notes = $2, updated_at = now()
-     where run_id = $1`,
+    `update public.uat_seed_runs set notes = $2, updated_at = now() where run_id = $1`,
     [runId, JSON.stringify(notes)],
   )
 }
 
 async function setRunStatus(client: Client, runId: string, status: SeedRunStatus): Promise<void> {
   await client.query(
-    `update public.uat_seed_runs
-     set status = $2, updated_at = now()
-     where run_id = $1`,
+    `update public.uat_seed_runs set status = $2, updated_at = now() where run_id = $1`,
     [runId, status],
   )
 }
@@ -191,9 +186,7 @@ function buildReplacementPlans() {
 async function requirePreflightPassed(client: Client, runId: string): Promise<SeedRunRow> {
   const run = await loadRun(client, runId)
   const notes = parseNotes(run.notes, runId)
-  if (!phaseCompleted(notes, 'PREFLIGHT')) {
-    throw new Error(`Run ${runId} has not completed PREFLIGHT.`)
-  }
+  if (!phaseCompleted(notes, 'PREFLIGHT')) throw new Error(`Run ${runId} has not completed PREFLIGHT.`)
   if (!['PREFLIGHT_PASSED', 'FAILED'].includes(run.status)) {
     throw new Error(`Run ${runId} is in status ${run.status}; a preflight-stage run is required.`)
   }
@@ -206,9 +199,7 @@ async function requireDryRunPassed(client: Client, runId: string): Promise<SeedR
   if (!phaseCompleted(notes, 'PREFLIGHT') || !phaseCompleted(notes, 'DRY_RUN_RESET')) {
     throw new Error(`Run ${runId} must complete PREFLIGHT and DRY_RUN_RESET before destructive reset.`)
   }
-  if (phaseCompleted(notes, 'EXECUTE_RESET')) {
-    throw new Error(`Run ${runId} has already completed EXECUTE_RESET.`)
-  }
+  if (phaseCompleted(notes, 'EXECUTE_RESET')) throw new Error(`Run ${runId} has already completed EXECUTE_RESET.`)
   return run
 }
 
@@ -245,7 +236,6 @@ function assertValidationReportPassed(report: ValidationReport): void {
   const reconciliationFailures = Object.entries(report.reconciliation)
     .filter(([, value]) => value !== null && value !== 0)
     .map(([key, value]) => `${key}=${value}`)
-
   if (failedPositive.length > 0 || failedNegative.length > 0 || reconciliationFailures.length > 0) {
     throw new Error(
       `National UAT validation failed: positive=${failedPositive.map((row) => row.id).join(',') || 'none'}; ` +
@@ -286,9 +276,7 @@ function writeValidationEvidence(runId: string, report: ValidationReport): void 
 
 function parseCli(argv: readonly string[]): { mode: CliMode; runId: string } {
   const modes = argv.filter((value): value is CliMode => MODES.includes(value as CliMode))
-  if (modes.length !== 1) {
-    throw new Error(`Specify exactly one mode: ${MODES.join(' | ')}`)
-  }
+  if (modes.length !== 1) throw new Error(`Specify exactly one mode: ${MODES.join(' | ')}`)
   const runIdIndex = argv.indexOf('--run-id')
   const runId = runIdIndex >= 0 ? argv[runIdIndex + 1] : runIdFor(new Date())
   if (!runId?.trim()) throw new Error('--run-id requires a non-empty value')
@@ -304,33 +292,28 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     switch (mode) {
       case '--preflight': {
         const existing = await ensureRun(client, runId)
-        const existingNotes = parseNotes(existing.notes, runId)
-        if (phaseCompleted(existingNotes, 'EXECUTE_RESET')) {
+        if (phaseCompleted(parseNotes(existing.notes, runId), 'EXECUTE_RESET')) {
           throw new Error(`Run ${runId} has already executed reset; use a new --run-id for a new rebuild.`)
         }
-
         currentPhase = 'PREFLIGHT'
+        await appendPhaseEvent(client, runId, 'PREFLIGHT', 'STARTED')
         await assertRetainedUserShape(client)
         const protectedManifest = await captureProtectedManifest(client)
         const preResetCounts = await captureTableCounts(client)
         const foreignKeys = await captureRebuildableForeignKeys(client)
         const plans = buildReplacementPlans()
-
         const run = await loadRun(client, runId)
         const notes = parseNotes(run.notes, runId)
         notes.phaseHistory.push({
           phase: 'PREFLIGHT',
           outcome: 'COMPLETED',
           at: isoNow(),
-          message: `Replacement plan validated: ${plans.organisation.locations.length} Court Locations, ${plans.finance.contexts.length} finance contexts, ${foreignKeys.length} rebuildable FK edges.`,
+          message: `Validated ${plans.organisation.locations.length} Court Locations, ${plans.finance.contexts.length} finance contexts and ${foreignKeys.length} rebuildable FK edges.`,
         })
         await client.query(
           `update public.uat_seed_runs
-           set status = 'PREFLIGHT_PASSED',
-               protected_manifest = $2::jsonb,
-               pre_reset_counts = $3::jsonb,
-               notes = $4,
-               updated_at = now()
+           set status = 'PREFLIGHT_PASSED', protected_manifest = $2::jsonb,
+               pre_reset_counts = $3::jsonb, notes = $4, updated_at = now()
            where run_id = $1`,
           [runId, JSON.stringify(protectedManifest), JSON.stringify(preResetCounts), JSON.stringify(notes)],
         )
@@ -339,10 +322,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       }
 
       case '--dry-run-reset': {
-        currentPhase = 'DRY_RUN_RESET'
         await requirePreflightPassed(client, runId)
-        const result = await dryRunReset(client)
         currentPhase = 'BACKUP'
+        await appendPhaseEvent(client, runId, 'BACKUP', 'STARTED')
+        currentPhase = 'DRY_RUN_RESET'
+        await appendPhaseEvent(client, runId, 'DRY_RUN_RESET', 'STARTED')
+        const result = await dryRunReset(client)
         await client.query(
           `update public.uat_seed_runs
            set backup_id = $2, pre_reset_counts = $3::jsonb, updated_at = now()
@@ -350,33 +335,28 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
           [runId, result.backup.backupId, JSON.stringify(result.preResetCounts)],
         )
         await appendPhaseEvent(client, runId, 'BACKUP', 'COMPLETED', `Verified FULL backup ${result.backup.backupId}.`)
-        currentPhase = 'DRY_RUN_RESET'
         await appendPhaseEvent(client, runId, 'DRY_RUN_RESET', 'COMPLETED', `Rollback-only purge validated ${result.purgeOrder.length} tables.`)
-        console.log(`DRY_RUN_RESET passed for ${runId}; all reset changes were rolled back.`)
+        console.log(`DRY_RUN_RESET passed for ${runId}; reset changes were rolled back.`)
         break
       }
 
       case '--execute-reset': {
-        currentPhase = 'EXECUTE_RESET'
         await requireDryRunPassed(client, runId)
         await setRunStatus(client, runId, 'RESET_IN_PROGRESS')
+        currentPhase = 'BACKUP'
+        await appendPhaseEvent(client, runId, 'BACKUP', 'STARTED', 'Re-verifying backup immediately before destructive reset.')
+        currentPhase = 'EXECUTE_RESET'
         await appendPhaseEvent(client, runId, 'EXECUTE_RESET', 'STARTED')
         const result = await executeReset(client, process.argv)
-        currentPhase = 'BACKUP'
         await appendPhaseEvent(client, runId, 'BACKUP', 'COMPLETED', `Re-verified FULL backup ${result.backup.backupId} before COMMIT.`)
-        currentPhase = 'EXECUTE_RESET'
         const run = await loadRun(client, runId)
         const notes = parseNotes(run.notes, runId)
         notes.phaseHistory.push({ phase: 'EXECUTE_RESET', outcome: 'COMPLETED', at: isoNow() })
         await client.query(
           `update public.uat_seed_runs
-           set status = 'RESET_COMPLETED',
-               backup_id = $2,
-               protected_manifest = $3::jsonb,
-               pre_reset_counts = $4::jsonb,
-               post_reset_counts = $5::jsonb,
-               notes = $6,
-               updated_at = now()
+           set status = 'RESET_COMPLETED', backup_id = $2,
+               protected_manifest = $3::jsonb, pre_reset_counts = $4::jsonb,
+               post_reset_counts = $5::jsonb, notes = $6, updated_at = now()
            where run_id = $1`,
           [
             runId,
@@ -392,24 +372,31 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       }
 
       case '--seed': {
-        currentPhase = 'SEED_MASTER'
         await requireResetCompletedForSeed(client, runId)
         await setRunStatus(client, runId, 'SEEDING')
         await withTransaction(client, async (transaction) => {
+          currentPhase = 'SEED_MASTER'
+          await appendPhaseEvent(transaction, runId, 'SEED_MASTER', 'STARTED')
           const organisation = await seedNationalOrganisation(transaction, runId)
           await appendPhaseEvent(transaction, runId, 'SEED_MASTER', 'COMPLETED', `${organisation.departments.length} Departments seeded.`)
+
           currentPhase = 'REMAP_USERS'
+          await appendPhaseEvent(transaction, runId, 'REMAP_USERS', 'STARTED')
+          await assertRetainedUserShape(transaction)
           await appendPhaseEvent(transaction, runId, 'REMAP_USERS', 'COMPLETED', 'Retained active users remapped by the national organisation seed.')
 
           currentPhase = 'SEED_FINANCE'
+          await appendPhaseEvent(transaction, runId, 'SEED_FINANCE', 'STARTED')
           const finance = await seedFinanceMasters(transaction, runId, organisation)
           await appendPhaseEvent(transaction, runId, 'SEED_FINANCE', 'COMPLETED', `${finance.mappings.length} canonical finance mappings seeded.`)
 
           currentPhase = 'SEED_BUDGETS_AND_ACTIVATE'
+          await appendPhaseEvent(transaction, runId, 'SEED_BUDGETS_AND_ACTIVATE', 'STARTED')
           const budgets = await seedAndActivateNationalBudgets(transaction, runId, organisation, finance)
-          await appendPhaseEvent(transaction, runId, 'SEED_BUDGETS_AND_ACTIVATE', 'COMPLETED', `${budgets.submissions.length} FY2026 submissions seeded and activated through the controlled workflow.`)
+          await appendPhaseEvent(transaction, runId, 'SEED_BUDGETS_AND_ACTIVATE', 'COMPLETED', `${budgets.submissions.length} FY2026 submissions seeded and activated.`)
 
           currentPhase = 'SEED_TRANSACTIONS'
+          await appendPhaseEvent(transaction, runId, 'SEED_TRANSACTIONS', 'STARTED')
           const transactions = await seedNationalTransactions(transaction, runId, organisation, finance, budgets)
           await appendPhaseEvent(transaction, runId, 'SEED_TRANSACTIONS', 'COMPLETED', `${transactions.ff3.length} FF3 and ${transactions.ff4.length} FF4 scenarios seeded.`)
         })
@@ -420,19 +407,23 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       case '--validate': {
         currentPhase = 'VALIDATE'
         const run = await requireSeedCompletedForValidation(client, runId)
+        await appendPhaseEvent(client, runId, 'VALIDATE', 'STARTED')
         const { organisation, finance, budgets, transactions } = buildReplacementPlans()
 
-        const validationReport = await withTransaction(client, async (transaction) =>
-          validateLiveDatabase(transaction, organisation, finance, budgets, transactions, {
+        await client.query('BEGIN')
+        let validationReport: ValidationReport
+        try {
+          const validationReport = await validateLiveDatabase(client, organisation, finance, budgets, transactions, {
             beforeProtectedManifest: run.protected_manifest,
-          }),
-        )
-
-        // Deliberately persist uat_seed_runs only after validateLiveDatabase has finished
-        // every positive reconciliation and rollback-only negative validation stage.
-        await persistValidationResults(client, runId, validationReport)
-        writeValidationEvidence(runId, validationReport)
-        assertValidationReportPassed(validationReport)
+          })
+          await client.query('COMMIT')
+          await persistValidationResults(client, runId, validationReport)
+          writeValidationEvidence(runId, validationReport)
+          assertValidationReportPassed(validationReport)
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => undefined)
+          throw error
+        }
         console.log(`VALIDATE passed for ${runId}; evidence written to ${VALIDATION_EVIDENCE_PATH}.`)
         break
       }
