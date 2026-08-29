@@ -60,6 +60,13 @@ for (const assignment of RETAINED_USER_ASSIGNMENTS) {
   assert.equal(assignment.departmentCode, section.code.split('-').slice(0, -1).join('-'))
 }
 
+const lineSupervisorAssignment = RETAINED_USER_ASSIGNMENTS.find((item) => item.userId === 'a7a7aeb9-082d-4ed0-a4a7-07ba92f24f00')
+const hrDepartment = plan.departments.find((item) => item.code === 'NCD-WGN-HR')
+const hrBudgetDivision = plan.budgetDivisions.find((item) => item.departmentId === hrDepartment?.id)
+const lineSupervisorSection = plan.sections.find((item) => item.code === lineSupervisorAssignment?.sectionCode)
+assert.ok(hrBudgetDivision && lineSupervisorSection, 'HR revision ownership fixtures must exist')
+assert.equal(hrBudgetDivision.sectionId, lineSupervisorSection.id, 'HR budget division must match the retained Line Supervisor section for revision workflow controls')
+
 const branchLibraries = new Set(
   plan.departments.filter((item) => item.functionCode === 'LIB').map((item) => item.courtLocationCode),
 )
