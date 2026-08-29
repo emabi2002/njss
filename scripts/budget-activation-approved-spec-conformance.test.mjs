@@ -6,8 +6,9 @@ const migration061 = 'supabase/migrations/061_explicit_finance_posting_mapping_a
 const migration062 = 'supabase/migrations/062_budget_activation_fingerprint_and_immutable_snapshot.sql'
 const migration0625 = 'supabase/migrations/0625_budget_activation_queue_view_reset.sql'
 const migration063 = 'supabase/migrations/063_budget_activation_fk_only_guards.sql'
+const migration064 = 'supabase/migrations/064_budget_activation_finance_mapping_worklist.sql'
 
-for (const path of [migration061, migration062, migration0625, migration063]) {
+for (const path of [migration061, migration062, migration0625, migration063, migration064]) {
   assert.ok(fs.existsSync(path), `missing ${path}`)
 }
 
@@ -15,6 +16,7 @@ const m61 = read(migration061)
 const m62 = read(migration062)
 const m625 = read(migration0625)
 const m63 = read(migration063)
+const m64 = read(migration064)
 
 for (const token of [
   'finance_posting_mappings',
@@ -27,8 +29,7 @@ for (const token of [
   'budget.activation.report',
 ]) assert.ok(m61.includes(token), `migration 061 missing ${token}`)
 
-// Deployed NJSS user identity schema is full_name + email.
-for (const [name, sql] of [['061', m61], ['062', m62], ['063', m63]]) {
+for (const [name, sql] of [['061', m61], ['062', m62], ['063', m63], ['064', m64]]) {
   assert.doesNotMatch(
     sql,
     /\b(?:u|creator|updater|approver|prep|auth)\.(?:first_name|last_name)\b/i,
@@ -39,8 +40,6 @@ assert.match(m61, /\b(?:u|creator|updater)\.full_name\b/i, 'migration 061 must u
 assert.match(m62, /\bu\.full_name\b/i, 'migration 062 must use users.full_name')
 assert.match(m63, /\b(?:prep|auth)\.full_name\b/i, 'migration 063 must use users.full_name for UUID-backed activation actors')
 
-// reviewed_by / approved_by are deployed as text audit labels; UUID workflow
-// actor fields remain submitted_by / rejected_by.
 assert.match(m61, /reviewed_by\s*=\s*CASE[\s\S]*v_actor_label/i, 'REVIEW must store the actor label in reviewed_by')
 assert.match(m61, /approved_by\s*=\s*CASE[\s\S]*v_actor_label/i, 'APPROVE must store the actor label in approved_by')
 assert.match(m61, /submitted_by\s*=\s*CASE[\s\S]*v_user_id/i, 'SUBMIT must continue using the UUID actor')
@@ -69,8 +68,7 @@ assert.match(m62, /INSERT\s+INTO\s+(?:public\.)?budget_activation_line_snapshots
 assert.match(m62, /UPDATE\s+(?:public\.)?budget_activation_batches[\s\S]*status\s*=\s*'VALIDATION_FAILED'[\s\S]*validation_fingerprint\s*=\s*NULL/i)
 assert.match(m62, /p_activation_batch_id::TEXT/i, 'activation notification reference_id must use deployed TEXT storage')
 
-// system_settings.setting_value is JSONB in the deployed NJSS schema.
-for (const [name, sql] of [['061', m61], ['062', m62], ['063', m63]]) {
+for (const [name, sql] of [['061', m61], ['062', m62], ['063', m63], ['064', m64]]) {
   assert.match(
     sql,
     /latest_database_migration[\s\S]*to_jsonb\s*\(/i,
@@ -93,7 +91,6 @@ assert.doesNotMatch(
   /(?:JOIN|WHERE|AND|OR)[^\n]*cost_centre_name\s*(?:=|ILIKE|LIKE)/i,
   'migration 062 must not use Cost Centre name as a resolver predicate',
 )
-
 assert.doesNotMatch(m63, /cost_centre_name/i, 'live activation guards must rely on Cost Centre ids only')
 assert.doesNotMatch(m63, /submission_cost_centre/i, 'live guards must not resolve Cost Centre from free-text submission value')
 assert.doesNotMatch(
@@ -102,13 +99,19 @@ assert.doesNotMatch(
   'no Cost Centre name fallback is allowed in live guards',
 )
 
+for (const token of ['njss_budget_activation_mapping_worklist', 'MAPPING_REQUIRED', 'COST_CENTRE_REQUIRED', 'POSTING_CODE_INACTIVE', 'CHART_ACCOUNT_INACTIVE']) {
+  assert.ok(m64.includes(token), `migration 064 missing ${token}`)
+}
+assert.match(m64, /njss_current_user_has_role\('System Administrator'\)[\s\S]*njss_current_user_has_role\('Registrar'\)/i, 'mapping worklist must be role-restricted')
+assert.doesNotMatch(m64, /INSERT\s+INTO\s+(?:public\.)?budget_allocations/i, 'mapping worklist migration must never create operational allocations')
+
 const service = read('lib/budget-activation.ts')
 for (const token of ['validation_fingerprint', 'finance_posting_mapping_id', 'getBudgetActivationSnapshots']) {
   assert.ok(service.includes(token), `budget activation service missing ${token}`)
 }
 
 const mappingService = read('lib/finance-posting-mapping.ts')
-for (const token of ['FinancePostingMapping', 'getFinancePostingMappings', 'saveFinancePostingMapping', 'deactivateFinancePostingMapping']) {
+for (const token of ['FinancePostingMapping', 'BudgetActivationMappingWorklistRow', 'getBudgetActivationMappingWorklist', 'getFinancePostingMappings', 'saveFinancePostingMapping', 'deactivateFinancePostingMapping']) {
   assert.ok(mappingService.includes(token), `finance mapping service missing ${token}`)
 }
 
@@ -132,9 +135,11 @@ for (const token of ['useSearchParams', 'validation_fingerprint', 'getBudgetActi
 }
 
 const mappingPage = read('app/dashboard/master/finance-mapping/page.tsx')
-for (const label of ['Section', 'Category', 'Expense Item', 'Financial Year', 'Last Updated By', 'Last Updated At', 'Ambiguous Mapping']) {
+for (const label of ['Section', 'Category', 'Expense Item', 'Financial Year', 'Last Updated By', 'Last Updated At', 'Required Budget Mappings', 'Use Context']) {
   assert.ok(mappingPage.includes(label), `finance mapping page missing ${label}`)
 }
+assert.ok(mappingPage.includes('getBudgetActivationMappingWorklist'), 'finance mapping page must load the approved-budget mapping worklist')
+assert.ok(mappingPage.includes('No default account or silent mapping is permitted.'), 'finance mapping page must preserve the no-fallback control')
 
 const masterPage = read('app/dashboard/master/page.tsx')
 for (const token of ['saveFinancePostingMapping', 'Finance Code (optional)', 'Chart of Accounts (optional)', 'expenseCodeRegistryId: createdPosting.id']) {
