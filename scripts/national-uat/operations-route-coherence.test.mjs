@@ -2,15 +2,15 @@ import fs from 'node:fs'
 import assert from 'node:assert/strict'
 
 const configPath = 'lib/rbac/config.ts'
-const operationsPagePath = 'app/dashboard/admin/operations/page.tsx'
+const operationsLayoutPath = 'app/dashboard/admin/operations/layout.tsx'
 const operationsApiPath = 'app/api/operations/summary/route.ts'
 
-for (const path of [configPath, operationsPagePath, operationsApiPath]) {
+for (const path of [configPath, operationsLayoutPath, operationsApiPath]) {
   assert.ok(fs.existsSync(path), `operations authorization source missing: ${path}`)
 }
 
 const config = fs.readFileSync(configPath, 'utf8')
-const operationsPage = fs.readFileSync(operationsPagePath, 'utf8')
+const operationsLayout = fs.readFileSync(operationsLayoutPath, 'utf8')
 const operationsApi = fs.readFileSync(operationsApiPath, 'utf8')
 
 // Transaction Monitor is intentionally exposed by the live menu to audit.view users,
@@ -26,15 +26,15 @@ assert.match(broadRule[1], /'operations\.view'/, 'System Operations must accept 
 assert.match(broadRule[1], /'operations\.manage'/, 'System Operations must accept operations.manage')
 assert.match(broadRule[1], /'settings\.manage'/, 'System Operations must accept settings.manage')
 
-// Page-level authorization must mirror the route distinction as defense in depth.
-assert.match(operationsPage, /usePathname/, 'operations page must know which operations section is being rendered')
-assert.match(operationsPage, /pathname\.endsWith\(["']\/transactions["']\)/, 'operations page must identify Transaction Monitor')
-assert.match(operationsPage, /audit\.view/, 'Transaction Monitor page gate must accept audit.view')
-assert.doesNotMatch(
-  operationsPage,
-  /PagePermissionGate\s+any=\{\[\s*["']dashboard\.view["']/,
-  'operations page must not use dashboard.view as a blanket authorization',
-)
+// Segment-level authorization protects content rendered before the page's own gate
+// (notably DatabaseBackupControls) and mirrors the route distinction.
+assert.match(operationsLayout, /["']use client["']/, 'operations authorization layout must be client-side')
+assert.match(operationsLayout, /usePathname/, 'operations layout must know which operations section is being rendered')
+assert.match(operationsLayout, /canAny/, 'operations layout must evaluate effective permissions')
+assert.match(operationsLayout, /pathname\.endsWith\(["']\/transactions["']\)/, 'operations layout must identify Transaction Monitor')
+assert.match(operationsLayout, /audit\.view/, 'Transaction Monitor layout gate must accept audit.view')
+assert.doesNotMatch(operationsLayout, /dashboard\.view/, 'operations layout must not use dashboard.view as authorization')
+assert.match(operationsLayout, /DatabaseBackupControls/, 'operations layout must retain controlled backup tooling')
 
 // API authorization must not re-open the restricted operations summary to every
 // ordinary dashboard user. Audit viewers remain permitted because the Transaction
