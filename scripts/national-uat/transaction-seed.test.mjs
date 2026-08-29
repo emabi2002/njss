@@ -45,6 +45,11 @@ assert.doesNotMatch(
   /update\s+public\.ff3_headers\s+set\s+selected_quotation_id=\$1/i,
   'the quotation selection trigger must own the selected_quotation_id header update',
 )
+assert.doesNotMatch(
+  transactionSeederSource,
+  /insert\s+into\s+public\.ff4_headers\s*\([^)]*\bnet_amount\b/is,
+  'FF4 UAT seeding must not write the generated ff4_headers.net_amount column',
+)
 
 assert.equal(plan.ff3.filter((row) => row.targetStatus === 'COMMITTED').length, 20)
 assert.equal(plan.ff3.filter((row) => row.targetStatus === 'SUBMITTED').length, 4)
