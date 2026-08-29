@@ -117,7 +117,7 @@ export const PROVINCIAL_TEMPLATE: readonly FunctionalUnitTemplate[] = [
   { code: 'ADM', name: 'Provincial Administration', provenance: 'DERIVED', sections: sections([['FIN', 'Administration & Finance'], ['HRA', 'HR & Staff Administration'], ['TRF', 'Transport & Facilities']]) },
   { code: 'SEC', name: 'Security', provenance: 'DERIVED', sections: sections([['ACC', 'Court Security & Access']]) },
   { code: 'ICT', name: 'ICT Support', provenance: 'DERIVED', sections: sections([['SUP', 'Local ICT & User Support']]) },
-  { code: 'LIB', name: 'Library', provenance: 'DERIVED', sections: sections([['LIB', 'Court Library']], },
+  { code: 'LIB', name: 'Library', provenance: 'DERIVED', sections: sections([['LIB', 'Court Library']]) },
 ] as const
 
 export const SUBREGISTRY_TEMPLATE: readonly FunctionalUnitTemplate[] = [
