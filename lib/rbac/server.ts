@@ -140,11 +140,15 @@ export async function logServerAccessEvent(request: NextRequest, context: UserAc
 export async function requirePermission(request: NextRequest, permissions: PermissionCode[]) {
   const response = NextResponse.next()
   const context = await getServerAccessContext(request, response)
-  if (!hasAnyServerPermission(context, permissions)) {
+  const requiredPermissions = request.nextUrl.pathname.startsWith('/api/operations/')
+    ? permissions.filter((permission) => permission !== 'dashboard.view')
+    : permissions
+
+  if (!hasAnyServerPermission(context, requiredPermissions)) {
     await logServerAccessEvent(request, context, {
       action: 'ACCESS_DENIED',
       entityType: 'AUTHORIZATION',
-      metadata: { pathname: request.nextUrl.pathname, required_permissions: permissions },
+      metadata: { pathname: request.nextUrl.pathname, required_permissions: requiredPermissions },
     })
     return { context, response: NextResponse.json({ error: 'Access denied' }, { status: 403 }) }
   }

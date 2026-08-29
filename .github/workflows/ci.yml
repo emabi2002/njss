@@ -66,6 +66,17 @@ jobs:
       - name: Approved Task 9 spec conformance checks
         run: node scripts/budget-activation-approved-spec-conformance.test.mjs
 
+      - name: National UAT regression checks
+        run: |
+          for test_file in scripts/national-uat/*.test.mjs; do
+            [ -e "$test_file" ] || continue
+            [ "$test_file" = "scripts/national-uat/orchestrator.test.mjs" ] && continue
+            bun "$test_file"
+          done
+
+      - name: National UAT orchestrator contract checks
+        run: bun scripts/national-uat/orchestrator.test.mjs
+
       - name: Lint
         run: bun run lint
 

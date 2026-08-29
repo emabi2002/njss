@@ -38,6 +38,7 @@ export function getAuthorizedMenus(permissions: PermissionCode[], menus: RbacMen
 }
 
 export function getRoutePermissions(pathname: string) {
+  if (pathname === '/dashboard/no-access') return []
   const matched = ROUTE_PERMISSIONS.find((route) => route.pattern.test(pathname))
   if (matched) return matched.permissions
   return pathname.startsWith('/dashboard') ? ['__deny_unmapped_route__'] : []
@@ -54,6 +55,8 @@ export function canAccessRecord(context: Pick<UserAccessContext, 'userId' | 'dep
     switch (scope.scope_type) {
       case 'SYSTEM_WIDE':
         return true
+      case 'SECTION_WIDE':
+        return !!context.sectionId && record.section_id === context.sectionId
       case 'DEPARTMENT_WIDE':
         return !!context.departmentId && record.department_id === context.departmentId
       case 'OWN_DIVISION':
