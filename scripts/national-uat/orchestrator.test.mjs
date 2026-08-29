@@ -50,10 +50,18 @@ assert.match(
   '--seed must run the approved master, finance, budget and transaction sequence after its reset gate',
 )
 
+const validateCase = run.indexOf("case '--validate'")
 const validationCall = run.indexOf('const validationReport = await validateLiveDatabase')
 const validationPersist = run.indexOf('await persistValidationResults')
-assert.ok(validationCall >= 0, '--validate must execute validateLiveDatabase')
+assert.ok(validateCase >= 0, '--validate mode must exist')
+assert.ok(validationCall > validateCase, '--validate must execute validateLiveDatabase')
 assert.ok(validationPersist > validationCall, 'uat_seed_runs validation results must only be persisted after all validation stages finish')
+const beforeValidationCall = run.slice(validateCase, validationCall)
+assert.doesNotMatch(
+  beforeValidationCall,
+  /appendPhaseEvent\s*\(|setRunStatus\s*\(|update\s+public\.uat_seed_runs/i,
+  '--validate must not mutate uat_seed_runs before all validation stages finish',
+)
 
 assert.match(run, /status\s*=\s*['"]FAILED['"]|['"]FAILED['"]/i, 'phase failures must persist FAILED status')
 assert.match(run, /phaseHistory|phase_history|phases/, 'orchestrator must persist detailed phase/timestamp history')
