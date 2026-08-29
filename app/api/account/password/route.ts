@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { createAdminClient, recordAudit } from '@/lib/rbac/admin'
 import { createRequestSupabaseClient, getServerAccessContext } from '@/lib/rbac/server'
 import { validatePassword } from '@/lib/password'
 
 export const dynamic = 'force-dynamic'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || ''
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || ''
 
 /**
  * Reports whether the signed-in user is still holding an administrator-issued
@@ -25,12 +27,20 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Changes the signed-in user's own password and clears the forced-change flag.
- * The new password is never echoed back and never reaches the audit trail.
+ * Proxies the signed-in user's first-login password change to the dedicated
+ * Supabase Edge Function. The caller JWT is forwarded unchanged so the Edge
+ * Function can independently verify identity. Netlify never needs the service
+ * role credential for this self-service operation.
  */
 export async function POST(request: NextRequest) {
-  const context = await getServerAccessContext(request)
-  if (!context) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return NextResponse.json({ error: 'Supabase application configuration is unavailable.' }, { status: 500 })
+  }
+
+  const authorization = request.headers.get('authorization')?.trim() || ''
+  if (!/^Bearer\s+\S+/i.test(authorization)) {
+    return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+  }
 
   let body: { password?: string; confirmPassword?: string }
   try {
@@ -45,39 +55,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: errors[0], errors }, { status: 400 })
   }
 
-  if (!context.authUserId) {
-    return NextResponse.json(
-      { error: 'This profile has no linked authentication account.' },
-      { status: 400 },
-    )
-  }
-
-  const admin = createAdminClient()
-
-  const { error: authError } = await admin.auth.admin.updateUserById(context.authUserId, { password })
-  if (authError) {
-    return NextResponse.json({ error: authError.message }, { status: 400 })
-  }
-
-  const now = new Date().toISOString()
-  await admin
-    .from('users')
-    .update({
-      must_change_password: false,
-      password_changed_at: now,
-      updated_at: now,
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/njss-self-password`, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        apikey: supabaseAnonKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ password, confirmPassword: body.confirmPassword }),
+      cache: 'no-store',
     })
-    .eq('id', context.userId)
 
-  await recordAudit(admin, {
-    actorContext: context,
-    action: 'PASSWORD_CHANGED',
-    entityType: 'USER',
-    entityId: context.userId,
-    entityReference: context.email,
-    metadata: { self_service: true, forced_change_cleared: true },
-    request,
-  })
-
-  return NextResponse.json({ ok: true })
+    const text = await response.text()
+    return new NextResponse(text || null, {
+      status: response.status,
+      headers: {
+        'Content-Type': response.headers.get('content-type') || 'application/json',
+      },
+    })
+  } catch (error) {
+    console.error('Self-service password Edge Function request failed:', error)
+    return NextResponse.json({ error: 'Unable to reach the password service. Please try again.' }, { status: 502 })
+  }
 }
