@@ -83,6 +83,9 @@ for (const token of [
   'Refusing committed reset without an atomic retained-user remap',
   "set_config('njss.budget_workflow', 'on', true)",
   "set_config('njss.budget_revision_workflow', 'on', true)",
+  'deleteExpenseLedgerLeafFirst',
+  'parent_ledger_id',
+  'NOT EXISTS',
 ]) assert.ok(resetSource.includes(token), `reset execution source missing ${token}`)
 
 assert.ok(!/TRUNCATE\s+/i.test(safetySource), 'reset must not use TRUNCATE')
