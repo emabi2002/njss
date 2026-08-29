@@ -3,7 +3,7 @@ import { FUNDING_SOURCES, SUPPLIER_SCENARIOS, TRANSACTION_SCENARIOS } from './ca
 import { buildNationalMasterPlan, RETAINED_USER_ASSIGNMENTS } from './seed-master.ts'
 import { buildFinanceMasterPlan } from './seed-finance.ts'
 import { buildBudgetSeedPlan } from './seed-budgets.ts'
-import { buildTransactionSeedPlan } from './seed-transactions.ts'
+import { authorityTypeForFundingSource, buildTransactionSeedPlan } from './seed-transactions.ts'
 
 const organisation = buildNationalMasterPlan()
 const finance = buildFinanceMasterPlan(organisation)
@@ -15,6 +15,13 @@ assert.equal(plan.suppliers.length, SUPPLIER_SCENARIOS.length)
 assert.equal(plan.ff3.length, TRANSACTION_SCENARIOS.length * 4)
 assert.equal(plan.ff4.length, TRANSACTION_SCENARIOS.length * 2)
 assert.equal(plan.revisions.length, TRANSACTION_SCENARIOS.length)
+
+assert.equal(authorityTypeForFundingSource('GOVERNMENT_RECURRENT'), 'GOVERNMENT_APPROPRIATION')
+assert.equal(authorityTypeForFundingSource('GOVERNMENT_DEVELOPMENT'), 'GOVERNMENT_APPROPRIATION')
+assert.equal(authorityTypeForFundingSource('DEVELOPMENT_PARTNER'), 'DEVELOPMENT_PARTNER')
+assert.equal(authorityTypeForFundingSource('SPECIAL_PURPOSE'), 'PROJECT_FUNDING')
+assert.equal(authorityTypeForFundingSource('OTHER'), 'OTHER')
+assert.throws(() => authorityTypeForFundingSource('UNSUPPORTED_UAT_TYPE'), /Unsupported funding source type/i)
 
 assert.equal(plan.ff3.filter((row) => row.targetStatus === 'COMMITTED').length, 20)
 assert.equal(plan.ff3.filter((row) => row.targetStatus === 'SUBMITTED').length, 4)
