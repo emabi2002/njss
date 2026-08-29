@@ -3,7 +3,7 @@ import { COURT_LOCATIONS } from './catalog/organisation.ts'
 import { BUDGET_TIERS, MONTHLY_PROFILES } from './catalog/scenarios.ts'
 import { buildNationalMasterPlan } from './seed-master.ts'
 import { buildFinanceMasterPlan } from './seed-finance.ts'
-import { allocateMonthlyCents, buildBudgetSeedPlan } from './seed-budgets.ts'
+import { allocateMonthlyCents, buildBudgetSeedPlan, seedDraftBudgets } from './seed-budgets.ts'
 
 const organisation = buildNationalMasterPlan()
 const finance = buildFinanceMasterPlan(organisation)
@@ -74,5 +74,41 @@ assert.ok(subregistryPerDivisionAverage < hqPerDivisionAverage, 'sub-registry bu
 for (const collection of [plan.cycles, plan.ceilings, plan.submissions, plan.lines, plan.monthlyAllocations]) {
   assert.equal(new Set(collection.map((item) => item.id)).size, collection.length, 'budget deterministic IDs must be unique')
 }
+
+const triggerSubmission = plan.submissions[0]
+const triggerLine = plan.lines.find((line) => line.submissionId === triggerSubmission.id)
+const triggerCeiling = plan.ceilings.find((ceiling) => ceiling.divisionId === triggerSubmission.divisionId)
+assert.ok(triggerLine, 'monthly-trigger regression requires a budget line')
+assert.ok(triggerCeiling, 'monthly-trigger regression requires a ceiling')
+const triggerPlan = {
+  ...plan,
+  ceilings: [triggerCeiling],
+  submissions: [triggerSubmission],
+  lines: [triggerLine],
+  monthlyAllocations: plan.monthlyAllocations.filter((row) => row.budgetLineId === triggerLine.id),
+  activationSubmissionIds: [triggerSubmission.id],
+}
+const monthlyUpdates = []
+const triggerAwareClient = {
+  async query(text, values = []) {
+    const sql = String(text)
+    if (sql.includes('select auth_user_id, email from public.users')) {
+      return { rowCount: 1, rows: [{ auth_user_id: '00000000-0000-4000-8000-000000000001', email: 'line.supervisor@uat.invalid' }] }
+    }
+    if (sql.includes('select full_name,email from public.users')) {
+      return { rowCount: 1, rows: [{ full_name: 'UAT Line Supervisor', email: 'line.supervisor@uat.invalid' }] }
+    }
+    if (/insert\s+into\s+public\.budget_monthly_allocations/i.test(sql)) {
+      throw new Error('duplicate key value violates unique constraint "budget_monthly_allocations_budget_line_id_month_number_key"')
+    }
+    if (/update\s+public\.budget_monthly_allocations/i.test(sql)) monthlyUpdates.push({ sql, values })
+    return { rowCount: 1, rows: [] }
+  },
+}
+await assert.doesNotReject(
+  () => seedDraftBudgets(triggerAwareClient, 'UAT-TRIGGER-REGRESSION', triggerPlan),
+  'budget seeding must reuse the 12 monthly rows auto-created by the budget-line trigger',
+)
+assert.equal(monthlyUpdates.length, 12, 'budget seeding must update exactly 12 trigger-created monthly allocations per line')
 
 console.log(`national budget seed plan checks passed: ${plan.submissions.length} submissions, ${plan.lines.length} lines`)
