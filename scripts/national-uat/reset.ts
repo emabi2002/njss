@@ -96,6 +96,16 @@ async function setScopedSectionGuard(client: Client, enabled: boolean): Promise<
   await client.query(`ALTER TABLE public.users ${action} ${SCOPED_SECTION_GUARD_TRIGGER}`)
 }
 
+async function enableResetMaintenanceContexts(client: Client): Promise<void> {
+  // These are the database's existing sanctioned workflow-maintenance contexts.
+  // is_local=true confines them to the current reset transaction and prevents
+  // approved-budget/revision immutability guards from blocking an authorised purge.
+  await client.query(
+    `select set_config('njss.budget_workflow', 'on', true),
+            set_config('njss.budget_revision_workflow', 'on', true)`,
+  )
+}
+
 async function detachRetainedUsers(client: Client): Promise<void> {
   await client.query('UPDATE public.users SET department_id = NULL, section_id = NULL WHERE department_id IS NOT NULL OR section_id IS NOT NULL')
 }
@@ -158,6 +168,8 @@ async function runResetCore(
   let scopedGuardDisabled = false
 
   try {
+    await enableResetMaintenanceContexts(client)
+
     // The scoped-role guard correctly prevents Requisition Officers and Line Supervisors
     // from being committed without a Section. During a national organisational replacement,
     // the old Section FKs must be detached before those Section rows can be deleted. The guard
