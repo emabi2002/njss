@@ -22,9 +22,17 @@ export const PROTECTED_TABLES = [
   'user_permissions',
 ] as const
 
+// These tables are expected to grow as backup/change-capture activity occurs.
+// They are preserved, but exact row/digest equality is not required during the reset gate.
 export const MUTABLE_PROTECTED_TABLES = new Set<string>([
   'system_backup_registry',
   'system_backup_change_log',
+])
+
+// Historic audit evidence is append-only. Reset activity may create new audit rows,
+// but the pre-reset history must never shrink.
+export const APPEND_ONLY_PROTECTED_TABLES = new Set<string>([
+  'audit_logs',
 ])
 
 export const REBUILDABLE_TABLES = [
@@ -180,11 +188,21 @@ export async function assertProtectedManifestEqual(
   after: ProtectedManifest,
 ): Promise<void> {
   for (const table of PROTECTED_TABLES) {
-    if (MUTABLE_PROTECTED_TABLES.has(table)) continue
     const left = before[table]
     const right = after[table]
-    if (!left || !right || left.count !== right.count || left.digest !== right.digest) {
-      throw new Error(`Protected table public.${table} changed during reset dry-run`) 
+    if (!left || !right) throw new Error(`Protected table public.${table} manifest is missing`)
+
+    if (MUTABLE_PROTECTED_TABLES.has(table)) continue
+
+    if (APPEND_ONLY_PROTECTED_TABLES.has(table)) {
+      if (right.count < left.count) {
+        throw new Error(`Append-only protected table public.${table} lost historic rows during reset dry-run`)
+      }
+      continue
+    }
+
+    if (left.count !== right.count || left.digest !== right.digest) {
+      throw new Error(`Protected table public.${table} changed during reset dry-run`)
     }
   }
 }
