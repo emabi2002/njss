@@ -551,9 +551,9 @@ export async function seedFf4Workflows(
     await client.query(
       `insert into public.ff4_headers (
          id,ff4_number,ff3_header_id,commitment_id,financial_year,payment_request_date,payee_type,payee_name,supplier_code,
-         invoice_number,invoice_date,payment_description,gross_amount,tax_amount,deductions,net_amount,department_id,section_id,account_id,
+         invoice_number,invoice_date,payment_description,gross_amount,tax_amount,deductions,department_id,section_id,account_id,
          payment_method,status,created_by,supplier_id,budget_allocation_id,expense_code_registry_id,cost_centre_id,funding_source_id,payment_type,is_partial_payment
-       ) values ($1,$2,$3,$4,2026,'2026-04-01','SUPPLIER',$5,$6,$7,'2026-03-31',$8,$9,0,0,$9,$10,$11,$12,'EFT','DRAFT',$13,$14,$15,$16,$17,$18,'COMMITMENT',true)`,
+       ) values ($1,$2,$3,$4,2026,'2026-04-01','SUPPLIER',$5,$6,$7,'2026-03-31',$8,$9,0,0,$10,$11,$12,'EFT','DRAFT',$13,$14,$15,$16,$17,$18,'COMMITMENT',true)`,
       [row.id, row.code, source.id, commitmentId, supplier.name, supplier.code, `UAT-INV-${row.code}`, `${DATASET_VERSION} payment for ${source.code}`, money(row.amountCents), source.departmentId, source.sectionId, source.chartOfAccountId, TRANSACTION_ACTORS.paymentOfficer, supplier.id, budgetAllocationId, source.expenseCodeRegistryId, source.costCentreId, source.fundingSourceId],
     )
     await registerEntity(client, runId, 'ff4_headers', row.id, row.code, `${DATASET_VERSION} ${row.targetStatus} FF4 scenario`)
