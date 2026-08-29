@@ -333,11 +333,15 @@ export async function seedDraftBudgets(
       for (let index = 0; index < 12; index += 1) {
         const monthly = plan.monthlyAllocations.find((item) => item.budgetLineId === line.id && item.monthNumber === index + 1)
         if (!monthly) throw new Error(`Missing month ${index + 1} for budget line ${line.id}`)
-        await client.query(
-          `insert into public.budget_monthly_allocations (id,budget_line_id,month_number,month_name,amount,updated_at)
-           values ($1,$2,$3,$4,$5,now())`,
+        const updated = await client.query(
+          `update public.budget_monthly_allocations
+           set id=$1,month_name=$4,amount=$5,updated_at=now()
+           where budget_line_id=$2 and month_number=$3`,
           [monthly.id, monthly.budgetLineId, monthly.monthNumber, monthly.monthName, money(monthly.amountCents)],
         )
+        if (updated.rowCount !== 1) {
+          throw new Error(`Expected trigger-created month ${monthly.monthNumber} for budget line ${line.id}`)
+        }
         await registerBudgetEntity(client, runId, 'budget_monthly_allocations', monthly.id, `${line.activityReference}:${monthly.monthNumber}`)
       }
     }
