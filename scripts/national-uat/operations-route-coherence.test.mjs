@@ -3,13 +3,15 @@ import assert from 'node:assert/strict'
 
 const configPath = 'lib/rbac/config.ts'
 const operationsPagePath = 'app/dashboard/admin/operations/page.tsx'
+const operationsApiPath = 'app/api/operations/summary/route.ts'
 
-for (const path of [configPath, operationsPagePath]) {
+for (const path of [configPath, operationsPagePath, operationsApiPath]) {
   assert.ok(fs.existsSync(path), `operations authorization source missing: ${path}`)
 }
 
 const config = fs.readFileSync(configPath, 'utf8')
 const operationsPage = fs.readFileSync(operationsPagePath, 'utf8')
+const operationsApi = fs.readFileSync(operationsApiPath, 'utf8')
 
 // Transaction Monitor is intentionally exposed by the live menu to audit.view users,
 // so its direct route must carry that same permission before the broader operations rule.
@@ -34,4 +36,15 @@ assert.doesNotMatch(
   'operations page must not use dashboard.view as a blanket authorization',
 )
 
-console.log('operations menu/route authorization coherence checks passed')
+// API authorization must not re-open the restricted operations summary to every
+// ordinary dashboard user. Audit viewers remain permitted because the Transaction
+// Monitor intentionally consumes this summary endpoint.
+const apiPermissions = operationsApi.match(/const ADMIN_PERMISSIONS\s*=\s*\[([^\]]+)\]/)
+assert.ok(apiPermissions, 'operations API permission list must remain explicit')
+assert.doesNotMatch(apiPermissions[1], /'dashboard\.view'/, 'operations API must not accept ordinary dashboard.view')
+assert.match(apiPermissions[1], /'audit\.view'/, 'operations API must accept audit.view for Transaction Monitor')
+assert.match(apiPermissions[1], /'operations\.view'/, 'operations API must accept operations.view')
+assert.match(apiPermissions[1], /'operations\.manage'/, 'operations API must accept operations.manage')
+assert.match(apiPermissions[1], /'settings\.manage'/, 'operations API must accept settings.manage')
+
+console.log('operations menu/route/API authorization coherence checks passed')
