@@ -131,6 +131,22 @@ function supplierTargetStatus(status: SupplierScenarioStatus): { workflow: Suppl
   }
 }
 
+export function authorityTypeForFundingSource(sourceType: string): string {
+  switch (sourceType) {
+    case 'GOVERNMENT_RECURRENT':
+    case 'GOVERNMENT_DEVELOPMENT':
+      return 'GOVERNMENT_APPROPRIATION'
+    case 'DEVELOPMENT_PARTNER':
+      return 'DEVELOPMENT_PARTNER'
+    case 'SPECIAL_PURPOSE':
+      return 'PROJECT_FUNDING'
+    case 'OTHER':
+      return 'OTHER'
+    default:
+      throw new Error(`Unsupported funding source type for authority: ${sourceType}`)
+  }
+}
+
 function centsFraction(value: number, numerator: number, denominator: number): number {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`Invalid positive cents value ${value}`)
   return Math.max(1, Math.floor((value * numerator) / denominator))
@@ -398,7 +414,7 @@ export async function seedFundingAndReleases(
     if (totalCents <= 0) throw new Error(`Funding source ${source.code} has no planned allocations`)
     const authorityResult = await client.query<{ id: string; authority_number: string | null }>(
       `select id,authority_number from public.njss_create_funding_authority($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
-      [2026, source.sourceType, source.id, money(totalCents), '2026-01-01', '2026-12-31', 'NJSS UAT Funding Source', 'NJSS', `UAT-APP-${source.code}`, `UAT-WARRANT-${source.code}`, '2026-01-02', null, null, `${DATASET_VERSION} synthetic funding authority`, null, null, null, null, null, null, null, 'Unrestricted UAT funding authority', admin.email],
+      [2026, authorityTypeForFundingSource(source.sourceType), source.id, money(totalCents), '2026-01-01', '2026-12-31', 'NJSS UAT Funding Source', 'NJSS', `UAT-APP-${source.code}`, `UAT-WARRANT-${source.code}`, '2026-01-02', null, null, `${DATASET_VERSION} synthetic funding authority`, null, null, null, null, null, null, null, 'Unrestricted UAT funding authority', admin.email],
     )
     if (authorityResult.rowCount !== 1) throw new Error(`Funding authority creation failed for ${source.code}`)
     const authority = authorityResult.rows[0]
