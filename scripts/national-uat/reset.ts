@@ -20,13 +20,11 @@ export { PROTECTED_TABLES, REBUILDABLE_TABLES, MUTABLE_PROTECTED_TABLES }
 
 export const NULLABLE_CYCLE_DETACHMENTS = [
   { table: 'expense_ledger', column: 'expense_code_registry_id' },
-  { table: 'expense_code_registry', column: 'expense_ledger_id' },
   { table: 'ff3_headers', column: 'selected_quotation_id' },
 ] as const
 
 const DETACHED_FK_EDGES = new Set([
   'expense_ledger->expense_code_registry',
-  'expense_code_registry->expense_ledger',
   'ff3_headers->ff3_quotations',
 ])
 
