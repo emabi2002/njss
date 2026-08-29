@@ -34,7 +34,7 @@ for (const table of protectedSet) {
 assert.ok(APPEND_ONLY_PROTECTED_TABLES.has('audit_logs'), 'audit_logs must be protected as append-only history')
 
 assert.ok(NULLABLE_CYCLE_DETACHMENTS.some((item) => item.table === 'expense_ledger' && item.column === 'expense_code_registry_id'))
-assert.ok(NULLABLE_CYCLE_DETACHMENTS.some((item) => item.table === 'expense_code_registry' && item.column === 'expense_ledger_id'))
+assert.ok(!NULLABLE_CYCLE_DETACHMENTS.some((item) => item.table === 'expense_code_registry' && item.column === 'expense_ledger_id'), 'only one side of the ledger/registry cycle should be detached')
 assert.ok(NULLABLE_CYCLE_DETACHMENTS.some((item) => item.table === 'ff3_headers' && item.column === 'selected_quotation_id'))
 
 assert.deepEqual(
