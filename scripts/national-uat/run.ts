@@ -349,7 +349,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
         await appendPhaseEvent(client, runId, 'BACKUP', 'STARTED', 'Re-verifying backup immediately before destructive reset.')
         currentPhase = 'EXECUTE_RESET'
         await appendPhaseEvent(client, runId, 'EXECUTE_RESET', 'STARTED')
-        const result = await executeReset(client, process.argv)
+        const result = await executeReset(client, process.argv, async (transaction) => {
+          await seedNationalOrganisation(transaction, runId)
+        })
         await appendPhaseEvent(client, runId, 'BACKUP', 'COMPLETED', `Re-verified FULL backup ${result.backup.backupId} before COMMIT.`)
         const run = await loadRun(client, runId)
         const notes = parseNotes(run.notes, runId)
