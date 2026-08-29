@@ -79,7 +79,11 @@ export default function FinanceMappingPage() {
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    // Initial remote-data hydration intentionally updates local state from the async loader.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load()
+  }, [load])
 
   const needle = search.trim().toLowerCase()
   const visibleMappings = mappings.filter((row) => !needle || [row.finance_code, row.finance_description, row.department_code, row.department_name, row.section_code, row.section_name, row.cost_centre_code, row.cost_centre_name, row.expense_category_code, row.expense_category_name, row.expense_item_code, row.expense_item_name, row.posting_code, row.chart_account_code, row.chart_account_name, statusLabel(row.mapping_status)].some((v) => String(v || "").toLowerCase().includes(needle)))
