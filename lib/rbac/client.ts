@@ -38,6 +38,7 @@ export function getAuthorizedMenus(permissions: PermissionCode[], menus: RbacMen
 }
 
 export function getRoutePermissions(pathname: string) {
+  if (pathname === '/dashboard/no-access') return []
   const matched = ROUTE_PERMISSIONS.find((route) => route.pattern.test(pathname))
   if (matched) return matched.permissions
   return pathname.startsWith('/dashboard') ? ['__deny_unmapped_route__'] : []
