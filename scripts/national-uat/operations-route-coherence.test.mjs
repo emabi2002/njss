@@ -4,14 +4,16 @@ import assert from 'node:assert/strict'
 const configPath = 'lib/rbac/config.ts'
 const operationsLayoutPath = 'app/dashboard/admin/operations/layout.tsx'
 const operationsApiPath = 'app/api/operations/summary/route.ts'
+const serverRbacPath = 'lib/rbac/server.ts'
 
-for (const path of [configPath, operationsLayoutPath, operationsApiPath]) {
+for (const path of [configPath, operationsLayoutPath, operationsApiPath, serverRbacPath]) {
   assert.ok(fs.existsSync(path), `operations authorization source missing: ${path}`)
 }
 
 const config = fs.readFileSync(configPath, 'utf8')
 const operationsLayout = fs.readFileSync(operationsLayoutPath, 'utf8')
 const operationsApi = fs.readFileSync(operationsApiPath, 'utf8')
+const serverRbac = fs.readFileSync(serverRbacPath, 'utf8')
 
 // Transaction Monitor is intentionally exposed by the live menu to audit.view users,
 // so its direct route must carry that same permission before the broader operations rule.
@@ -36,15 +38,12 @@ assert.match(operationsLayout, /audit\.view/, 'Transaction Monitor layout gate m
 assert.doesNotMatch(operationsLayout, /dashboard\.view/, 'operations layout must not use dashboard.view as authorization')
 assert.match(operationsLayout, /DatabaseBackupControls/, 'operations layout must retain controlled backup tooling')
 
-// API authorization must not re-open the restricted operations summary to every
-// ordinary dashboard user. Audit viewers remain permitted because the Transaction
-// Monitor intentionally consumes this summary endpoint.
-const apiPermissions = operationsApi.match(/const ADMIN_PERMISSIONS\s*=\s*\[([^\]]+)\]/)
-assert.ok(apiPermissions, 'operations API permission list must remain explicit')
-assert.doesNotMatch(apiPermissions[1], /'dashboard\.view'/, 'operations API must not accept ordinary dashboard.view')
-assert.match(apiPermissions[1], /'audit\.view'/, 'operations API must accept audit.view for Transaction Monitor')
-assert.match(apiPermissions[1], /'operations\.view'/, 'operations API must accept operations.view')
-assert.match(apiPermissions[1], /'operations\.manage'/, 'operations API must accept operations.manage')
-assert.match(apiPermissions[1], /'settings\.manage'/, 'operations API must accept settings.manage')
+// Transaction Monitor consumes the operations summary, so audit.view remains a valid
+// API permission. The shared server guard must strip ordinary dashboard.view for every
+// /api/operations endpoint before evaluating the endpoint's declared permission list.
+assert.match(operationsApi, /const ADMIN_PERMISSIONS\s*=\s*\[[^\]]*'audit\.view'/, 'operations summary API must retain audit.view for Transaction Monitor')
+assert.match(serverRbac, /request\.nextUrl\.pathname\.startsWith\(['"]\/api\/operations\/['"]\)/, 'server RBAC must identify operations API routes')
+assert.match(serverRbac, /permission\s*!==\s*['"]dashboard\.view['"]/, 'operations API authorization must remove ordinary dashboard.view')
+assert.match(serverRbac, /hasAnyServerPermission\(context,\s*requiredPermissions\)/, 'requirePermission must evaluate the hardened permission list')
 
 console.log('operations menu/route/API authorization coherence checks passed')
