@@ -30,6 +30,10 @@ const DETACHED_FK_EDGES = new Set([
   'ff3_headers->ff3_quotations',
 ])
 
+const SCOPED_SECTION_GUARD_TRIGGER = 'trg_users_keep_section_for_scoped_group'
+
+type ResetTransactionHook = (client: Client) => Promise<void>
+
 function quoteIdentifier(identifier: string): string {
   if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) throw new Error(`Unsafe SQL identifier: ${identifier}`)
   return `"${identifier}"`
@@ -89,6 +93,11 @@ export async function buildPurgeOrder(client: Client): Promise<string[]> {
   return topologicalPurgeOrder(REBUILDABLE_TABLES, edges)
 }
 
+async function setScopedSectionGuard(client: Client, enabled: boolean): Promise<void> {
+  const action = enabled ? 'ENABLE TRIGGER' : 'DISABLE TRIGGER'
+  await client.query(`ALTER TABLE public.users ${action} ${SCOPED_SECTION_GUARD_TRIGGER}`)
+}
+
 async function detachRetainedUsers(client: Client): Promise<void> {
   await client.query('UPDATE public.users SET department_id = NULL, section_id = NULL WHERE department_id IS NOT NULL OR section_id IS NOT NULL')
 }
@@ -106,6 +115,20 @@ function assertAllRebuildableCountsZero(counts: TableCounts): void {
     .filter(([, count]) => count !== 0)
     .map(([table, count]) => `${table}=${count}`)
   if (nonZero.length > 0) throw new Error(`Reset left rebuildable rows behind: ${nonZero.join(', ')}`)
+}
+
+async function assertActiveRetainedUsersMapped(client: Client): Promise<void> {
+  const result = await client.query<{ unmapped: string }>(
+    `select count(*)::text as unmapped
+     from public.users
+     where is_active is true
+       and archived_at is null
+       and (department_id is null or section_id is null)`,
+  )
+  const unmapped = Number(result.rows[0]?.unmapped ?? '0')
+  if (unmapped !== 0) {
+    throw new Error(`Atomic retained-user remap left ${unmapped} active user(s) without Department/Section assignment`)
+  }
 }
 
 async function deleteRebuildableRows(client: Client, order: readonly string[]): Promise<void> {
@@ -126,23 +149,52 @@ type ResetCoreResult = {
   protectedAfter: ProtectedManifest
 }
 
-async function runResetCore(client: Client): Promise<ResetCoreResult> {
+async function runResetCore(
+  client: Client,
+  afterResetBeforeCommit?: ResetTransactionHook,
+): Promise<ResetCoreResult> {
   await assertRetainedUserShape(client)
   const protectedBefore = await captureProtectedManifest(client)
   const preResetCounts = await captureTableCounts(client)
   const purgeOrder = await buildPurgeOrder(client)
+  let scopedGuardDisabled = false
 
-  await detachRetainedUsers(client)
-  await detachNullableCycles(client)
-  await deleteRebuildableRows(client, purgeOrder)
+  try {
+    // The scoped-role guard correctly prevents Requisition Officers and Line Supervisors
+    // from being committed without a Section. During a national organisational replacement,
+    // the old Section FKs must be detached before those Section rows can be deleted. The guard
+    // is therefore suspended only inside this reset transaction and restored before COMMIT.
+    await setScopedSectionGuard(client, false)
+    scopedGuardDisabled = true
 
-  const postResetCounts = await captureTableCounts(client)
-  assertAllRebuildableCountsZero(postResetCounts)
-  await assertRetainedUserShape(client)
-  const protectedAfter = await captureProtectedManifest(client)
-  await assertProtectedManifestEqual(protectedBefore, protectedAfter)
+    await detachRetainedUsers(client)
+    await detachNullableCycles(client)
+    await deleteRebuildableRows(client, purgeOrder)
 
-  return { purgeOrder, preResetCounts, postResetCounts, protectedBefore, protectedAfter }
+    const postResetCounts = await captureTableCounts(client)
+    assertAllRebuildableCountsZero(postResetCounts)
+    await assertRetainedUserShape(client)
+
+    if (afterResetBeforeCommit) {
+      await afterResetBeforeCommit(client)
+      await assertRetainedUserShape(client)
+      await assertActiveRetainedUsersMapped(client)
+    }
+
+    await setScopedSectionGuard(client, true)
+    scopedGuardDisabled = false
+
+    const protectedAfter = await captureProtectedManifest(client)
+    await assertProtectedManifestEqual(protectedBefore, protectedAfter)
+
+    return { purgeOrder, preResetCounts, postResetCounts, protectedBefore, protectedAfter }
+  } finally {
+    if (scopedGuardDisabled) {
+      // If a SQL statement has already aborted the transaction this may fail; the caller's
+      // ROLLBACK still restores the transactional ALTER TABLE automatically.
+      await setScopedSectionGuard(client, true).catch(() => undefined)
+    }
+  }
 }
 
 export type ResetResult = ResetCoreResult & {
@@ -162,11 +214,14 @@ async function verifyBackupGates(client: Client): Promise<{
   return { backup, snapshotProbe }
 }
 
-export async function dryRunReset(client: Client): Promise<ResetResult> {
+export async function dryRunReset(
+  client: Client,
+  afterResetBeforeRollback?: ResetTransactionHook,
+): Promise<ResetResult> {
   const { backup, snapshotProbe } = await verifyBackupGates(client)
   await client.query('BEGIN')
   try {
-    const result = await runResetCore(client)
+    const result = await runResetCore(client, afterResetBeforeRollback)
     await client.query('ROLLBACK')
     return { ...result, mode: 'DRY_RUN', backup, snapshotProbe }
   } catch (error) {
@@ -184,13 +239,17 @@ export function assertExecuteResetFlag(argv: readonly string[] = process.argv): 
 export async function executeReset(
   client: Client,
   argv: readonly string[] = process.argv,
+  afterResetBeforeCommit?: ResetTransactionHook,
 ): Promise<ResetResult> {
   assertExecuteResetFlag(argv)
+  if (!afterResetBeforeCommit) {
+    throw new Error('Refusing committed reset without an atomic retained-user remap')
+  }
   const { backup, snapshotProbe } = await verifyBackupGates(client)
 
   await client.query('BEGIN')
   try {
-    const result = await runResetCore(client)
+    const result = await runResetCore(client, afterResetBeforeCommit)
     await client.query('COMMIT')
     return { ...result, mode: 'COMMITTED', backup, snapshotProbe }
   } catch (error) {
