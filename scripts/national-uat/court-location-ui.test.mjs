@@ -1,10 +1,15 @@
 import fs from 'node:fs'
 import assert from 'node:assert/strict'
 
-const pagePath = 'app/dashboard/master/page.tsx'
-assert.ok(fs.existsSync(pagePath), 'existing master-data page must be extended rather than duplicated')
+const pagePath = 'app/dashboard/master/court-locations/page.tsx'
+const helperPath = 'lib/court-locations.ts'
+assert.ok(fs.existsSync(pagePath), 'focused Court Locations master page must exist')
+assert.ok(fs.existsSync(helperPath), 'focused Court Locations data helper must exist')
+
 const page = fs.readFileSync(pagePath, 'utf8')
+const helper = fs.readFileSync(helperPath, 'utf8')
 const migration = fs.readFileSync('supabase/migrations/066_national_uat_location_seed_registry.sql', 'utf8')
+const combined = `${page}\n${helper}`
 
 for (const token of [
   'court_locations',
@@ -21,16 +26,17 @@ for (const token of [
   'province_id',
   'is_headquarters',
   'town',
+  'is_active',
 ]) {
-  assert.ok(page.includes(token), `master-data page missing Court Location UI token: ${token}`)
+  assert.ok(combined.includes(token), `Court Location maintenance missing token: ${token}`)
 }
 
-assert.match(page, /can\("masterdata\.manage"\)/, 'Court Location maintenance must inherit the master-data permission guard')
-assert.match(page, /can\("registry\.manage"\)/, 'Court Location maintenance must inherit the registry-management permission guard')
-assert.match(page, /SourceKey[^\n]*provinces|type SourceKey[\s\S]*provinces/, 'Province must be available as a select source')
-assert.match(page, /supabase\.from\("provinces"\)/, 'Province lookup must load from the provinces master')
-assert.match(page, /table:\s*"court_locations"/, 'Court Locations must be maintained through the existing master CRUD engine')
-assert.match(page, /province:c?provinces|province:provinces|provinces\(name\)/, 'Court Location rows must display Province context')
+assert.match(page, /can\("masterdata\.manage"\)/, 'Court Location maintenance must require master-data permission')
+assert.match(page, /can\("registry\.manage"\)/, 'Court Location maintenance must permit registry-management permission')
+assert.match(helper, /supabase\.from\("provinces"\)/, 'Province lookup must load from the provinces master')
+assert.match(helper, /supabase\.from\("court_locations"\)/, 'Court Location CRUD must use the court_locations master')
+assert.match(helper, /is_headquarters:\s*input\.location_type\s*===\s*"HEADQUARTERS"/, 'Headquarters flag must be derived from location type')
+assert.match(helper, /province:provinces\(id, code, name\)/, 'Court Location rows must display Province context')
 assert.match(migration, /code varchar\(30\) NOT NULL UNIQUE/, 'duplicate Court Location codes must remain rejected by the database')
 assert.match(migration, /court_locations_headquarters_consistency/, 'Headquarters flag/type consistency must remain enforced by the database')
 
