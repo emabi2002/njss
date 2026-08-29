@@ -253,9 +253,11 @@ export async function persistValidationResults(
   client: Client,
   runId: string,
   report: ValidationReport,
+  startedAt: string,
 ): Promise<void> {
   const run = await loadRun(client, runId)
   const notes = parseNotes(run.notes, runId)
+  notes.phaseHistory.push({ phase: 'VALIDATE', outcome: 'STARTED', at: startedAt })
   notes.phaseHistory.push({ phase: 'VALIDATE', outcome: 'COMPLETED', at: isoNow() })
   await client.query(
     `update public.uat_seed_runs
@@ -407,17 +409,16 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       case '--validate': {
         currentPhase = 'VALIDATE'
         const run = await requireSeedCompletedForValidation(client, runId)
-        await appendPhaseEvent(client, runId, 'VALIDATE', 'STARTED')
+        const validationStartedAt = isoNow()
         const { organisation, finance, budgets, transactions } = buildReplacementPlans()
 
         await client.query('BEGIN')
-        let validationReport: ValidationReport
         try {
           const validationReport = await validateLiveDatabase(client, organisation, finance, budgets, transactions, {
             beforeProtectedManifest: run.protected_manifest,
           })
           await client.query('COMMIT')
-          await persistValidationResults(client, runId, validationReport)
+          await persistValidationResults(client, runId, validationReport, validationStartedAt)
           writeValidationEvidence(runId, validationReport)
           assertValidationReportPassed(validationReport)
         } catch (error) {
