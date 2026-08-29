@@ -491,17 +491,17 @@ export async function seedFf3Workflows(
     )
     const itemId = deterministicUuid(`ff3-item:${row.id}:1`)
     await client.query(
-      `insert into public.ff3_items (id,ff3_header_id,line_number,item_description,specifications,quantity,unit_of_measure,estimated_unit_price,total_amount,account_id)
-       values ($1,$2,1,$3,$4,1,'EA',$5,$5,$6)`,
+      `insert into public.ff3_items (id,ff3_header_id,line_number,item_description,specifications,quantity,unit_of_measure,estimated_unit_price,account_id)
+       values ($1,$2,1,$3,$4,1,'EA',$5,$6)`,
       [itemId, row.id, `${row.financeCode} UAT expenditure`, DATASET_VERSION, money(row.requestCents), row.chartOfAccountId],
     )
     const quotationId = deterministicUuid(`ff3-quotation:${row.id}:1`)
     await client.query(
       `insert into public.ff3_quotations (id,ff3_header_id,supplier_name,quotation_number,quotation_date,quotation_amount,is_selected,supplier_id,supplier_code_snapshot,supplier_registration_snapshot,legacy_imported,supplier_mapping_required)
-       values ($1,$2,$3,$4,'2026-02-01',$5,true,$6,$7,$8,false,false)`,
+       values ($1,$2,$3,$4,'2026-02-01',$5,false,$6,$7,$8,false,false)`,
       [quotationId, row.id, supplier.name, `UAT-Q-${row.code}`, money(row.requestCents), supplier.id, supplier.code, `IPA-${supplier.code}`],
     )
-    await client.query('update public.ff3_headers set selected_quotation_id=$1 where id=$2', [quotationId, row.id])
+    await client.query('update public.ff3_quotations set is_selected=true where id=$1', [quotationId])
     await registerEntity(client, runId, 'ff3_headers', row.id, row.code, `${DATASET_VERSION} ${row.targetStatus} FF3 scenario`)
 
     const requisitionActor = await setActorContext(client, TRANSACTION_ACTORS.requisitionOfficer)
