@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertCircle, CheckCircle2, Eye, FolderOpen, Hash, Loader2, Pencil, Plus, Power, Trash2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { saveFinancePostingMapping } from "@/lib/finance-posting-mapping"
 import { useAuth } from "@/contexts/AuthContext"
 
 type Row = Record<string, unknown>
@@ -11,6 +12,8 @@ type Opt = { id: string; code?: string; name: string; department_id?: string; se
 type Field = { name: string; label: string; type: "text" | "select" | "number" | "date"; required?: boolean; optionsKey?: SourceKey; dependsOn?: string }
 type Column = { key: string; label: string; badge?: boolean }
 type TabConfig = { key: string; table: string; label: string; select: string; order: string; columns: Column[]; fields: Field[]; builder?: boolean }
+type FinanceCodeOption = { id: string; finance_code: string; standard_description: string | null }
+type AccountOption = { id: string; account_code: string; account_name: string }
 
 const baseFields = {
   code: { name: "code", label: "Code", type: "text", required: true } as Field,
@@ -283,24 +286,72 @@ function CodeBuilder({ sources, onCreated }: { sources: Record<SourceKey, Opt[]>
   const [cat, setCat] = useState("")
   const [item, setItem] = useState("")
   const [desc, setDesc] = useState("")
+  const [financeCodeId, setFinanceCodeId] = useState("")
+  const [accountId, setAccountId] = useState("")
+  const [financialYear, setFinancialYear] = useState(String(new Date().getFullYear()))
+  const [financeCodes, setFinanceCodes] = useState<FinanceCodeOption[]>([])
+  const [accounts, setAccounts] = useState<AccountOption[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+
+  useEffect(() => {
+    async function loadFinanceOptions() {
+      const [ledgerResult, accountResult] = await Promise.all([
+        supabase.from("expense_ledger").select("id, finance_code, standard_description").eq("is_active", true).eq("is_posting", true).order("finance_code"),
+        supabase.from("chart_of_accounts").select("id, account_code, account_name").eq("is_active", true).order("account_code"),
+      ])
+      if (ledgerResult.error) setError(ledgerResult.error.message)
+      if (accountResult.error) setError(accountResult.error.message)
+      setFinanceCodes((ledgerResult.data || []) as FinanceCodeOption[])
+      setAccounts((accountResult.data || []) as AccountOption[])
+    }
+    loadFinanceOptions()
+  }, [])
+
   const ccOptions = useMemo(() => sources.cost_centres.filter((c) => !dept || c.department_id === dept), [sources.cost_centres, dept])
   const itemOptions = useMemo(() => sources.expense_items.filter((i) => !cat || i.expense_category_id === cat), [sources.expense_items, cat])
   const codeOf = (arr: Opt[], id: string) => arr.find((o) => o.id === id)?.code || ""
   const preview = [codeOf(sources.departments, dept) || "DEPT", codeOf(sources.cost_centres, cc) || "CC", codeOf(sources.expense_categories, cat) || "CAT", codeOf(sources.expense_items, item) || "ITEM"].join("-").toUpperCase()
-  const ready = dept && cc && cat && item
+  const linkageIncomplete = Boolean(financeCodeId) !== Boolean(accountId)
+  const parsedFinancialYear = Number(financialYear)
+  const validFinancialYear = Number.isInteger(parsedFinancialYear) && parsedFinancialYear >= 2000 && parsedFinancialYear <= 2200
+  const ready = Boolean(dept && cc && cat && item && validFinancialYear && !linkageIncomplete)
+
   const create = async () => {
     setSaving(true); setError(""); setSuccess("")
     try {
+      if (linkageIncomplete) throw new Error("Select both Finance Code and Chart of Accounts to create a canonical mapping, or leave both blank.")
+      if (!validFinancialYear) throw new Error("Financial Year must be between 2000 and 2200.")
       const section_id = sources.cost_centres.find((c) => c.id === cc)?.section_id || null
-      const { error: insErr } = await supabase.from("expense_code_registry").insert({ department_id: dept, cost_centre_id: cc, expense_category_id: cat, expense_item_id: item, section_id, description: desc || null, financial_year: new Date().getFullYear(), full_expense_code: "PENDING" })
+      const { data: createdPosting, error: insErr } = await supabase
+        .from("expense_code_registry")
+        .insert({ department_id: dept, cost_centre_id: cc, expense_category_id: cat, expense_item_id: item, section_id, description: desc || null, financial_year: parsedFinancialYear, full_expense_code: "PENDING" })
+        .select("id")
+        .single()
       if (insErr) throw insErr
-      setSuccess(`Code ${preview} created.`); setCc(""); setItem(""); setDesc(""); onCreated()
+      if (!createdPosting?.id) throw new Error("Posting Code was created without a returned identifier.")
+
+      if (financeCodeId && accountId) {
+        await saveFinancePostingMapping({
+          mappingId: null,
+          financialYear: parsedFinancialYear,
+          expenseLedgerId: financeCodeId,
+          expenseCodeRegistryId: createdPosting.id,
+          chartOfAccountId: accountId,
+          costCentreId: cc,
+          departmentId: dept,
+          sectionId: section_id,
+          mappingNotes: "Created from Posting Code builder",
+        })
+      }
+
+      setSuccess(financeCodeId && accountId ? `Code ${preview} created with canonical Finance mapping.` : `Code ${preview} created. Mapping status remains Incomplete until Finance Code and Chart of Accounts are assigned.`)
+      setCc(""); setItem(""); setDesc(""); setFinanceCodeId(""); setAccountId(""); onCreated()
     } catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to create code.") } finally { setSaving(false) }
   }
-  return <div className="rounded-lg border border-png-gold/40 bg-white p-5"><h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-900"><Hash className="h-4 w-4 text-png-gold" /> Build Expense Code</h3><p className="mb-4 text-xs text-slate-500">Combine Department · Cost Centre · Category · Item. The full code is generated automatically.</p>{success && <Notice tone="green" text={success} />}{error && <Notice tone="red" text={error} />}<div className="mt-3 grid gap-3 md:grid-cols-4"><Picker label="Department" value={dept} onChange={(v) => { setDept(v); setCc("") }} options={sources.departments} /><Picker label="Cost Centre" value={cc} onChange={setCc} options={ccOptions} disabled={!dept} /><Picker label="Category" value={cat} onChange={(v) => { setCat(v); setItem("") }} options={sources.expense_categories} /><Picker label="Item" value={item} onChange={setItem} options={itemOptions} disabled={!cat} /></div><div className="mt-3 flex flex-wrap items-end justify-between gap-3"><div className="flex items-center gap-3"><div><label className="mb-1 block text-xs font-medium text-slate-500">Generated code</label><span className="rounded-lg border border-png-gold/40 bg-png-red/5 px-3 py-1.5 font-mono text-lg font-bold text-png-red">{preview}</span></div><input placeholder="Description (optional)" value={desc} onChange={(e) => setDesc(e.target.value)} className="w-64 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red" /></div><button onClick={create} disabled={!ready || saving} className="flex items-center gap-2 rounded-lg bg-png-red px-4 py-2 text-sm font-medium text-white hover:bg-png-maroon disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create Code</button></div></div>
+
+  return <div className="rounded-lg border border-png-gold/40 bg-white p-5"><h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-900"><Hash className="h-4 w-4 text-png-gold" /> Build Expense Code</h3><p className="mb-4 text-xs text-slate-500">Combine Department · Cost Centre · Category · Item. Finance Code and Chart of Accounts are optional, but must be supplied together when you want the new Posting Code to be activation-ready immediately.</p>{success && <Notice tone="green" text={success} />}{error && <Notice tone="red" text={error} />}<div className="mt-3 grid gap-3 md:grid-cols-4"><Picker label="Department" value={dept} onChange={(v) => { setDept(v); setCc("") }} options={sources.departments} /><Picker label="Cost Centre" value={cc} onChange={setCc} options={ccOptions} disabled={!dept} /><Picker label="Category" value={cat} onChange={(v) => { setCat(v); setItem("") }} options={sources.expense_categories} /><Picker label="Item" value={item} onChange={setItem} options={itemOptions} disabled={!cat} /></div><div className="mt-3 grid gap-3 md:grid-cols-3"><div><label className="mb-1 block text-xs font-medium text-slate-500">Finance Code (optional)</label><select value={financeCodeId} onChange={(e) => setFinanceCodeId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Leave incomplete...</option>{financeCodes.map((row) => <option key={row.id} value={row.id}>{row.finance_code} — {row.standard_description || "No description"}</option>)}</select></div><div><label className="mb-1 block text-xs font-medium text-slate-500">Chart of Accounts (optional)</label><select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red"><option value="">Leave incomplete...</option>{accounts.map((row) => <option key={row.id} value={row.id}>{row.account_code} — {row.account_name}</option>)}</select></div><div><label className="mb-1 block text-xs font-medium text-slate-500">Financial Year</label><input type="number" min={2000} max={2200} value={financialYear} onChange={(e) => setFinancialYear(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red" /></div></div>{linkageIncomplete && <p className="mt-2 text-xs font-medium text-amber-700">Finance Code and Chart of Accounts must either both be selected or both be left blank.</p>}<div className="mt-3 flex flex-wrap items-end justify-between gap-3"><div className="flex items-center gap-3"><div><label className="mb-1 block text-xs font-medium text-slate-500">Generated code</label><span className="rounded-lg border border-png-gold/40 bg-png-red/5 px-3 py-1.5 font-mono text-lg font-bold text-png-red">{preview}</span></div><input placeholder="Description (optional)" value={desc} onChange={(e) => setDesc(e.target.value)} className="w-64 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-png-red" /></div><button onClick={create} disabled={!ready || saving} className="flex items-center gap-2 rounded-lg bg-png-red px-4 py-2 text-sm font-medium text-white hover:bg-png-maroon disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create Code</button></div></div>
 }
 
 function Picker({ label, value, onChange, options, disabled }: { label: string; value: string; onChange: (v: string) => void; options: Opt[]; disabled?: boolean }) {

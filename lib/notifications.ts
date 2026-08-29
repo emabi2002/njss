@@ -15,6 +15,8 @@ export type NotificationType =
   | 'BUDGET_LOW'
   | 'BUDGET_EXCEEDED'
   | 'BUDGET_RELEASED'
+  | 'BUDGET_ACTIVATION_READY'
+  | 'BUDGET_ACTIVATED'
   | 'COMMITMENT_CREATED'
   | 'COMMITMENT_EXPIRING'
   | 'COMMITMENT_FULLY_PAID'
@@ -39,7 +41,6 @@ export type Notification = {
   created_at: string
 }
 
-// Sound configurations
 const SOUNDS: Record<SoundType, { frequency: number; duration: number; pattern: number[] }> = {
   default: { frequency: 800, duration: 0.15, pattern: [1] },
   chime: { frequency: 1200, duration: 0.1, pattern: [1, 0.5, 1] },
@@ -49,7 +50,6 @@ const SOUNDS: Record<SoundType, { frequency: number; duration: number; pattern: 
   none: { frequency: 0, duration: 0, pattern: [] },
 }
 
-// Get sound preference from localStorage
 function getSoundPreference(): SoundType {
   if (typeof window === 'undefined') return 'default'
   try {
@@ -62,7 +62,6 @@ function getSoundPreference(): SoundType {
   return 'default'
 }
 
-// Play notification sound with customizable type
 export function playNotificationSound(soundType?: SoundType) {
   const type = soundType || getSoundPreference()
   if (type === 'none') return
@@ -97,7 +96,6 @@ export function playNotificationSound(soundType?: SoundType) {
   }
 }
 
-// Show toast notification
 export function showToast(
   type: 'success' | 'error' | 'warning' | 'info',
   title: string,
@@ -119,24 +117,22 @@ export function showToast(
   }
 }
 
-// Create a notification record in database
 export async function createNotification(data: {
   user_id?: string
   notification_type: NotificationType
   title: string
   message: string
-  reference_type: 'FF3' | 'FF4' | 'BUDGET' | 'COMMITMENT' | 'SYSTEM'
+  reference_type: 'FF3' | 'FF4' | 'BUDGET' | 'BUDGET_ACTIVATION' | 'COMMITMENT' | 'SYSTEM'
   reference_id: string
   priority?: NotificationPriority
   show_toast?: boolean
   sound_type?: SoundType
 }): Promise<void> {
-  // Determine toast type
   const getToastType = (): 'success' | 'error' | 'warning' | 'info' => {
     if (data.notification_type.includes('REJECTED') || data.notification_type.includes('CANCELLED') || data.notification_type.includes('EXCEEDED')) {
       return 'error'
     }
-    if (data.notification_type.includes('APPROVED') || data.notification_type.includes('PAID') || data.notification_type.includes('SUCCESS')) {
+    if (data.notification_type.includes('APPROVED') || data.notification_type.includes('PAID') || data.notification_type.includes('SUCCESS') || data.notification_type.includes('ACTIVATED')) {
       return 'success'
     }
     if (data.notification_type.includes('LOW') || data.notification_type.includes('EXPIRING') || data.notification_type.includes('ALERT')) {
@@ -145,22 +141,19 @@ export async function createNotification(data: {
     return 'info'
   }
 
-  // Show toast if requested
   if (data.show_toast !== false) {
     showToast(getToastType(), data.title, data.message)
   }
 
-  // Play sound based on type
   if (data.sound_type !== 'none') {
     const soundType = data.notification_type.includes('ALERT') || data.notification_type.includes('EXCEEDED')
       ? 'alert'
-      : data.notification_type.includes('APPROVED') || data.notification_type.includes('PAID')
+      : data.notification_type.includes('APPROVED') || data.notification_type.includes('PAID') || data.notification_type.includes('ACTIVATED')
         ? 'success'
         : data.sound_type || 'default'
     playNotificationSound(soundType)
   }
 
-  // Save to database
   try {
     const { error } = await supabase
       .from('notifications')
@@ -184,7 +177,6 @@ export async function createNotification(data: {
   }
 }
 
-// Get unread notifications for a user
 export async function getUnreadNotifications(userId?: string): Promise<Notification[]> {
   let query = supabase
     .from('notifications')
@@ -207,7 +199,6 @@ export async function getUnreadNotifications(userId?: string): Promise<Notificat
   return data || []
 }
 
-// Get all notifications for a user
 export async function getAllNotifications(userId?: string): Promise<Notification[]> {
   let query = supabase
     .from('notifications')
@@ -229,7 +220,6 @@ export async function getAllNotifications(userId?: string): Promise<Notification
   return data || []
 }
 
-// Mark notification as read
 export async function markAsRead(notificationId: string): Promise<void> {
   const { error } = await supabase
     .from('notifications')
@@ -241,7 +231,6 @@ export async function markAsRead(notificationId: string): Promise<void> {
   }
 }
 
-// Mark all notifications as read for a user
 export async function markAllAsRead(userId?: string): Promise<void> {
   let query = supabase
     .from('notifications')
@@ -258,10 +247,6 @@ export async function markAllAsRead(userId?: string): Promise<void> {
     console.error('Error marking all notifications as read:', error)
   }
 }
-
-// ==========================================
-// FF3 Notification Helpers
-// ==========================================
 
 export async function notifyFF3Submitted(ff3Number: string, ff3Id: string, amount: number, userId?: string): Promise<void> {
   await createNotification({
@@ -313,10 +298,6 @@ export async function notifyFF3Rejected(ff3Number: string, ff3Id: string, reason
     sound_type: 'alert'
   })
 }
-
-// ==========================================
-// FF4 Notification Helpers
-// ==========================================
 
 export async function notifyFF4Submitted(ff4Number: string, ff4Id: string, amount: number, userId?: string): Promise<void> {
   await createNotification({
@@ -392,10 +373,6 @@ export async function notifyFF4Cancelled(ff4Number: string, ff4Id: string, reaso
   })
 }
 
-// ==========================================
-// Budget Notification Helpers
-// ==========================================
-
 export async function notifyBudgetLow(percentage: number, availableBalance: number, userId?: string): Promise<void> {
   await createNotification({
     user_id: userId,
@@ -434,10 +411,6 @@ export async function notifyBudgetReleased(quarter: number, amount: number, user
     sound_type: 'chime'
   })
 }
-
-// ==========================================
-// Commitment Notification Helpers
-// ==========================================
 
 export async function notifyCommitmentCreated(commitmentNumber: string, ff3Number: string, amount: number, userId?: string): Promise<void> {
   await createNotification({
@@ -478,10 +451,6 @@ export async function notifyCommitmentFullyPaid(commitmentNumber: string, totalP
   })
 }
 
-// ==========================================
-// System Notification Helpers
-// ==========================================
-
 export async function notifySystemAlert(title: string, message: string, userId?: string): Promise<void> {
   await createNotification({
     user_id: userId,
@@ -508,7 +477,6 @@ export async function notifySystemInfo(title: string, message: string, userId?: 
   })
 }
 
-// Get notification count badge
 export async function getNotificationCount(userId?: string): Promise<number> {
   let query = supabase
     .from('notifications')
@@ -529,13 +497,8 @@ export async function getNotificationCount(userId?: string): Promise<number> {
   return count || 0
 }
 
-// ==========================================
-// Budget Check Helper (call this when creating FF3)
-// ==========================================
-
 export async function checkBudgetAndNotify(requestedAmount: number, userId?: string, financialYear = new Date().getFullYear()): Promise<boolean> {
   try {
-    // Get current budget status
     const { data: releases } = await supabase
       .from('quarterly_releases')
       .select('released_amount')
@@ -551,13 +514,11 @@ export async function checkBudgetAndNotify(requestedAmount: number, userId?: str
     const actualExpenditure = commitments?.reduce((sum, c) => sum + (c.paid_amount || 0), 0) || 0
     const availableBalance = quarterlyReleased - committedAmount - actualExpenditure
 
-    // Check if budget would be exceeded
     if (requestedAmount > availableBalance) {
       await notifyBudgetExceeded(requestedAmount, availableBalance, userId)
       return false
     }
 
-    // Check if budget is running low (less than 20%)
     const percentageRemaining = (availableBalance / quarterlyReleased) * 100
     if (percentageRemaining < 20) {
       await notifyBudgetLow(Math.round(percentageRemaining), availableBalance, userId)
@@ -566,6 +527,6 @@ export async function checkBudgetAndNotify(requestedAmount: number, userId?: str
     return true
   } catch (error) {
     console.error('Error checking budget:', error)
-    return true // Allow to proceed on error
+    return true
   }
 }
