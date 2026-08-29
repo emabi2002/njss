@@ -33,8 +33,8 @@ for (const token of [
 
 assert.match(page, /can\("masterdata\.manage"\)/, 'Court Location maintenance must require master-data permission')
 assert.match(page, /can\("registry\.manage"\)/, 'Court Location maintenance must permit registry-management permission')
-assert.match(helper, /supabase\.from\("provinces"\)/, 'Province lookup must load from the provinces master')
-assert.match(helper, /supabase\.from\("court_locations"\)/, 'Court Location CRUD must use the court_locations master')
+assert.match(helper, /supabase\s*\.from\("provinces"\)/, 'Province lookup must load from the provinces master')
+assert.match(helper, /supabase\s*\.from\("court_locations"\)/, 'Court Location CRUD must use the court_locations master')
 assert.match(helper, /is_headquarters:\s*input\.location_type\s*===\s*"HEADQUARTERS"/, 'Headquarters flag must be derived from location type')
 assert.match(helper, /province:provinces\(id, code, name\)/, 'Court Location rows must display Province context')
 assert.match(migration, /code varchar\(30\) NOT NULL UNIQUE/, 'duplicate Court Location codes must remain rejected by the database')
