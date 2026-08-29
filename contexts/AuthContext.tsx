@@ -37,6 +37,8 @@ type AuthContextType = {
   canAll: (perms: Permission[]) => boolean
   canOnRecord: (perm: Permission, record: Parameters<typeof canAccessRecord>[1]) => boolean
   loading: boolean
+  /** true only after the database-backed profile, permissions and scopes have resolved. */
+  accessReady: boolean
   /** null while unknown, true when an administrator-issued password is still in force. */
   mustChangePassword: boolean | null
   refreshPasswordState: () => Promise<void>
@@ -60,6 +62,7 @@ const AuthContext = createContext<AuthContextType>({
   canAll: () => false,
   canOnRecord: () => false,
   loading: true,
+  accessReady: false,
   mustChangePassword: null,
   refreshPasswordState: async () => {},
   isTestingFallback: false,
@@ -75,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [menus, setMenus] = useState<RbacMenuItem[]>([])
   const [modules, setModules] = useState<RbacModule[]>([])
   const [loading, setLoading] = useState(true)
+  const [accessReady, setAccessReady] = useState(false)
   const [mustChangePassword, setMustChangePassword] = useState<boolean | null>(null)
 
   const loadPasswordState = async () => {
@@ -110,21 +114,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let mounted = true
 
     const loadAccessContext = async (authUser: User, fallbackEmail: string) => {
-      const p = await getUserProfile(authUser.id, fallbackEmail)
-      if (!mounted || !p) return
+      setAccessReady(false)
+      try {
+        const p = await getUserProfile(authUser.id, fallbackEmail)
+        if (!mounted) return
 
-      const roles = p.roles?.length ? p.roles : [p.role].filter(Boolean)
-      const roleRows = await getUserRoles(p.id).catch(() => [])
-      const effectivePermissions = await getUserPermissions(p.id)
-      const effectiveScopes = await getUserDataScopes(
-        p.id,
-        roleRows.length ? roleRows : roles.map((name) => ({ id: name, name, description: null })),
-      )
+        if (!p) {
+          setProfile(null)
+          setPermissions([])
+          setScopes([])
+          return
+        }
 
-      if (!mounted) return
-      setProfile(p)
-      setPermissions(effectivePermissions)
-      setScopes(effectiveScopes)
+        const roles = p.roles?.length ? p.roles : [p.role].filter(Boolean)
+        const roleRows = await getUserRoles(p.id).catch(() => [])
+        const effectivePermissions = await getUserPermissions(p.id)
+        const effectiveScopes = await getUserDataScopes(
+          p.id,
+          roleRows.length ? roleRows : roles.map((name) => ({ id: name, name, description: null })),
+        )
+
+        if (!mounted) return
+        setProfile(p)
+        setPermissions(effectivePermissions)
+        setScopes(effectiveScopes)
+      } finally {
+        if (mounted) setAccessReady(true)
+      }
     }
 
     async function loadSession() {
@@ -134,6 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return
 
       if (session?.user) {
+        setAccessReady(false)
         setUser(session.user)
         setProfile({
           id: session.user.id,
@@ -153,6 +170,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null)
         setPermissions([])
         setScopes([])
+        setAccessReady(true)
         setMustChangePassword(null)
         setLoading(false)
       }
@@ -164,6 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return
 
       if (session?.user) {
+        setAccessReady(false)
         setUser(session.user)
         setProfile({
           id: session.user.id,
@@ -183,6 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null)
         setPermissions([])
         setScopes([])
+        setAccessReady(true)
         setMustChangePassword(null)
       }
 
@@ -231,13 +251,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(null)
       setPermissions([])
       setScopes([])
+      setAccessReady(true)
       setMustChangePassword(null)
       if (typeof window !== 'undefined') window.location.href = '/login'
     }
   }
 
   const refreshProfile = async () => {
-    if (user) {
+    if (!user) return
+
+    setAccessReady(false)
+    try {
       const p = await getUserProfile(user.id, user.email || '')
       setProfile(p)
       if (p) {
@@ -250,7 +274,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             roleRows.length ? roleRows : roleNames.map((name) => ({ id: name, name, description: null })),
           ),
         )
+      } else {
+        setPermissions([])
+        setScopes([])
       }
+    } finally {
+      setAccessReady(true)
     }
   }
 
@@ -274,6 +303,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         canAll,
         canOnRecord,
         loading,
+        accessReady,
         mustChangePassword,
         refreshPasswordState,
         isTestingFallback: false,
