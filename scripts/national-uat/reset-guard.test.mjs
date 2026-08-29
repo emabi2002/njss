@@ -58,11 +58,12 @@ assert.throws(
   /cycle/i,
 )
 
-for (const file of ['scripts/national-uat/preflight.ts', 'scripts/national-uat/reset.ts']) {
+for (const file of ['scripts/national-uat/preflight.ts', 'scripts/national-uat/reset.ts', 'scripts/national-uat/run.ts']) {
   assert.ok(fs.existsSync(file), `missing ${file}`)
 }
 const resetSource = fs.readFileSync('scripts/national-uat/reset.ts', 'utf8')
 const preflightSource = fs.readFileSync('scripts/national-uat/preflight.ts', 'utf8')
+const runSource = fs.readFileSync('scripts/national-uat/run.ts', 'utf8')
 const safetySource = `${preflightSource}\n${resetSource}`
 
 for (const token of [
@@ -76,7 +77,21 @@ for (const token of [
   'ROLLBACK',
   'COMMIT',
   'UPDATE public.users SET department_id = NULL, section_id = NULL',
+  'trg_users_keep_section_for_scoped_group',
+  'DISABLE TRIGGER',
+  'ENABLE TRIGGER',
+  'afterResetBeforeCommit',
+  'Refusing committed reset without an atomic retained-user remap',
 ]) assert.ok(resetSource.includes(token), `reset execution source missing ${token}`)
+
+assert.ok(
+  /executeReset\([\s\S]*seedNationalOrganisation/s.test(runSource),
+  'orchestrator must seed/remap retained users inside the committed reset transaction',
+)
+assert.ok(
+  runSource.includes('Atomic reset + national master remap'),
+  'orchestrator must record the atomic reset/remap boundary',
+)
 
 assert.ok(!/TRUNCATE\s+/i.test(safetySource), 'reset must not use TRUNCATE')
 assert.ok(!/DELETE\s+FROM\s+public\.users/i.test(resetSource), 'reset must never delete users')
