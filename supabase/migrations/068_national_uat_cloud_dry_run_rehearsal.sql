@@ -44,7 +44,7 @@ DECLARE
 
   -- Child-before-parent order generated from the live pg_constraint graph using
   -- the same algorithm as scripts/national-uat/reset.ts, excluding only the
-  -- three explicitly nullable cycle-detachment edges.
+  -- two explicitly nullable cycle-detachment edges.
   v_purge_order text[] := ARRAY[
     'activity_templates','budget_activation_line_snapshots','budget_activation_lines',
     'budget_activation_batches','budget_activity_templates','budget_consolidations',
@@ -55,8 +55,8 @@ DECLARE
     'ff4_approvals','ff4_attachments','finance_posting_mappings','financial_years','notifications',
     'payment_transactions','ff4_headers','ff3_commitments','ff3_headers','payee_types','payment_methods',
     'quarterly_releases','funding_allocations','budget_allocations','annual_plan_lines','annual_plan_headers',
-    'divisional_budget_lines','divisional_budget_submissions','budget_cycles','budget_divisions','expense_ledger',
-    'budget_classes','budget_expense_categories','funding_receipts','funding_authorities','expense_code_registry',
+    'divisional_budget_lines','divisional_budget_submissions','budget_cycles','budget_divisions','expense_code_registry',
+    'expense_ledger','budget_classes','budget_expense_categories','funding_receipts','funding_authorities',
     'chart_of_accounts','cost_centres','expense_items','expense_categories','funding_sources','priority_levels',
     'procurement_methods','projects','sections','departments','court_locations','supplier_category_assignments',
     'supplier_contacts','supplier_document_requirements','supplier_categories','supplier_documents',
@@ -180,10 +180,6 @@ BEGIN
     SET expense_code_registry_id = NULL
     WHERE expense_code_registry_id IS NOT NULL;
 
-    UPDATE public.expense_code_registry
-    SET expense_ledger_id = NULL
-    WHERE expense_ledger_id IS NOT NULL;
-
     UPDATE public.ff3_headers
     SET selected_quotation_id = NULL
     WHERE selected_quotation_id IS NOT NULL;
@@ -246,7 +242,6 @@ BEGIN
       END IF;
     END LOOP;
 
-    -- Restore the guard before the intentional rollback as an additional invariant.
     ALTER TABLE public.users ENABLE TRIGGER trg_users_keep_section_for_scoped_group;
 
     RAISE EXCEPTION USING ERRCODE = 'PDR01', MESSAGE = 'NJSS_UAT_DRY_RUN_ROLLBACK';
@@ -255,7 +250,6 @@ BEGIN
       NULL;
   END;
 
-  -- Every destructive statement above must have been rolled back here.
   FOREACH v_table IN ARRAY v_rebuildable_tables LOOP
     EXECUTE format('select count(*)::bigint from public.%I', v_table) INTO v_count;
     IF v_count <> coalesce((v_pre_counts ->> v_table)::bigint, -1) THEN
