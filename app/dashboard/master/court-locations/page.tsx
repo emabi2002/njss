@@ -86,15 +86,16 @@ export default function CourtLocationsPage() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadData()
   }, [loadData])
 
-  const audit = useCallback(async (
+  async function audit(
     action: string,
     rowId: string | null,
     oldValues: unknown,
     newValues: unknown,
-  ) => {
+  ) {
     try {
       await supabase.from("audit_logs").insert({
         user_id: profile?.id || null,
@@ -111,7 +112,7 @@ export default function CourtLocationsPage() {
     } catch (auditError) {
       console.warn("Court Location audit failed:", auditError)
     }
-  }, [profile?.email, profile?.id, profile?.name])
+  }
 
   const filteredRows = useMemo(() => {
     const needle = search.trim().toLowerCase()
