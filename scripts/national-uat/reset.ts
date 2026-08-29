@@ -139,10 +139,33 @@ async function assertActiveRetainedUsersMapped(client: Client): Promise<void> {
   }
 }
 
+async function deleteExpenseLedgerLeafFirst(client: Client): Promise<void> {
+  while (true) {
+    const deletion = await client.query(
+      `DELETE FROM public.expense_ledger parent
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM public.expense_ledger child
+         WHERE child.parent_ledger_id = parent.id
+       )`,
+    )
+    const remaining = await client.query<{ count: string }>('SELECT count(*)::text AS count FROM public.expense_ledger')
+    const remainingCount = Number(remaining.rows[0]?.count ?? '0')
+    if (remainingCount === 0) return
+    if ((deletion.rowCount ?? 0) === 0) {
+      throw new Error(`Finance ledger hierarchy cannot be purged leaf-first; ${remainingCount} cyclic/unresolved row(s) remain`)
+    }
+  }
+}
+
 async function deleteRebuildableRows(client: Client, order: readonly string[]): Promise<void> {
   for (const table of order) {
     if (!(REBUILDABLE_TABLES as readonly string[]).includes(table)) {
       throw new Error(`Refusing delete outside rebuild allowlist: public.${table}`)
+    }
+    if (table === 'expense_ledger') {
+      await deleteExpenseLedgerLeafFirst(client)
+      continue
     }
     const quoted = quoteIdentifier(table)
     await client.query(`DELETE FROM public.${quoted}`)
