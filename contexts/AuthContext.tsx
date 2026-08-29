@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { getUserProfile, type AuthUser } from '@/lib/auth'
+import type { AuthUser } from '@/lib/auth'
 import { authFetch } from '@/lib/auth-fetch'
 import type { Permission } from '@/lib/permissions'
 import type { RbacDataScope, RbacMenuItem, RbacModule } from '@/lib/rbac/types'
@@ -12,9 +12,6 @@ import {
   canPerformAction,
   canPerformAllActions,
   canPerformAnyAction,
-  getUserDataScopes,
-  getUserPermissions,
-  getUserRoles,
   loadRbacModules,
   loadRbacNavigation,
   logAccessEvent,
@@ -48,6 +45,21 @@ type AuthContextType = {
   refreshProfile: () => Promise<void>
 }
 
+type ServerAccessResponse = {
+  userId: string
+  authUserId?: string | null
+  email: string
+  name: string
+  roles?: Array<{ id: string; name: string }>
+  roleNames?: string[]
+  permissions?: string[]
+  scopes?: RbacDataScope[]
+  departmentId?: string | null
+  sectionId?: string | null
+}
+
+const FALLBACK_ROLE = 'Executive Viewer'
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
@@ -69,6 +81,38 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
   refreshProfile: async () => {},
 })
+
+async function fetchServerAccess(authUser: User, fallbackEmail: string) {
+  const response = await authFetch('/api/account/access')
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.error || 'Unable to load account access.')
+  }
+
+  const access = (await response.json()) as ServerAccessResponse
+  const roleNames = access.roleNames?.length
+    ? access.roleNames
+    : (access.roles || []).map((role) => role.name).filter(Boolean)
+  const effectiveRoles = roleNames.length ? roleNames : [FALLBACK_ROLE]
+
+  const profile: AuthUser = {
+    id: access.userId,
+    authUserId: access.authUserId || authUser.id,
+    email: access.email || fallbackEmail,
+    name: access.name || fallbackEmail.split('@')[0] || 'User',
+    role: effectiveRoles[0],
+    roles: effectiveRoles,
+    roleIds: (access.roles || []).map((role) => role.id),
+    departmentId: access.departmentId ?? null,
+    sectionId: access.sectionId ?? null,
+  }
+
+  return {
+    profile,
+    permissions: access.permissions || [],
+    scopes: access.scopes || [],
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
@@ -116,28 +160,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const loadAccessContext = async (authUser: User, fallbackEmail: string) => {
       setAccessReady(false)
       try {
-        const p = await getUserProfile(authUser.id, fallbackEmail)
+        const access = await fetchServerAccess(authUser, fallbackEmail)
         if (!mounted) return
-
-        if (!p) {
-          setProfile(null)
-          setPermissions([])
-          setScopes([])
-          return
-        }
-
-        const roles = p.roles?.length ? p.roles : [p.role].filter(Boolean)
-        const roleRows = await getUserRoles(p.id).catch(() => [])
-        const effectivePermissions = await getUserPermissions(p.id)
-        const effectiveScopes = await getUserDataScopes(
-          p.id,
-          roleRows.length ? roleRows : roles.map((name) => ({ id: name, name, description: null })),
-        )
-
+        setProfile(access.profile)
+        setPermissions(access.permissions)
+        setScopes(access.scopes)
+      } catch (error) {
         if (!mounted) return
-        setProfile(p)
-        setPermissions(effectivePermissions)
-        setScopes(effectiveScopes)
+        console.warn('Server RBAC access load failed:', error)
+        setPermissions([])
+        setScopes([])
       } finally {
         if (mounted) setAccessReady(true)
       }
@@ -262,22 +294,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setAccessReady(false)
     try {
-      const p = await getUserProfile(user.id, user.email || '')
-      setProfile(p)
-      if (p) {
-        const roleNames = p.roles?.length ? p.roles : [p.role]
-        const roleRows = await getUserRoles(p.id).catch(() => [])
-        setPermissions(await getUserPermissions(p.id))
-        setScopes(
-          await getUserDataScopes(
-            p.id,
-            roleRows.length ? roleRows : roleNames.map((name) => ({ id: name, name, description: null })),
-          ),
-        )
-      } else {
-        setPermissions([])
-        setScopes([])
-      }
+      const access = await fetchServerAccess(user, user.email || '')
+      setProfile(access.profile)
+      setPermissions(access.permissions)
+      setScopes(access.scopes)
+    } catch (error) {
+      console.warn('Server RBAC refresh failed:', error)
+      setPermissions([])
+      setScopes([])
     } finally {
       setAccessReady(true)
     }
