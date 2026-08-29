@@ -41,6 +41,11 @@ assert.match(
 )
 assert.match(
   run,
+  /case\s+['"]--execute-reset['"][\s\S]*?executeReset\s*\(\s*client\s*,\s*process\.argv\s*,\s*async\s*\([^)]*\)\s*=>\s*\{[\s\S]*?seedNationalOrganisation\s*\(/,
+  'committed reset must atomically rebuild the organisation and remap retained active users before COMMIT',
+)
+assert.match(
+  run,
   /requireResetCompletedForSeed[\s\S]*?RESET_COMPLETED/,
   '--seed must require RESET_COMPLETED for the same run ID',
 )
