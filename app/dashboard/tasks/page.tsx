@@ -111,6 +111,8 @@ export default function WorkflowTasksPage() {
   }, [])
 
   useEffect(() => {
+    // Initial task retrieval synchronises the client with the authenticated server queue.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
   }, [loadTasks])
 
