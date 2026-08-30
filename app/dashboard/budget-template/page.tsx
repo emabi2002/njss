@@ -931,15 +931,15 @@ export default function BudgetTemplatePage() {
         </div>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
-        <aside className="space-y-5">
+      <div className="space-y-5">
+        <div data-testid="budget-entry-setup" className="space-y-5">
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
               <h2 className="flex items-center gap-2 font-semibold text-slate-900">
                 <Plus className="h-4 w-4 text-[#1f4e79]" /> Create draft sheet
               </h2>
             </div>
-            <div className="space-y-3 p-4">
+            <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.1fr)_minmax(320px,1.6fr)_minmax(150px,.7fr)_minmax(220px,1fr)_auto] xl:items-end">
               <Field label="Budget cycle">
                 <div className="flex items-center gap-2">
                   <select value={draftHeader.cycle_id} onChange={(e) => selectCycle(e.target.value)} className="input min-w-0 flex-1">
@@ -1047,41 +1047,45 @@ export default function BudgetTemplatePage() {
               <Field label="Submission reference">
                 <input value={draftHeader.submission_reference} onChange={(e) => setDraftHeader((h) => ({ ...h, submission_reference: e.target.value }))} className="input" />
               </Field>
-              <button onClick={createSubmission} disabled={saving || !canEdit} className="btn-primary w-full justify-center">
+              <button onClick={createSubmission} disabled={saving || !canEdit} className="btn-primary w-full justify-center xl:w-auto xl:self-end">
                 <ClipboardList className="h-4 w-4" /> Create Draft
               </button>
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-              <h2 className="font-semibold text-slate-900">Submissions</h2>
-            </div>
-            <div className="max-h-[520px] divide-y divide-slate-100 overflow-y-auto">
-              {submissions.length === 0 ? (
-                <Empty message="No budget templates yet." />
-              ) : (
-                submissions.map((submission) => (
-                  <button key={submission.id} onClick={() => setSelectedId(submission.id)} className={`w-full p-4 text-left hover:bg-blue-50 ${selectedId === submission.id ? "bg-blue-50" : ""}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-slate-900">{submission.submission_number || "Draft"}</span>
-                      <StatusBadge status={submission.status} />
+          <div data-testid="budget-submission-selector" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="grid gap-3 lg:grid-cols-[minmax(300px,1fr)_minmax(0,2fr)] lg:items-end">
+              <Field label="Existing budget sheet">
+                <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="input">
+                  <option value="">Select existing budget sheet</option>
+                  {submissions.map((submission) => (
+                    <option key={submission.id} value={submission.id}>
+                      {submission.submission_number || "Draft"} — {submission.division?.code || "No division"} — {submission.division?.name || "Unnamed division"} — FY{submission.budget_year} — {submission.status}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <div className="min-w-0 rounded-lg bg-slate-50 px-4 py-2.5">
+                {selected ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-slate-900">{selected.submission_number || "Draft"}</span>
+                      <StatusBadge status={selected.status} />
                     </div>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {submission.division?.code} — {submission.division?.name}
+                    <p className="mt-1 truncate text-sm text-slate-600">
+                      {selected.division?.code || "-"} — {selected.division?.name || "-"} • FY{selected.budget_year} • {money(selected.total_proposed_budget || 0)}
                     </p>
-                    <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                      <span>FY{submission.budget_year}</span>
-                      <span>{money(submission.total_proposed_budget || 0)}</span>
-                    </div>
-                  </button>
-                ))
-              )}
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-500">Choose an existing budget sheet to continue editing, reviewing or approving it.</p>
+                )}
+              </div>
             </div>
+            {submissions.length === 0 && <Empty message="No budget templates yet." />}
           </div>
-        </aside>
+        </div>
 
-        <main className="min-w-0 space-y-5">
+        <main data-testid="budget-sheet-workspace" className="w-full min-w-0 space-y-5">
           {!selected ? (
             <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Select or create a divisional budget sheet to begin.</div>
           ) : (
@@ -1178,7 +1182,7 @@ export default function BudgetTemplatePage() {
                 </div>
               </div>
 
-              <div ref={gridRef} onKeyDown={handleGridKeyDown} onPaste={handlePaste} className="sheet-wrap rounded-xl border border-[#1f4e79] bg-white shadow-sm">
+              <div ref={gridRef} onKeyDown={handleGridKeyDown} onPaste={handlePaste} className="sheet-wrap min-h-[calc(100vh-360px)] overflow-x-auto rounded-xl border border-[#1f4e79] bg-white shadow-sm">
                 <table className={`budget-sheet ${revision ? "min-w-[6400px]" : "min-w-[5200px]"} border-collapse text-xs`}>
                   <thead>
                     <tr>
@@ -1510,7 +1514,7 @@ export default function BudgetTemplatePage() {
         .btn-light:disabled { opacity: .5; cursor: not-allowed; }
         .sheet-action { display: inline-flex; align-items: center; gap: .4rem; border-radius: .4rem; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.12); padding: .45rem .7rem; font-size: .8rem; font-weight: 700; }
         .sheet-action:hover { background: rgba(255,255,255,.2); }
-        .sheet-wrap { max-width: 100%; overflow: auto; max-height: calc(100vh - 245px); }
+        .sheet-wrap { max-width: 100%; overflow-x: auto; overflow-y: visible; }
         .budget-sheet thead th { position: sticky; top: 0; z-index: 10; }
         .budget-sheet .sticky-col { position: sticky; z-index: 12; }
         .budget-sheet thead .sticky-col { z-index: 18; }
