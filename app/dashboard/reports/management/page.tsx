@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { BarChart3, FileDown, FileSpreadsheet, Loader2, Play, Printer, TableProperties } from 'lucide-react'
 import { authFetch } from '@/lib/auth-fetch'
@@ -49,7 +49,7 @@ export default function ManagementReportsPage() {
   const [sectionId, setSectionId] = useState('')
   const [response, setResponse] = useState<ManagementReportResponse | null>(null)
   const [history, setHistory] = useState<DrillHistory[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -111,12 +111,6 @@ export default function ManagementReportsPage() {
       setLoading(false)
     }
   }
-
-  useEffect(() => {
-    void loadReport('management-financial-summary')
-    // Initial report load only. User changes are applied through Run Report.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const markChanged = () => {
     setDirty(true)
@@ -319,6 +313,12 @@ export default function ManagementReportsPage() {
           {dirty && <span className="text-xs font-medium text-amber-700">Filters changed — run the report before exporting.</span>}
         </div>
       </div>
+
+      {!response && !loading && !error && (
+        <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+          Choose the report and filters above, then click <span className="font-semibold text-slate-700">Run Report</span> to load the authorised result.
+        </div>
+      )}
 
       <ManagementReportPreview
         response={response}
