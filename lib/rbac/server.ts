@@ -43,9 +43,10 @@ export function createRequestSupabaseClient(request: NextRequest, response: Next
 export async function getServerAccessContext(request: NextRequest, response: NextResponse = NextResponse.next()): Promise<UserAccessContext | null> {
   if (!supabaseUrl || !supabaseAnonKey) return null
   const supabase = createRequestSupabaseClient(request, response)
+  const token = bearerToken(request)
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser(token || undefined)
 
   if (!user) return null
 
