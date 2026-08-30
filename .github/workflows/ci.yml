@@ -54,6 +54,9 @@ jobs:
       - name: System Settings printable report branding regression checks
         run: node lib/rbac/report-branding.test.mjs
 
+      - name: Role-aware workflow inbox regression checks
+        run: node lib/rbac/workflow-inbox.test.mjs
+
       - name: Full and differential backup regression checks
         run: node lib/backup/full-differential-backup.test.mjs
 
