@@ -32,7 +32,10 @@ function exportRows(response: ManagementReportResponse): ExportRow[] {
     const output: ExportRow = {}
     for (const column of response.columns) {
       const value = row[column.key]
-      output[column.label] = value === undefined || value === null ? '' : value as string | number | boolean
+      if (value === undefined || value === null) output[column.label] = ''
+      else if (typeof value === 'boolean') output[column.label] = value ? 'Yes' : 'No'
+      else if (typeof value === 'number' || typeof value === 'string') output[column.label] = value
+      else output[column.label] = String(value)
     }
     return output
   })
