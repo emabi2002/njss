@@ -41,7 +41,8 @@ export type ManagementReportResponse = {
   rows: ManagementReportRow[]
   totals?: Record<string, number>
   lookups: {
-    departments: Array<{ id: string; name: string }>
+    provinces: Array<{ id: string; name: string }>
+    departments: Array<{ id: string; name: string; province_id: string | null }>
     sections: Array<{ id: string; department_id: string | null; name: string }>
   }
 }
@@ -100,6 +101,9 @@ export default function ManagementReportPreview({
 
   if (!response) return null
 
+  const filteredSystemReport = response.scope.mode === 'SYSTEM'
+    && Boolean(response.appliedFilters.provinceId || response.appliedFilters.departmentId || response.appliedFilters.sectionId)
+
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
       <div className="border-b border-slate-200 p-5">
@@ -121,7 +125,7 @@ export default function ManagementReportPreview({
             <p className="mt-1 text-sm text-slate-500">Financial Year {response.financialYear}</p>
           </div>
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${response.scope.mode === 'SYSTEM' ? 'bg-png-red/10 text-png-red' : 'bg-png-gold/20 text-png-maroon'}`}>
-            {response.scope.mode === 'SYSTEM' ? 'System-wide Report' : 'Section Report'}
+            {response.scope.mode === 'SECTION' ? 'Section Report' : filteredSystemReport ? 'Filtered Consolidated Report' : 'System-wide Report'}
           </span>
         </div>
 
