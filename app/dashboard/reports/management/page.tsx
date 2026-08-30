@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { BarChart3, FileDown, FileSpreadsheet, Loader2, Play, Printer, TableProperties } from 'lucide-react'
 import { authFetch } from '@/lib/auth-fetch'
@@ -8,6 +8,7 @@ import { exportToCSV, exportToExcel, exportToPDF, printRows, rowsToPdfTable, typ
 import ManagementReportPreview, {
   type ManagementDrilldown,
   type ManagementReportResponse,
+  type ManagementReportScope,
 } from '@/components/reports/ManagementReportPreview'
 
 const REPORTS = [
@@ -25,6 +26,12 @@ type ExportFormat = 'pdf' | 'excel' | 'csv' | 'print'
 type DrillHistory = {
   response: ManagementReportResponse
   selectedReport: string
+}
+
+const EMPTY_LOOKUPS: ManagementReportResponse['lookups'] = {
+  provinces: [],
+  departments: [],
+  sections: [],
 }
 
 function exportRows(response: ManagementReportResponse): ExportRow[] {
@@ -48,8 +55,12 @@ export default function ManagementReportsPage() {
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`)
   const [endDate, setEndDate] = useState(`${currentYear}-12-31`)
   const [status, setStatus] = useState('')
+  const [provinceId, setProvinceId] = useState('')
   const [departmentId, setDepartmentId] = useState('')
   const [sectionId, setSectionId] = useState('')
+  const [lookups, setLookups] = useState<ManagementReportResponse['lookups']>(EMPTY_LOOKUPS)
+  const [lookupScope, setLookupScope] = useState<ManagementReportScope | null>(null)
+  const [lookupLoading, setLookupLoading] = useState(true)
   const [response, setResponse] = useState<ManagementReportResponse | null>(null)
   const [history, setHistory] = useState<DrillHistory[]>([])
   const [loading, setLoading] = useState(false)
@@ -57,10 +68,55 @@ export default function ManagementReportsPage() {
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
   const [dirty, setDirty] = useState(false)
 
+  useEffect(() => {
+    let cancelled = false
+
+    authFetch('/api/reports/management?lookupsOnly=1')
+      .then(async (lookupResponse) => {
+        const payload = await lookupResponse.json() as ManagementReportResponse & { error?: string }
+        if (!lookupResponse.ok) throw new Error(payload.error || 'Unable to load reporting hierarchy.')
+        return payload
+      })
+      .then((payload) => {
+        if (cancelled) return
+        setLookups(payload.lookups)
+        setLookupScope(payload.scope)
+        if (payload.scope.mode === 'SECTION') {
+          setProvinceId(payload.scope.province?.id || '')
+          setDepartmentId(payload.scope.departmentId || '')
+          setSectionId(payload.scope.sectionId || '')
+        }
+      })
+      .catch((lookupError) => {
+        if (cancelled) return
+        console.error('Management reporting hierarchy load failed:', lookupError)
+        setError(lookupError instanceof Error ? lookupError.message : 'Unable to load reporting hierarchy.')
+      })
+      .finally(() => {
+        if (!cancelled) setLookupLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const departments = useMemo(() => {
+    return provinceId
+      ? lookups.departments.filter((department) => department.province_id === provinceId)
+      : lookups.departments
+  }, [lookups.departments, provinceId])
+
   const sections = useMemo(() => {
-    const all = response?.lookups.sections || []
-    return departmentId ? all.filter((section) => section.department_id === departmentId) : all
-  }, [departmentId, response?.lookups.sections])
+    if (departmentId) {
+      return lookups.sections.filter((section) => section.department_id === departmentId)
+    }
+    if (provinceId) {
+      const departmentIds = new Set(departments.map((department) => department.id))
+      return lookups.sections.filter((section) => section.department_id && departmentIds.has(section.department_id))
+    }
+    return lookups.sections
+  }, [departmentId, departments, lookups.sections, provinceId])
 
   const loadReport = async (
     reportId: string,
@@ -80,6 +136,7 @@ export default function ManagementReportsPage() {
       const baseFilters = options.useCurrentResponseFilters && response
         ? response.appliedFilters
         : {
+            provinceId: provinceId || null,
             departmentId: departmentId || null,
             sectionId: sectionId || null,
             costCentreId: null,
@@ -87,7 +144,7 @@ export default function ManagementReportsPage() {
             fundingSourceId: null,
           }
 
-      for (const key of ['departmentId', 'sectionId', 'costCentreId', 'expenseCodeRegistryId', 'fundingSourceId'] as const) {
+      for (const key of ['provinceId', 'departmentId', 'sectionId', 'costCentreId', 'expenseCodeRegistryId', 'fundingSourceId'] as const) {
         const value = extraParams[key] ?? baseFilters[key]
         if (value) params.set(key, value)
       }
@@ -101,8 +158,11 @@ export default function ManagementReportsPage() {
       }
 
       setResponse(payload)
+      setLookups(payload.lookups)
+      setLookupScope(payload.scope)
       setSelectedReport(reportId)
       if (payload.scope.mode === 'SECTION') {
+        setProvinceId(payload.scope.province?.id || '')
         setDepartmentId(payload.scope.departmentId || '')
         setSectionId(payload.scope.sectionId || '')
       }
@@ -171,7 +231,8 @@ export default function ManagementReportsPage() {
     }
   }
 
-  const sectionLocked = response?.scope.mode === 'SECTION'
+  const sectionLocked = lookupScope?.mode === 'SECTION' || response?.scope.mode === 'SECTION'
+  const hierarchyDisabled = sectionLocked || lookupLoading
 
   return (
     <div className="space-y-6">
@@ -261,15 +322,33 @@ export default function ManagementReportsPage() {
           </div>
 
           <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Province</label>
+            <select
+              value={provinceId}
+              disabled={hierarchyDisabled}
+              onChange={(event) => {
+                setProvinceId(event.target.value)
+                setDepartmentId('')
+                setSectionId('')
+                markChanged()
+              }}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 focus:outline-none focus:ring-2 focus:ring-png-red"
+            >
+              <option value="">{lookupLoading ? 'Loading Provinces…' : 'All Provinces'}</option>
+              {lookups.provinces.map((province) => <option key={province.id} value={province.id}>{province.name}</option>)}
+            </select>
+          </div>
+
+          <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Department</label>
             <select
               value={departmentId}
-              disabled={sectionLocked}
+              disabled={hierarchyDisabled}
               onChange={(event) => { setDepartmentId(event.target.value); setSectionId(''); markChanged() }}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 focus:outline-none focus:ring-2 focus:ring-png-red"
             >
-              <option value="">All Departments</option>
-              {(response?.lookups.departments || []).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+              <option value="">{lookupLoading ? 'Loading Departments…' : 'All Departments'}</option>
+              {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
             </select>
           </div>
 
@@ -277,11 +356,11 @@ export default function ManagementReportsPage() {
             <label className="mb-1 block text-sm font-medium text-slate-700">Section</label>
             <select
               value={sectionId}
-              disabled={sectionLocked}
+              disabled={hierarchyDisabled}
               onChange={(event) => { setSectionId(event.target.value); markChanged() }}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 focus:outline-none focus:ring-2 focus:ring-png-red"
             >
-              <option value="">All Sections</option>
+              <option value="">{lookupLoading ? 'Loading Sections…' : 'All Sections'}</option>
               {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
             </select>
           </div>
@@ -291,7 +370,7 @@ export default function ManagementReportsPage() {
           <button
             type="button"
             onClick={() => void runSelectedReport()}
-            disabled={loading}
+            disabled={loading || lookupLoading}
             className="inline-flex items-center gap-2 rounded-lg bg-png-red px-4 py-2 text-sm font-semibold text-white hover:bg-png-maroon disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
