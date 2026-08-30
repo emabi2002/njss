@@ -56,6 +56,9 @@ type PositionRow = {
   projected_available_after_pending: number | null
 }
 
+type ProvinceLookup = { id: string; name: string }
+type DepartmentLookup = { id: string; name: string; province_id: string | null }
+type SectionLookup = { id: string; department_id: string | null; name: string }
 type Drilldown = { report: string; params: Record<string, string> }
 
 type ReportColumn = {
@@ -155,6 +158,10 @@ function hasReportPermission(permissions: string[]) {
     || permissions.includes('budget.report.view')
 }
 
+function paramsFrom(entries: Array<[string, string] | null>) {
+  return Object.fromEntries(entries.filter(Boolean) as Array<[string, string]>)
+}
+
 export async function GET(request: NextRequest) {
   const context = await getServerAccessContext(request)
   if (!context) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
@@ -162,10 +169,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Management report access denied' }, { status: 403 })
   }
 
+  const lookupsOnly = request.nextUrl.searchParams.get('lookupsOnly') === '1'
   const report = request.nextUrl.searchParams.get('report') || 'management-financial-summary'
-  if (!REPORT_IDS.has(report)) return NextResponse.json({ error: 'Unsupported management report' }, { status: 400 })
+  if (!lookupsOnly && !REPORT_IDS.has(report)) {
+    return NextResponse.json({ error: 'Unsupported management report' }, { status: 400 })
+  }
 
   const financialYear = parseYear(request.nextUrl.searchParams.get('financialYear'))
+  const requestedProvinceId = cleanId(request.nextUrl.searchParams.get('provinceId'))
   const requestedDepartmentId = cleanId(request.nextUrl.searchParams.get('departmentId'))
   const requestedSectionId = cleanId(request.nextUrl.searchParams.get('sectionId'))
   const costCentreId = cleanId(request.nextUrl.searchParams.get('costCentreId'))
@@ -179,29 +190,139 @@ export async function GET(request: NextRequest) {
 
   try {
     const scope = await resolveManagementReportScope(supabase, context)
+
+    let provinces: ProvinceLookup[] = []
+    let departments: DepartmentLookup[] = []
+    let sections: SectionLookup[] = []
+
+    if (scope.mode === 'SECTION') {
+      provinces = scope.province ? [scope.province] : []
+      departments = scope.department
+        ? [{ ...scope.department, province_id: scope.province?.id || null }]
+        : []
+      sections = scope.section
+        ? [{ ...scope.section, department_id: scope.departmentId }]
+        : []
+    } else {
+      const [provinceResult, courtLocationResult, departmentResult, sectionResult] = await Promise.all([
+        supabase.from('provinces').select('id, name').eq('is_active', true).order('name'),
+        supabase.from('court_locations').select('id, province_id').eq('is_active', true),
+        supabase.from('departments').select('id, name, court_location_id').eq('is_active', true).order('name'),
+        supabase.from('sections').select('id, department_id, name').eq('is_active', true).order('name'),
+      ])
+      if (provinceResult.error) throw provinceResult.error
+      if (courtLocationResult.error) throw courtLocationResult.error
+      if (departmentResult.error) throw departmentResult.error
+      if (sectionResult.error) throw sectionResult.error
+
+      const provinceByCourtLocation = new Map(
+        (courtLocationResult.data || []).map((location) => [location.id, location.province_id as string | null]),
+      )
+
+      provinces = provinceResult.data || []
+      departments = (departmentResult.data || []).map((department) => ({
+        id: department.id,
+        name: department.name,
+        province_id: department.court_location_id
+          ? provinceByCourtLocation.get(department.court_location_id) || null
+          : null,
+      }))
+      sections = sectionResult.data || []
+    }
+
+    let provinceId = requestedProvinceId
     let departmentId = requestedDepartmentId
     let sectionId = requestedSectionId
 
     if (scope.mode === 'SECTION') {
+      const assignedProvinceId = scope.province?.id || null
+      if (requestedProvinceId && requestedProvinceId !== assignedProvinceId) {
+        return NextResponse.json({ error: 'Requested Province is outside your reporting scope.' }, { status: 403 })
+      }
       if (requestedDepartmentId && requestedDepartmentId !== scope.departmentId) {
         return NextResponse.json({ error: 'Requested Department is outside your reporting scope.' }, { status: 403 })
       }
       if (requestedSectionId && requestedSectionId !== scope.sectionId) {
         return NextResponse.json({ error: 'Requested Section is outside your reporting scope.' }, { status: 403 })
       }
+      provinceId = assignedProvinceId
       departmentId = scope.departmentId
       sectionId = scope.sectionId
-    } else if (requestedSectionId) {
-      const sectionCheck = await supabase
-        .from('sections')
-        .select('id, department_id')
-        .eq('id', requestedSectionId)
-        .maybeSingle()
-      if (sectionCheck.error) throw sectionCheck.error
-      if (!sectionCheck.data) return NextResponse.json({ error: 'Requested Section does not exist.' }, { status: 400 })
-      if (requestedDepartmentId && sectionCheck.data.department_id !== requestedDepartmentId) {
+    } else {
+      const selectedProvince = provinceId ? provinces.find((province) => province.id === provinceId) : null
+      if (provinceId && !selectedProvince) {
+        return NextResponse.json({ error: 'Requested Province does not exist.' }, { status: 400 })
+      }
+
+      const selectedDepartment = departmentId
+        ? departments.find((department) => department.id === departmentId)
+        : null
+      if (departmentId && !selectedDepartment) {
+        return NextResponse.json({ error: 'Requested Department does not exist.' }, { status: 400 })
+      }
+      if (provinceId && selectedDepartment && selectedDepartment.province_id !== provinceId) {
+        return NextResponse.json({ error: 'Requested Department does not belong to the selected Province.' }, { status: 400 })
+      }
+
+      const selectedSection = sectionId ? sections.find((section) => section.id === sectionId) : null
+      if (sectionId && !selectedSection) {
+        return NextResponse.json({ error: 'Requested Section does not exist.' }, { status: 400 })
+      }
+      if (selectedSection && departmentId && selectedSection.department_id !== departmentId) {
         return NextResponse.json({ error: 'Requested Section does not belong to the selected Department.' }, { status: 400 })
       }
+      if (selectedSection && provinceId) {
+        const sectionDepartment = departments.find((department) => department.id === selectedSection.department_id)
+        if (!sectionDepartment || sectionDepartment.province_id !== provinceId) {
+          return NextResponse.json({ error: 'Requested Section does not belong to the selected Province.' }, { status: 400 })
+        }
+      }
+    }
+
+    const provinceDepartmentIds = provinceId
+      ? departments.filter((department) => department.province_id === provinceId).map((department) => department.id)
+      : []
+
+    const selectedProvince = provinceId ? provinces.find((province) => province.id === provinceId) || null : null
+    const selectedDepartment = departmentId ? departments.find((department) => department.id === departmentId) || null : null
+    const selectedSection = sectionId ? sections.find((section) => section.id === sectionId) || null : null
+
+    const responseScope = scope.mode === 'SECTION'
+      ? scope
+      : {
+          ...scope,
+          label: selectedSection
+            ? [selectedProvince?.name, selectedDepartment?.name || departments.find((department) => department.id === selectedSection.department_id)?.name, selectedSection.name].filter(Boolean).join(' › ')
+            : selectedDepartment
+              ? [selectedProvince?.name, selectedDepartment.name, 'All Sections'].filter(Boolean).join(' › ')
+              : selectedProvince
+                ? `${selectedProvince.name} — All Departments & Sections`
+                : scope.label,
+        }
+
+    const appliedFilters = {
+      provinceId,
+      departmentId,
+      sectionId,
+      costCentreId,
+      expenseCodeRegistryId,
+      fundingSourceId,
+      status,
+      startDate,
+      endDate,
+    }
+
+    if (lookupsOnly) {
+      return NextResponse.json({
+        report: 'lookups',
+        title: 'Management Report Filters',
+        financialYear,
+        scope: responseScope,
+        appliedFilters,
+        columns: [],
+        rows: [],
+        lookups: { provinces, departments, sections },
+      })
     }
 
     let positionQuery = supabase
@@ -210,6 +331,7 @@ export async function GET(request: NextRequest) {
       .eq('financial_year', financialYear)
 
     if (departmentId) positionQuery = positionQuery.eq('department_id', departmentId)
+    else if (provinceId) positionQuery = positionQuery.in('department_id', provinceDepartmentIds)
     if (sectionId) positionQuery = positionQuery.eq('section_id', sectionId)
     if (costCentreId) positionQuery = positionQuery.eq('cost_centre_id', costCentreId)
     if (expenseCodeRegistryId) positionQuery = positionQuery.eq('expense_code_registry_id', expenseCodeRegistryId)
@@ -235,13 +357,37 @@ export async function GET(request: NextRequest) {
         .select('status, department_id, section_id, cost_centre_id, expense_code_registry_id, funding_source_id, payment_request_date')
         .eq('financial_year', financialYear)
 
-      if (departmentId) { ff3Query = ff3Query.eq('department_id', departmentId); ff4Query = ff4Query.eq('department_id', departmentId) }
-      if (sectionId) { ff3Query = ff3Query.eq('section_id', sectionId); ff4Query = ff4Query.eq('section_id', sectionId) }
-      if (costCentreId) { ff3Query = ff3Query.eq('cost_centre_id', costCentreId); ff4Query = ff4Query.eq('cost_centre_id', costCentreId) }
-      if (expenseCodeRegistryId) { ff3Query = ff3Query.eq('expense_code_registry_id', expenseCodeRegistryId); ff4Query = ff4Query.eq('expense_code_registry_id', expenseCodeRegistryId) }
-      if (fundingSourceId) { ff3Query = ff3Query.eq('funding_source_id', fundingSourceId); ff4Query = ff4Query.eq('funding_source_id', fundingSourceId) }
-      if (startDate) { ff3Query = ff3Query.gte('request_date', startDate); ff4Query = ff4Query.gte('payment_request_date', startDate) }
-      if (endDate) { ff3Query = ff3Query.lte('request_date', endDate); ff4Query = ff4Query.lte('payment_request_date', endDate) }
+      if (departmentId) {
+        ff3Query = ff3Query.eq('department_id', departmentId)
+        ff4Query = ff4Query.eq('department_id', departmentId)
+      } else if (provinceId) {
+        ff3Query = ff3Query.in('department_id', provinceDepartmentIds)
+        ff4Query = ff4Query.in('department_id', provinceDepartmentIds)
+      }
+      if (sectionId) {
+        ff3Query = ff3Query.eq('section_id', sectionId)
+        ff4Query = ff4Query.eq('section_id', sectionId)
+      }
+      if (costCentreId) {
+        ff3Query = ff3Query.eq('cost_centre_id', costCentreId)
+        ff4Query = ff4Query.eq('cost_centre_id', costCentreId)
+      }
+      if (expenseCodeRegistryId) {
+        ff3Query = ff3Query.eq('expense_code_registry_id', expenseCodeRegistryId)
+        ff4Query = ff4Query.eq('expense_code_registry_id', expenseCodeRegistryId)
+      }
+      if (fundingSourceId) {
+        ff3Query = ff3Query.eq('funding_source_id', fundingSourceId)
+        ff4Query = ff4Query.eq('funding_source_id', fundingSourceId)
+      }
+      if (startDate) {
+        ff3Query = ff3Query.gte('request_date', startDate)
+        ff4Query = ff4Query.gte('payment_request_date', startDate)
+      }
+      if (endDate) {
+        ff3Query = ff3Query.lte('request_date', endDate)
+        ff4Query = ff4Query.lte('payment_request_date', endDate)
+      }
 
       const [ff3Result, ff4Result] = await Promise.all([ff3Query, ff4Query])
       if (ff3Result.error) throw ff3Result.error
@@ -251,10 +397,11 @@ export async function GET(request: NextRequest) {
       const nextReport = scope.mode === 'SECTION' ? 'cost-centre-financial-position' : 'department-financial-position'
       const drilldown: Drilldown = {
         report: nextReport,
-        params: Object.fromEntries([
+        params: paramsFrom([
+          provinceId ? ['provinceId', provinceId] : null,
           departmentId ? ['departmentId', departmentId] : null,
           sectionId ? ['sectionId', sectionId] : null,
-        ].filter(Boolean) as Array<[string, string]>),
+        ]),
       }
       columns = [
         { key: 'metric', label: 'Metric' },
@@ -292,7 +439,13 @@ export async function GET(request: NextRequest) {
         positions,
         (row) => row.department_id || 'unassigned',
         (row) => row.department_name || 'Unassigned',
-        (row) => row.department_id ? { report: 'section-financial-position', params: { departmentId: row.department_id } } : undefined,
+        (row) => row.department_id ? {
+          report: 'section-financial-position',
+          params: paramsFrom([
+            provinceId ? ['provinceId', provinceId] : null,
+            ['departmentId', row.department_id],
+          ]),
+        } : undefined,
       )
     } else if (report === 'section-financial-position') {
       title = 'Section Financial Position'
@@ -303,10 +456,11 @@ export async function GET(request: NextRequest) {
         (row) => row.section_name || 'Unassigned',
         (row) => row.section_id ? {
           report: 'cost-centre-financial-position',
-          params: Object.fromEntries([
+          params: paramsFrom([
+            provinceId ? ['provinceId', provinceId] : null,
             row.department_id ? ['departmentId', row.department_id] : null,
             ['sectionId', row.section_id],
-          ].filter(Boolean) as Array<[string, string]>),
+          ]),
         } : undefined,
       )
     } else if (report === 'cost-centre-financial-position') {
@@ -318,11 +472,12 @@ export async function GET(request: NextRequest) {
         (row) => row.cost_centre_code ? `${row.cost_centre_code} — ${row.cost_centre_name || ''}` : row.cost_centre_name || 'Unassigned',
         (row) => row.cost_centre_id ? {
           report: 'expense-code-financial-position',
-          params: Object.fromEntries([
+          params: paramsFrom([
+            provinceId ? ['provinceId', provinceId] : null,
             row.department_id ? ['departmentId', row.department_id] : null,
             row.section_id ? ['sectionId', row.section_id] : null,
             ['costCentreId', row.cost_centre_id],
-          ].filter(Boolean) as Array<[string, string]>),
+          ]),
         } : undefined,
       )
     } else if (report === 'expense-code-financial-position') {
@@ -334,12 +489,13 @@ export async function GET(request: NextRequest) {
         (row) => row.full_expense_code || 'Unassigned',
         (row) => row.expense_code_registry_id ? {
           report: 'ff3-ff4-transaction-trace',
-          params: Object.fromEntries([
+          params: paramsFrom([
+            provinceId ? ['provinceId', provinceId] : null,
             row.department_id ? ['departmentId', row.department_id] : null,
             row.section_id ? ['sectionId', row.section_id] : null,
             row.cost_centre_id ? ['costCentreId', row.cost_centre_id] : null,
             ['expenseCodeRegistryId', row.expense_code_registry_id],
-          ].filter(Boolean) as Array<[string, string]>),
+          ]),
         } : undefined,
       )
     } else if (report === 'funding-source-financial-position') {
@@ -351,11 +507,12 @@ export async function GET(request: NextRequest) {
         (row) => row.funding_source_name || 'Unassigned',
         (row) => row.funding_source_id ? {
           report: 'ff3-ff4-transaction-trace',
-          params: Object.fromEntries([
+          params: paramsFrom([
+            provinceId ? ['provinceId', provinceId] : null,
             departmentId ? ['departmentId', departmentId] : null,
             sectionId ? ['sectionId', sectionId] : null,
             ['fundingSourceId', row.funding_source_id],
-          ].filter(Boolean) as Array<[string, string]>),
+          ]),
         } : undefined,
       )
     } else {
@@ -380,6 +537,7 @@ export async function GET(request: NextRequest) {
         .order('ff3_number')
 
       if (departmentId) traceQuery = traceQuery.eq('department_id', departmentId)
+      else if (provinceId) traceQuery = traceQuery.in('department_id', provinceDepartmentIds)
       if (sectionId) traceQuery = traceQuery.eq('section_id', sectionId)
       if (costCentreId) traceQuery = traceQuery.eq('cost_centre_id', costCentreId)
       if (expenseCodeRegistryId) traceQuery = traceQuery.eq('expense_code_registry_id', expenseCodeRegistryId)
@@ -406,41 +564,16 @@ export async function GET(request: NextRequest) {
       }))
     }
 
-    let departments: Array<{ id: string; name: string }> = []
-    let sections: Array<{ id: string; department_id: string | null; name: string }> = []
-    if (scope.mode === 'SECTION') {
-      departments = scope.department ? [scope.department] : []
-      sections = scope.section ? [{ ...scope.section, department_id: scope.departmentId }] : []
-    } else {
-      const [departmentResult, sectionResult] = await Promise.all([
-        supabase.from('departments').select('id, name').eq('is_active', true).order('name'),
-        supabase.from('sections').select('id, department_id, name').eq('is_active', true).order('name'),
-      ])
-      if (departmentResult.error) throw departmentResult.error
-      if (sectionResult.error) throw sectionResult.error
-      departments = departmentResult.data || []
-      sections = sectionResult.data || []
-    }
-
     return NextResponse.json({
       report,
       title,
       financialYear,
-      scope,
-      appliedFilters: {
-        departmentId,
-        sectionId,
-        costCentreId,
-        expenseCodeRegistryId,
-        fundingSourceId,
-        status,
-        startDate,
-        endDate,
-      },
+      scope: responseScope,
+      appliedFilters,
       columns,
       rows,
       totals,
-      lookups: { departments, sections },
+      lookups: { provinces, departments, sections },
     })
   } catch (error) {
     console.error('Unable to load scoped management report:', error)
