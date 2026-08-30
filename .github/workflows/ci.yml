@@ -48,6 +48,9 @@ jobs:
       - name: Scoped dashboard regression checks
         run: node lib/rbac/dashboard-scope.test.mjs
 
+      - name: Management reporting and drill-down regression checks
+        run: node lib/rbac/management-reports.test.mjs
+
       - name: Full and differential backup regression checks
         run: node lib/backup/full-differential-backup.test.mjs
 
