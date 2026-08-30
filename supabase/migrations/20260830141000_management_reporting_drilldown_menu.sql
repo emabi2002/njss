@@ -14,7 +14,7 @@ INSERT INTO public.menu_items (
 )
 VALUES (
   'reports.management_drilldown',
-  'njss_operations',
+  'reports',
   NULL,
   'Management Drill-Down',
   '/dashboard/reports/management',
