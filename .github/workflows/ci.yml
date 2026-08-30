@@ -45,6 +45,9 @@ jobs:
       - name: Access Control privileged Edge routing regression checks
         run: node lib/rbac/access-admin-edge.test.mjs
 
+      - name: Scoped dashboard regression checks
+        run: node lib/rbac/dashboard-scope.test.mjs
+
       - name: Full and differential backup regression checks
         run: node lib/backup/full-differential-backup.test.mjs
 
