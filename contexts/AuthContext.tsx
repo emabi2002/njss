@@ -12,13 +12,12 @@ import {
   canPerformAction,
   canPerformAllActions,
   canPerformAnyAction,
-  loadRbacModules,
-  loadRbacNavigation,
   logAccessEvent,
 } from '@/lib/rbac/client'
 
 // Authentication is provided exclusively by Supabase Auth. RBAC profile, roles,
-// permissions, menus and data scopes are loaded from the database after login.
+// permissions, menus and data scopes are loaded from the authenticated server
+// access context after login.
 
 type AuthContextType = {
   user: User | null
@@ -34,7 +33,7 @@ type AuthContextType = {
   canAll: (perms: Permission[]) => boolean
   canOnRecord: (perm: Permission, record: Parameters<typeof canAccessRecord>[1]) => boolean
   loading: boolean
-  /** true only after the database-backed profile, permissions and scopes have resolved. */
+  /** true only after the database-backed profile, permissions, scopes and navigation have resolved. */
   accessReady: boolean
   /** null while unknown, true when an administrator-issued password is still in force. */
   mustChangePassword: boolean | null
@@ -56,6 +55,8 @@ type ServerAccessResponse = {
   scopes?: RbacDataScope[]
   departmentId?: string | null
   sectionId?: string | null
+  menus?: RbacMenuItem[]
+  modules?: RbacModule[]
 }
 
 const FALLBACK_ROLE = 'Executive Viewer'
@@ -111,6 +112,8 @@ async function fetchServerAccess(authUser: User, fallbackEmail: string) {
     profile,
     permissions: access.permissions || [],
     scopes: access.scopes || [],
+    menus: access.menus || [],
+    modules: access.modules || [],
   }
 }
 
@@ -141,20 +144,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    // Navigation metadata is authenticated-only (migrations 016/029 revoke anon
-    // access), so skip the round-trip entirely when there is no session and clear
-    // any menus left over from a previous one.
-    if (!user) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMenus([])
-      setModules([])
-      return
-    }
-    loadRbacNavigation(permissions).then(setMenus)
-    loadRbacModules().then(setModules)
-  }, [permissions, user])
-
-  useEffect(() => {
     let mounted = true
 
     const loadAccessContext = async (authUser: User, fallbackEmail: string) => {
@@ -165,11 +154,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(access.profile)
         setPermissions(access.permissions)
         setScopes(access.scopes)
+        setMenus(access.menus || [])
+        setModules(access.modules || [])
       } catch (error) {
         if (!mounted) return
         console.warn('Server RBAC access load failed:', error)
         setPermissions([])
         setScopes([])
+        setMenus([])
+        setModules([])
       } finally {
         if (mounted) setAccessReady(true)
       }
@@ -184,6 +177,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         setAccessReady(false)
         setUser(session.user)
+        setMenus([])
+        setModules([])
         setProfile({
           id: session.user.id,
           authUserId: session.user.id,
@@ -202,6 +197,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null)
         setPermissions([])
         setScopes([])
+        setMenus([])
+        setModules([])
         setAccessReady(true)
         setMustChangePassword(null)
         setLoading(false)
@@ -216,6 +213,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         setAccessReady(false)
         setUser(session.user)
+        setMenus([])
+        setModules([])
         setProfile({
           id: session.user.id,
           authUserId: session.user.id,
@@ -234,6 +233,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null)
         setPermissions([])
         setScopes([])
+        setMenus([])
+        setModules([])
         setAccessReady(true)
         setMustChangePassword(null)
       }
@@ -283,6 +284,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(null)
       setPermissions([])
       setScopes([])
+      setMenus([])
+      setModules([])
       setAccessReady(true)
       setMustChangePassword(null)
       if (typeof window !== 'undefined') window.location.href = '/login'
@@ -298,10 +301,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(access.profile)
       setPermissions(access.permissions)
       setScopes(access.scopes)
+      setMenus(access.menus || [])
+      setModules(access.modules || [])
     } catch (error) {
       console.warn('Server RBAC refresh failed:', error)
       setPermissions([])
       setScopes([])
+      setMenus([])
+      setModules([])
     } finally {
       setAccessReady(true)
     }
