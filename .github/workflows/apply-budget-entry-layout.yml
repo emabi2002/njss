@@ -1,0 +1,35 @@
+name: Apply Budget Entry Layout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-budget-entry-layout.yml'
+      - 'scripts/apply-budget-entry-layout.mjs'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply layout transformation
+        run: node scripts/apply-budget-entry-layout.mjs
+
+      - name: Commit layout change
+        run: |
+          if git diff --quiet -- app/dashboard/budget-template/page.tsx; then
+            echo "Budget Entry layout already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/dashboard/budget-template/page.tsx
+          git commit -m "feat(budget): expand entry sheet to full width"
+          git push origin HEAD:main
