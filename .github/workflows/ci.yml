@@ -93,6 +93,9 @@ jobs:
       - name: Password recovery route regression checks
         run: node scripts/national-uat/password-recovery-route.test.mjs
 
+      - name: Repository governance regression checks
+        run: node scripts/repository-governance.test.mjs
+
       - name: Lint
         run: bun run lint
 
