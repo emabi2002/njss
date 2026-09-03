@@ -74,7 +74,7 @@ const FF4_RULES: Record<string, TaskRule> = {
     action: 'APPROVE_FF4',
     actionLabel: 'Approve FF4',
     summaryLabel: 'FF4s awaiting approval',
-    responsibleRole: 'Authorised Approver',
+    responsibleRole: 'Registrar',
   },
   APPROVED: {
     requiredPermission: 'ff4.process',
