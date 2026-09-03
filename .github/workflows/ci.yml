@@ -93,6 +93,9 @@ jobs:
       - name: Password recovery route regression checks
         run: node scripts/national-uat/password-recovery-route.test.mjs
 
+      - name: SECURITY DEFINER RPC privilege lockdown regression checks
+        run: node scripts/security-definer-rpc-lockdown.test.mjs
+
       - name: Lint
         run: bun run lint
 
