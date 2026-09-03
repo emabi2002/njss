@@ -93,6 +93,9 @@ jobs:
       - name: Password recovery route regression checks
         run: node scripts/national-uat/password-recovery-route.test.mjs
 
+      - name: Public-table RLS lockdown regression checks
+        run: node scripts/public-table-rls-lockdown.test.mjs
+
       - name: Lint
         run: bun run lint
 
