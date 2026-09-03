@@ -18,6 +18,20 @@ jobs:
     name: Build and validate
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: njss-ci-only
+          POSTGRES_DB: njss_rpc_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
@@ -110,6 +124,11 @@ jobs:
 
       - name: Critical SECURITY DEFINER RPC lockdown checks
         run: node scripts/critical-rpc-lockdown.test.mjs
+
+      - name: Budget RPC PostgreSQL runtime checks
+        env:
+          NJSS_TEST_DATABASE_URL: postgresql://postgres:njss-ci-only@127.0.0.1:5432/njss_rpc_test
+        run: node scripts/critical-rpc-runtime.test.mjs
 
       - name: Lint
         run: bun run lint
