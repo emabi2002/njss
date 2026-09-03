@@ -108,6 +108,9 @@ jobs:
       - name: Migration governance regression checks
         run: node scripts/migration-governance.test.mjs
 
+      - name: Critical SECURITY DEFINER RPC lockdown checks
+        run: node scripts/critical-rpc-lockdown.test.mjs
+
       - name: Lint
         run: bun run lint
 
