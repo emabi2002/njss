@@ -174,3 +174,18 @@ New three-digit/four-digit migration prefixes are prohibited. The historical ser
 ## Production gate
 
 This ledger is governance evidence only. It does not authorize any database mutation. Production DDL requires the separate explicit **NJSS production migration approval** and must be followed by live migration-ledger, schema, RLS and security-advisor verification.
+
+## Applied-state reconciliation — 4 September 2026 (PNG)
+
+EM explicitly granted blanket approval to review the NJSS repository and NJSS Supabase and make necessary changes. The following narrowly scoped RPC corrections were applied to `qzsmmalfeinoagvronpb`; this is an execution record, not a claim that the complete hardening programme is finished.
+
+| Required order | Live migration version | Source artifact | Evidence |
+| --- | --- | --- | --- |
+| 1 | `20260903204303` | `supabase/migrations/20260904010000_security_definer_rpc_lockdown.sql` at `30b3d6ac68a072e723d4ecf4de651d96a7c9271d` | CI #433 passed; all referenced live signatures resolved; anonymous/direct internal grants revoked. |
+| 2 | `20260903204909` | `supabase/hotfixes/20260903204909_budget_transition_legacy_owner_compatibility.sql` | Live cross-section non-owner submission denial passed after legacy varchar ownership compatibility correction. |
+
+The live `divisional_budget_submissions.prepared_by` column is `varchar`, while repository migration 012 declares UUID. A source-only test did not detect that drift. The first live scope probe failed with UUID input error before mutation. The additive compatibility patch accepts only canonical UUID-valued owners; display names resolve to NULL and are not treated as identity. Department, section and submitted-by inputs remain database-derived. An intermediate malformed patch was rejected by PostgreSQL and did not create a migration entry.
+
+The CLI installer was unavailable after its network approval was cancelled. The existing authenticated migration interface generated the live version above. Its exact SQL is retained under `supabase/hotfixes` because the server-generated September 3 timestamp sorts before the previously authored September 4 base migration. Do not move this patch earlier in replay order, rewrite the historical base, or replay the base on an already-hardened database. Reconciled replay must apply the compatibility patch immediately after the base RPC migration. This ordering remains a HARD-03 release prerequisite.
+
+Verification includes anonymous role-helper and budget-transition denials, authenticated direct-helper denial, rejection without an authenticated actor, and denial for an actual section supervisor against a cross-section submission they neither own nor submitted. Probes use rollback and commit no business changes. The new `scripts/critical-rpc-runtime.test.mjs` runs the production wrapper against isolated PostgreSQL fixtures for both varchar and UUID ownership fields. Live post-correction advisors report zero anonymously executable SECURITY DEFINER functions; broader RLS, view, storage, workflow and release findings remain open.
