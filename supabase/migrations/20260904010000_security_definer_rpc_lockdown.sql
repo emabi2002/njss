@@ -97,12 +97,16 @@ CREATE OR REPLACE FUNCTION public.transition_divisional_budget_submission(
 RETURNS public.divisional_budget_submissions
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog
 AS $wrapper$
 DECLARE
   v_actor uuid;
   v_actor_email text;
   v_action text := upper(coalesce(p_action, ''));
+  v_submission_department_id uuid;
+  v_submission_section_id uuid;
+  v_submission_prepared_by uuid;
+  v_submission_submitted_by uuid;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Authentication required';
@@ -133,6 +137,28 @@ BEGIN
     ELSE
       RAISE EXCEPTION 'Unsupported budget workflow action: %', p_action;
   END CASE;
+
+  SELECT s.department_id, d.section_id, s.prepared_by, s.submitted_by
+  INTO v_submission_department_id, v_submission_section_id,
+       v_submission_prepared_by, v_submission_submitted_by
+  FROM public.divisional_budget_submissions s
+  LEFT JOIN public.budget_divisions d ON d.id = s.division_id
+  WHERE s.id = p_submission_id
+  FOR UPDATE OF s;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Budget submission not found';
+  END IF;
+
+  IF NOT coalesce(public.fn_current_user_data_scope_allows(
+    v_submission_department_id,
+    v_submission_section_id,
+    v_submission_prepared_by,
+    v_submission_submitted_by,
+    NULL
+  ), false) THEN
+    RAISE EXCEPTION 'Budget submission is outside the current user organisational scope';
+  END IF;
 
   -- Ignore caller-supplied identity. The internal implementation receives the
   -- authenticated NJSS user's email so audit/history actor data cannot be spoofed.
