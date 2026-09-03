@@ -105,6 +105,9 @@ jobs:
       - name: Repository governance regression checks
         run: node scripts/repository-governance.test.mjs
 
+      - name: Migration governance regression checks
+        run: node scripts/migration-governance.test.mjs
+
       - name: Lint
         run: bun run lint
 
