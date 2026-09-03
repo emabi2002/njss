@@ -1,4 +1,5 @@
 -- NJSS HARD-10: remove non-row privileges from public client roles.
+-- Applied live as 20260903211826; this comment is post-application metadata.
 -- PostgreSQL 17+. No business rows, RLS policies, or DML grants are changed.
 -- This is independent of the pending business-policy migrations.
 SET LOCAL lock_timeout = '2s';
