@@ -42,10 +42,27 @@ DROP POLICY IF EXISTS budget_monthly_allocations_read ON public.budget_monthly_a
 DROP POLICY IF EXISTS budget_monthly_allocations_insert ON public.budget_monthly_allocations;
 DROP POLICY IF EXISTS budget_monthly_allocations_update ON public.budget_monthly_allocations;
 DROP POLICY IF EXISTS budget_monthly_allocations_delete ON public.budget_monthly_allocations;
+DROP POLICY IF EXISTS budget_monthly_allocations_select_phase6 ON public.budget_monthly_allocations;
 
+-- These tables retained older budget-admin mutation policies in the live schema.
+-- Because PostgreSQL permissive policies combine with OR semantics, leaving them
+-- in place would preserve Registrar mutation access even after stricter HARD-10
+-- policies were added. Retire the superseded policy set explicitly.
 DROP POLICY IF EXISTS budget_division_ceilings_read ON public.budget_division_ceilings;
+DROP POLICY IF EXISTS budget_division_ceilings_insert ON public.budget_division_ceilings;
+DROP POLICY IF EXISTS budget_division_ceilings_update ON public.budget_division_ceilings;
+DROP POLICY IF EXISTS budget_division_ceilings_delete ON public.budget_division_ceilings;
+
 DROP POLICY IF EXISTS budget_reference_values_read ON public.budget_reference_values;
+DROP POLICY IF EXISTS budget_reference_values_insert ON public.budget_reference_values;
+DROP POLICY IF EXISTS budget_reference_values_update ON public.budget_reference_values;
+DROP POLICY IF EXISTS budget_reference_values_delete ON public.budget_reference_values;
+
 DROP POLICY IF EXISTS expense_ledger_read ON public.expense_ledger;
+DROP POLICY IF EXISTS expense_ledger_insert ON public.expense_ledger;
+DROP POLICY IF EXISTS expense_ledger_update ON public.expense_ledger;
+DROP POLICY IF EXISTS expense_ledger_delete ON public.expense_ledger;
+DROP POLICY IF EXISTS expense_ledger_select_phase6 ON public.expense_ledger;
 
 -- Import batches: permission + division scope.
 DROP POLICY IF EXISTS hard10_import_batch_read ON public.budget_import_batches;
@@ -347,7 +364,18 @@ DROP POLICY IF EXISTS hard10_expense_ledger_read ON public.expense_ledger;
 DROP POLICY IF EXISTS hard10_expense_ledger_write ON public.expense_ledger;
 CREATE POLICY hard10_expense_ledger_read ON public.expense_ledger
 FOR SELECT TO authenticated
-USING (auth.uid() IS NOT NULL);
+USING (
+  auth.uid() IS NOT NULL
+  AND (
+    public.fn_current_user_has_permission('budget.template')
+    OR public.fn_current_user_has_permission('budget.template.view')
+    OR public.fn_current_user_has_permission('budget.report.view')
+    OR public.fn_current_user_has_permission('budget.module.view')
+    OR public.fn_current_user_has_permission('budget.view')
+    OR public.fn_current_user_has_permission('reports.view')
+    OR public.fn_current_user_has_permission('all')
+  )
+);
 CREATE POLICY hard10_expense_ledger_write ON public.expense_ledger
 FOR ALL TO authenticated
 USING (auth.uid() IS NOT NULL AND (public.fn_current_user_has_permission('masterdata.manage') OR public.fn_current_user_has_permission('registry.manage') OR public.fn_current_user_has_permission('all')))
@@ -364,6 +392,22 @@ BEGIN
            OR COALESCE(with_check, '') ILIKE '%njss_is_budget_contributor%')
   ) THEN
     RAISE EXCEPTION 'HARD-10 failed: a policy still depends on njss_is_budget_contributor()';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname='public'
+      AND (
+        policyname IN ('budget_monthly_allocations_select_phase6','expense_ledger_select_phase6')
+        OR (
+          tablename IN ('budget_division_ceilings','budget_reference_values','expense_ledger')
+          AND (COALESCE(qual,'') ILIKE '%njss_is_budget_admin%'
+               OR COALESCE(with_check,'') ILIKE '%njss_is_budget_admin%')
+        )
+      )
+  ) THEN
+    RAISE EXCEPTION 'HARD-10 failed: a superseded permissive ancillary budget policy still exists';
   END IF;
 END
 $retire_budget_contributor$;
