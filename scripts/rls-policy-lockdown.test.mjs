@@ -7,21 +7,24 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const migrationPath = path.join(root, 'supabase', 'migrations', '20260904013000_rls_and_legacy_policy_lockdown.sql')
 const cleanupPath = path.join(root, 'supabase', 'migrations', '20260904013100_budget_legacy_policy_cleanup.sql')
 const monthlyCompatibilityPath = path.join(root, 'supabase', 'migrations', '20260905152000_hard10_monthly_budget_view_compatibility.sql')
+const historyCompatibilityPath = path.join(root, 'supabase', 'migrations', '20260905152100_hard10_budget_view_history_compatibility.sql')
 const preflightPath = path.join(root, 'supabase', 'tests', 'hard10_policy_trigger_preflight.sql')
 const hard10aPath = path.join(root, 'supabase', 'hotfixes', '20260905082346_hard10a_uat_supervisor_delegation.sql')
 
 assert.ok(fs.existsSync(migrationPath), 'HARD-10 RLS lockdown migration must exist')
 assert.ok(fs.existsSync(cleanupPath), 'HARD-10 ancillary budget policy cleanup migration must exist')
 assert.ok(fs.existsSync(monthlyCompatibilityPath), 'HARD-10 monthly budget.view compatibility migration must exist')
+assert.ok(fs.existsSync(historyCompatibilityPath), 'HARD-10 budget.view history compatibility migration must exist')
 assert.ok(fs.existsSync(preflightPath), 'HARD-10 live policy/trigger actor preflight must exist')
 assert.ok(fs.existsSync(hard10aPath), 'HARD-10A UAT supervisor reconciliation hotfix must exist')
 
 const sql = fs.readFileSync(migrationPath, 'utf8').toLowerCase()
 const cleanup = fs.readFileSync(cleanupPath, 'utf8').toLowerCase()
 const monthlyCompatibility = fs.readFileSync(monthlyCompatibilityPath, 'utf8').toLowerCase()
+const historyCompatibility = fs.readFileSync(historyCompatibilityPath, 'utf8').toLowerCase()
 const preflight = fs.readFileSync(preflightPath, 'utf8').toLowerCase()
 const hard10a = fs.readFileSync(hard10aPath, 'utf8').toLowerCase()
-const combined = `${sql}\n${cleanup}\n${monthlyCompatibility}`
+const combined = `${sql}\n${cleanup}\n${monthlyCompatibility}\n${historyCompatibility}`
 
 const rlsTables = [
   'activity_templates','annual_plan_lines','approval_limits','budget_consolidations','budget_cycles',
@@ -61,9 +64,6 @@ for (const unsafePolicy of [
   assert.ok(combined.includes(`drop policy if exists ${unsafePolicy}`), `unsafe legacy policy not removed: ${unsafePolicy}`)
 }
 
-// Legacy permissive policies on the ancillary budget tables are OR-combined by
-// PostgreSQL. Every superseded policy must be retired, not merely accompanied by
-// a stricter hard10_* policy.
 for (const residualPolicy of [
   'budget_monthly_allocations_select_phase6',
   'budget_division_ceilings_insert',
@@ -95,11 +95,9 @@ const lineInsert = policyBlock(sql, 'hard10_budget_line_insert')
 const lineUpdate = policyBlock(sql, 'hard10_budget_line_update')
 const lineDelete = policyBlock(sql, 'hard10_budget_line_delete')
 const monthlyAllocationRead = policyBlock(monthlyCompatibility, 'hard10_monthly_allocation_read')
+const historyRead = policyBlock(historyCompatibility, 'hard10_budget_history_read')
 const expenseLedgerRead = policyBlock(cleanup, 'hard10_expense_ledger_read')
 
-// Direct table mutation is preparation/edit authority only. Submit/review/approve
-// remain guarded SECURITY DEFINER workflow RPC actions and must not become generic
-// row-write authority.
 assert.ok(submissionInsert.includes("budget.template.create"), 'submission INSERT must require budget.template.create')
 assert.ok(submissionUpdate.includes("budget.template.edit"), 'submission UPDATE must require budget.template.edit')
 assert.ok(submissionDelete.includes("budget.template.edit"), 'submission DELETE must require budget.template.edit')
@@ -120,40 +118,33 @@ for (const [label, block] of [
   }
 }
 
-// Normal direct edits only exist before workflow lock, with RETURNED explicitly
-// preserved for correction/resubmission.
 assert.ok(submissionInsert.includes("status = 'draft'"), 'direct submission INSERT must create DRAFT rows only')
 assert.ok(submissionUpdate.includes("status in ('draft','returned')") || submissionUpdate.includes("status in ('draft', 'returned')"), 'direct submission UPDATE must be limited to DRAFT/RETURNED')
 assert.ok(submissionDelete.includes("status in ('draft','returned')") || submissionDelete.includes("status in ('draft', 'returned')"), 'direct submission DELETE must be limited to DRAFT/RETURNED')
 assert.ok(lineUpdate.includes("s.status in ('draft','returned')") || lineUpdate.includes("s.status in ('draft', 'returned')"), 'line UPDATE must inherit DRAFT/RETURNED parent state')
 assert.ok(lineDelete.includes("s.status in ('draft','returned')") || lineDelete.includes("s.status in ('draft', 'returned')"), 'line DELETE must inherit DRAFT/RETURNED parent state')
 
-// Budget rows are organisational records. Passing submitted_by/created_by into
-// the generic scope helper would grant cross-section ownership override.
 assert.ok(!submissionRead.includes('submitted_by'), 'budget submission read scope must not bypass section scope through submitted_by ownership')
 assert.ok(!submissionUpdate.includes('submitted_by'), 'budget submission update scope must not bypass section scope through submitted_by ownership')
 assert.ok(!lineRead.includes('s.submitted_by'), 'budget line read scope must not inherit cross-section submitted_by ownership override')
 assert.ok(!lineUpdate.includes('s.submitted_by'), 'budget line update scope must not inherit cross-section submitted_by ownership override')
 
-// Monthly allocations are child detail of budget lines. Anyone with the canonical
-// budget.view permission who can read the parent submission/line must be able to
-// read its scoped monthly detail. Report-only permissions must not recreate the
-// retired Phase-6 cross-scope shortcut.
 assert.ok(monthlyAllocationRead.includes('budget.view'), 'monthly allocation read must preserve budget.view detail access')
 assert.ok(!monthlyAllocationRead.includes('budget.report.view'), 'monthly allocation read must not grant raw detail through budget.report.view alone')
 assert.ok(!monthlyAllocationRead.includes('reports.view'), 'monthly allocation read must not grant raw detail through reports.view alone')
 assert.ok(monthlyCompatibility.includes('hard-10b must run after the hard-10 ancillary budget policy cleanup'), 'monthly compatibility migration must refuse standalone application')
 
-// Reference-data reads may be broad within budget/report roles, but must never
-// fall back to any-authenticated access.
+assert.ok(historyRead.includes('budget.view'), 'workflow history read must preserve budget.view read-only detail access')
+assert.ok(!historyRead.includes('budget.report.view'), 'workflow history read must not grant raw detail through budget.report.view alone')
+assert.ok(!historyRead.includes('reports.view'), 'workflow history read must not grant raw detail through reports.view alone')
+assert.ok(historyCompatibility.includes('hard-10c must run after the primary hard-10 rls migration'), 'history compatibility migration must refuse standalone application')
+
 assert.ok(
   ['budget.template.view','budget.report.view','budget.module.view','budget.view','reports.view','all'].some(permission => expenseLedgerRead.includes(permission)),
   'expense ledger read must require an explicit budget/report permission',
 )
 assert.ok(!/^create\s+policy[\s\S]*using\s*\(\s*auth\.uid\(\)\s+is\s+not\s+null\s*\)\s*;$/i.test(expenseLedgerRead.trim()), 'expense ledger read must not allow every authenticated user')
 
-// Identity and parentage are immutable through direct table updates. Workflow
-// RPCs may change controlled actor/status fields under njss.budget_workflow.
 assert.ok(sql.includes('create or replace function public.njss_hard10_guard_budget_submission_identity()'), 'submission identity guard function must exist')
 assert.ok(sql.includes('create trigger trg_hard10_budget_submission_identity'), 'submission identity guard trigger must exist')
 for (const protectedField of ['new.division_id is distinct from old.division_id', 'new.department_id is distinct from old.department_id', 'new.submitted_by is distinct from old.submitted_by']) {
@@ -165,16 +156,10 @@ assert.ok(sql.includes('create trigger trg_hard10_budget_line_parent'), 'budget 
 assert.ok(sql.includes('create or replace function public.njss_hard10_guard_monthly_allocation_parent()'), 'monthly allocation parent guard function must exist')
 assert.ok(sql.includes('new.budget_line_id is distinct from old.budget_line_id'), 'monthly allocations must not be moved between budget lines directly')
 
-// Live preflight must detect UAT/production actor-data drift rather than forcing
-// permissive policy exceptions for invalid assignments.
 assert.ok(preflight.includes('assigned_line_supervisor_id'), 'preflight must inspect assigned Line Supervisors')
 assert.ok(preflight.includes('njss_budget_revision_supervisor_matches'), 'preflight must verify assigned supervisor organisational match')
 assert.ok(preflight.includes('fn_current_user_data_scope_allows'), 'preflight must exercise effective organisational scope')
 
-// HARD-10A: the national UAT supervisor must keep a stable home section. Any
-// cross-location responsibility is an explicit user-level delegation, not a
-// temporary rewrite of users.department_id/users.section_id and not a role-wide
-// scope relaxation.
 assert.ok(hard10a.includes('create or replace function public.njss_budget_revision_supervisor_matches'), 'HARD-10A must harden the canonical supervisor matcher')
 assert.ok(hard10a.includes('user_data_scopes'), 'HARD-10A must recognize explicit user-level delegated scope')
 assert.ok(hard10a.includes("scope_type = 'department_wide'"), 'HARD-10A delegated assignment must be DEPARTMENT_WIDE, not SYSTEM_WIDE')
