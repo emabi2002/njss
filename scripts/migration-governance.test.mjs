@@ -38,6 +38,22 @@ for (const file of timestampFiles) {
   assert.match(file, timestampPattern, `timestamp migration has invalid filename: ${file}`)
 }
 
+const timestampVersionFiles = new Map()
+for (const file of timestampFiles) {
+  const version = file.slice(0, 14)
+  const existing = timestampVersionFiles.get(version) || []
+  existing.push(file)
+  timestampVersionFiles.set(version, existing)
+}
+const duplicateTimestampVersions = [...timestampVersionFiles.entries()]
+  .filter(([, names]) => names.length > 1)
+  .map(([version, names]) => `${version}: ${names.join(', ')}`)
+assert.deepEqual(
+  duplicateTimestampVersions,
+  [],
+  `timestamp migration versions must be unique: ${duplicateTimestampVersions.join('; ')}`,
+)
+
 assert.ok(fs.existsSync(ledgerPath), 'authoritative NJSS migration ledger must exist')
 const ledger = fs.readFileSync(ledgerPath, 'utf8')
 for (const required of [
