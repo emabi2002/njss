@@ -91,6 +91,7 @@ const lineRead = policyBlock(sql, 'hard10_budget_line_read')
 const lineInsert = policyBlock(sql, 'hard10_budget_line_insert')
 const lineUpdate = policyBlock(sql, 'hard10_budget_line_update')
 const lineDelete = policyBlock(sql, 'hard10_budget_line_delete')
+const monthlyAllocationRead = policyBlock(cleanup, 'hard10_monthly_allocation_read')
 const expenseLedgerRead = policyBlock(cleanup, 'hard10_expense_ledger_read')
 
 // Direct table mutation is preparation/edit authority only. Submit/review/approve
@@ -130,6 +131,14 @@ assert.ok(!submissionRead.includes('submitted_by'), 'budget submission read scop
 assert.ok(!submissionUpdate.includes('submitted_by'), 'budget submission update scope must not bypass section scope through submitted_by ownership')
 assert.ok(!lineRead.includes('s.submitted_by'), 'budget line read scope must not inherit cross-section submitted_by ownership override')
 assert.ok(!lineUpdate.includes('s.submitted_by'), 'budget line update scope must not inherit cross-section submitted_by ownership override')
+
+// Monthly allocations are child detail of budget lines. Anyone with the canonical
+// budget.view permission who can read the parent submission/line must be able to
+// read its scoped monthly detail. Report-only permissions must not recreate the
+// retired Phase-6 cross-scope shortcut.
+assert.ok(monthlyAllocationRead.includes('budget.view'), 'monthly allocation read must preserve budget.view detail access')
+assert.ok(!monthlyAllocationRead.includes('budget.report.view'), 'monthly allocation read must not grant raw detail through budget.report.view alone')
+assert.ok(!monthlyAllocationRead.includes('reports.view'), 'monthly allocation read must not grant raw detail through reports.view alone')
 
 // Reference-data reads may be broad within budget/report roles, but must never
 // fall back to any-authenticated access.
