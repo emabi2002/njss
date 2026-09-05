@@ -7,7 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const migrationPath = path.join(root, 'supabase', 'migrations', '20260904013000_rls_and_legacy_policy_lockdown.sql')
 const cleanupPath = path.join(root, 'supabase', 'migrations', '20260904013100_budget_legacy_policy_cleanup.sql')
 const preflightPath = path.join(root, 'supabase', 'tests', 'hard10_policy_trigger_preflight.sql')
-const hard10aPath = path.join(root, 'supabase', 'hotfixes', '20260905090000_hard10a_uat_supervisor_delegation.sql')
+const hard10aPath = path.join(root, 'supabase', 'hotfixes', '20260905082346_hard10a_uat_supervisor_delegation.sql')
 
 assert.ok(fs.existsSync(migrationPath), 'HARD-10 RLS lockdown migration must exist')
 assert.ok(fs.existsSync(cleanupPath), 'HARD-10 ancillary budget policy cleanup migration must exist')
