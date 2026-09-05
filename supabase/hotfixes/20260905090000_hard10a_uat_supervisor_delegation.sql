@@ -88,8 +88,8 @@ BEGIN
     SELECT 1
     FROM public.uat_seed_runs usr
     WHERE usr.run_id = v_run_id
-      AND lower(usr.dataset_version) = lower(v_dataset)
-      AND lower(usr.dataset_version) = 'njss-national-uat-2026-v1'
+      AND usr.dataset_version = 'NJSS-NATIONAL-UAT-2026-V1'
+      AND usr.dataset_version = v_dataset
       AND usr.status = 'COMPLETED'
   ) THEN
     RAISE EXCEPTION 'HARD-10A requires completed UAT dataset % / %', v_run_id, v_dataset;
