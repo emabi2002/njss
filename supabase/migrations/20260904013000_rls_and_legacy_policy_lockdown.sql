@@ -196,87 +196,295 @@ FOR ALL TO authenticated
 USING (auth.uid() IS NOT NULL AND (public.fn_current_user_has_permission('budget.module.admin') OR public.fn_current_user_has_permission('all')))
 WITH CHECK (auth.uid() IS NOT NULL AND (public.fn_current_user_has_permission('budget.module.admin') OR public.fn_current_user_has_permission('all')));
 
--- 6. Divisional budget submissions: permission AND organisational data scope.
+-- 6. Divisional budget submissions: organisational scope is authoritative for
+-- direct table access. submitted_by is historical/workflow actor data and is
+-- deliberately NOT passed to fn_current_user_data_scope_allows(), because its
+-- generic ownership shortcut would otherwise permit cross-section access.
 DROP POLICY IF EXISTS hard10_budget_submission_read ON public.divisional_budget_submissions;
 DROP POLICY IF EXISTS hard10_budget_submission_write ON public.divisional_budget_submissions;
+DROP POLICY IF EXISTS hard10_budget_submission_insert ON public.divisional_budget_submissions;
+DROP POLICY IF EXISTS hard10_budget_submission_update ON public.divisional_budget_submissions;
+DROP POLICY IF EXISTS hard10_budget_submission_delete ON public.divisional_budget_submissions;
+
 CREATE POLICY hard10_budget_submission_read ON public.divisional_budget_submissions
 FOR SELECT TO authenticated
 USING (
   auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.view') OR public.fn_current_user_has_permission('budget.template') OR public.fn_current_user_has_permission('budget.module.view') OR public.fn_current_user_has_permission('budget.view') OR public.fn_current_user_has_permission('all'))
-  AND public.fn_current_user_data_scope_allows(
-    department_id,
-    (SELECT bd.section_id FROM public.budget_divisions bd WHERE bd.id = division_id),
-    submitted_by,
-    NULL,
-    NULL
+  AND (
+    public.fn_current_user_has_permission('budget.template.view')
+    OR public.fn_current_user_has_permission('budget.template')
+    OR public.fn_current_user_has_permission('budget.module.view')
+    OR public.fn_current_user_has_permission('budget.view')
+    OR public.fn_current_user_has_permission('all')
   )
-);
-CREATE POLICY hard10_budget_submission_write ON public.divisional_budget_submissions
-FOR ALL TO authenticated
-USING (
-  auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.create') OR public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('budget.template.submit') OR public.fn_current_user_has_permission('budget.template.review') OR public.fn_current_user_has_permission('budget.template.approve') OR public.fn_current_user_has_permission('budget.module.submit') OR public.fn_current_user_has_permission('budget.module.review') OR public.fn_current_user_has_permission('budget.module.approve') OR public.fn_current_user_has_permission('all'))
   AND public.fn_current_user_data_scope_allows(
     department_id,
     (SELECT bd.section_id FROM public.budget_divisions bd WHERE bd.id = division_id),
-    submitted_by,
     NULL,
-    NULL
-  )
-)
-WITH CHECK (
-  auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.create') OR public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('budget.template.submit') OR public.fn_current_user_has_permission('budget.template.review') OR public.fn_current_user_has_permission('budget.template.approve') OR public.fn_current_user_has_permission('budget.module.submit') OR public.fn_current_user_has_permission('budget.module.review') OR public.fn_current_user_has_permission('budget.module.approve') OR public.fn_current_user_has_permission('all'))
-  AND public.fn_current_user_data_scope_allows(
-    department_id,
-    (SELECT bd.section_id FROM public.budget_divisions bd WHERE bd.id = division_id),
-    submitted_by,
     NULL,
     NULL
   )
 );
 
--- 7. Divisional budget lines inherit parent permission/scope.
-DROP POLICY IF EXISTS hard10_budget_line_read ON public.divisional_budget_lines;
-DROP POLICY IF EXISTS hard10_budget_line_write ON public.divisional_budget_lines;
-CREATE POLICY hard10_budget_line_read ON public.divisional_budget_lines
-FOR SELECT TO authenticated
-USING (
+-- Creation is a preparation function, not a workflow-decision function.
+CREATE POLICY hard10_budget_submission_insert ON public.divisional_budget_submissions
+FOR INSERT TO authenticated
+WITH CHECK (
   auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.view') OR public.fn_current_user_has_permission('budget.template') OR public.fn_current_user_has_permission('budget.module.view') OR public.fn_current_user_has_permission('budget.view') OR public.fn_current_user_has_permission('all'))
-  AND EXISTS (
-    SELECT 1
-    FROM public.divisional_budget_submissions s
-    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
-    WHERE s.id = public.divisional_budget_lines.submission_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
+  AND status = 'DRAFT'
+  AND (
+    public.fn_current_user_has_permission('budget.template.create')
+    OR public.fn_current_user_has_permission('all')
+  )
+  AND public.fn_current_user_data_scope_allows(
+    department_id,
+    (SELECT bd.section_id FROM public.budget_divisions bd WHERE bd.id = division_id),
+    NULL,
+    NULL,
+    NULL
   )
 );
-CREATE POLICY hard10_budget_line_write ON public.divisional_budget_lines
-FOR ALL TO authenticated
+
+-- Direct editing is limited to editable preparation states. Submit/resubmit,
+-- return, review and approval remain guarded SECURITY DEFINER RPC actions.
+CREATE POLICY hard10_budget_submission_update ON public.divisional_budget_submissions
+FOR UPDATE TO authenticated
 USING (
   auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.create') OR public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('budget.template.submit') OR public.fn_current_user_has_permission('budget.template.review') OR public.fn_current_user_has_permission('budget.template.approve') OR public.fn_current_user_has_permission('all'))
-  AND EXISTS (
-    SELECT 1
-    FROM public.divisional_budget_submissions s
-    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
-    WHERE s.id = public.divisional_budget_lines.submission_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
+  AND status IN ('DRAFT','RETURNED')
+  AND (
+    public.fn_current_user_has_permission('budget.template.edit')
+    OR public.fn_current_user_has_permission('all')
+  )
+  AND public.fn_current_user_data_scope_allows(
+    department_id,
+    (SELECT bd.section_id FROM public.budget_divisions bd WHERE bd.id = division_id),
+    NULL,
+    NULL,
+    NULL
   )
 )
 WITH CHECK (
   auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.create') OR public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('budget.template.submit') OR public.fn_current_user_has_permission('budget.template.review') OR public.fn_current_user_has_permission('budget.template.approve') OR public.fn_current_user_has_permission('all'))
+  AND status IN ('DRAFT','RETURNED')
+  AND (
+    public.fn_current_user_has_permission('budget.template.edit')
+    OR public.fn_current_user_has_permission('all')
+  )
+  AND public.fn_current_user_data_scope_allows(
+    department_id,
+    (SELECT bd.section_id FROM public.budget_divisions bd WHERE bd.id = division_id),
+    NULL,
+    NULL,
+    NULL
+  )
+);
+
+CREATE POLICY hard10_budget_submission_delete ON public.divisional_budget_submissions
+FOR DELETE TO authenticated
+USING (
+  auth.uid() IS NOT NULL
+  AND status IN ('DRAFT','RETURNED')
+  AND (
+    public.fn_current_user_has_permission('budget.template.edit')
+    OR public.fn_current_user_has_permission('all')
+  )
+  AND public.fn_current_user_data_scope_allows(
+    department_id,
+    (SELECT bd.section_id FROM public.budget_divisions bd WHERE bd.id = division_id),
+    NULL,
+    NULL,
+    NULL
+  )
+);
+
+-- Direct callers may never re-parent or rewrite workflow/organisational identity.
+-- Controlled workflow/revision routines set transaction-local context before
+-- performing their legitimate system-owned changes.
+CREATE OR REPLACE FUNCTION public.njss_hard10_guard_budget_submission_identity()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF COALESCE(current_setting('njss.budget_workflow', true), '') = 'on'
+     OR COALESCE(current_setting('njss.budget_revision_create', true), '') = 'on'
+     OR COALESCE(current_setting('njss.budget_recalc', true), '') = 'on' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.division_id IS DISTINCT FROM OLD.division_id
+     OR NEW.department_id IS DISTINCT FROM OLD.department_id
+     OR NEW.cycle_id IS DISTINCT FROM OLD.cycle_id
+     OR NEW.budget_year IS DISTINCT FROM OLD.budget_year
+     OR NEW.parent_submission_id IS DISTINCT FROM OLD.parent_submission_id
+     OR NEW.version IS DISTINCT FROM OLD.version
+     OR NEW.superseded_by_id IS DISTINCT FROM OLD.superseded_by_id
+     OR NEW.submitted_by IS DISTINCT FROM OLD.submitted_by THEN
+    RAISE EXCEPTION 'Budget submission organisational/workflow identity cannot be changed directly; use the controlled workflow or revision process.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END
+$function$;
+
+DROP TRIGGER IF EXISTS trg_hard10_budget_submission_identity ON public.divisional_budget_submissions;
+CREATE TRIGGER trg_hard10_budget_submission_identity
+BEFORE UPDATE ON public.divisional_budget_submissions
+FOR EACH ROW EXECUTE FUNCTION public.njss_hard10_guard_budget_submission_identity();
+
+-- 7. Divisional budget lines inherit parent permission, state and organisational
+-- scope. Review/approval authority does not imply direct line mutation authority.
+DROP POLICY IF EXISTS hard10_budget_line_read ON public.divisional_budget_lines;
+DROP POLICY IF EXISTS hard10_budget_line_write ON public.divisional_budget_lines;
+DROP POLICY IF EXISTS hard10_budget_line_insert ON public.divisional_budget_lines;
+DROP POLICY IF EXISTS hard10_budget_line_update ON public.divisional_budget_lines;
+DROP POLICY IF EXISTS hard10_budget_line_delete ON public.divisional_budget_lines;
+
+CREATE POLICY hard10_budget_line_read ON public.divisional_budget_lines
+FOR SELECT TO authenticated
+USING (
+  auth.uid() IS NOT NULL
+  AND (
+    public.fn_current_user_has_permission('budget.template.view')
+    OR public.fn_current_user_has_permission('budget.template')
+    OR public.fn_current_user_has_permission('budget.module.view')
+    OR public.fn_current_user_has_permission('budget.view')
+    OR public.fn_current_user_has_permission('all')
+  )
   AND EXISTS (
     SELECT 1
     FROM public.divisional_budget_submissions s
     LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
     WHERE s.id = public.divisional_budget_lines.submission_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
   )
 );
+
+CREATE POLICY hard10_budget_line_insert ON public.divisional_budget_lines
+FOR INSERT TO authenticated
+WITH CHECK (
+  auth.uid() IS NOT NULL
+  AND (
+    public.fn_current_user_has_permission('budget.template.create')
+    OR public.fn_current_user_has_permission('budget.template.edit')
+    OR public.fn_current_user_has_permission('all')
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_submissions s
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE s.id = public.divisional_budget_lines.submission_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+);
+
+CREATE POLICY hard10_budget_line_update ON public.divisional_budget_lines
+FOR UPDATE TO authenticated
+USING (
+  auth.uid() IS NOT NULL
+  AND (
+    public.fn_current_user_has_permission('budget.template.edit')
+    OR public.fn_current_user_has_permission('all')
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_submissions s
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE s.id = public.divisional_budget_lines.submission_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+)
+WITH CHECK (
+  auth.uid() IS NOT NULL
+  AND (
+    public.fn_current_user_has_permission('budget.template.edit')
+    OR public.fn_current_user_has_permission('all')
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_submissions s
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE s.id = public.divisional_budget_lines.submission_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+);
+
+CREATE POLICY hard10_budget_line_delete ON public.divisional_budget_lines
+FOR DELETE TO authenticated
+USING (
+  auth.uid() IS NOT NULL
+  AND (
+    public.fn_current_user_has_permission('budget.template.edit')
+    OR public.fn_current_user_has_permission('all')
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_submissions s
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE s.id = public.divisional_budget_lines.submission_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+);
+
+CREATE OR REPLACE FUNCTION public.njss_hard10_guard_budget_line_parent()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF COALESCE(current_setting('njss.budget_workflow', true), '') = 'on'
+     OR COALESCE(current_setting('njss.budget_revision_create', true), '') = 'on'
+     OR COALESCE(current_setting('njss.budget_recalc', true), '') = 'on' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.submission_id IS DISTINCT FROM OLD.submission_id THEN
+    RAISE EXCEPTION 'Budget lines cannot be moved between submissions directly.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END
+$function$;
+
+DROP TRIGGER IF EXISTS trg_hard10_budget_line_parent ON public.divisional_budget_lines;
+CREATE TRIGGER trg_hard10_budget_line_parent
+BEFORE UPDATE ON public.divisional_budget_lines
+FOR EACH ROW EXECUTE FUNCTION public.njss_hard10_guard_budget_line_parent();
+
+-- Monthly allocation identity is also immutable through direct update. The
+-- ancillary HARD-10 migration applies its scoped read/write policies.
+CREATE OR REPLACE FUNCTION public.njss_hard10_guard_monthly_allocation_parent()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF COALESCE(current_setting('njss.budget_workflow', true), '') = 'on'
+     OR COALESCE(current_setting('njss.budget_revision_create', true), '') = 'on'
+     OR COALESCE(current_setting('njss.budget_recalc', true), '') = 'on' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.budget_line_id IS DISTINCT FROM OLD.budget_line_id THEN
+    RAISE EXCEPTION 'Monthly allocations cannot be moved between budget lines directly.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END
+$function$;
+
+DROP TRIGGER IF EXISTS trg_hard10_monthly_allocation_parent ON public.budget_monthly_allocations;
+CREATE TRIGGER trg_hard10_monthly_allocation_parent
+BEFORE UPDATE ON public.budget_monthly_allocations
+FOR EACH ROW EXECUTE FUNCTION public.njss_hard10_guard_monthly_allocation_parent();
 
 -- Workflow history is read-only to direct callers; SECURITY DEFINER workflow
 -- functions remain responsible for inserts.
@@ -285,13 +493,19 @@ CREATE POLICY hard10_budget_history_read ON public.budget_workflow_history
 FOR SELECT TO authenticated
 USING (
   auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.view') OR public.fn_current_user_has_permission('budget.template.review') OR public.fn_current_user_has_permission('budget.template.approve') OR public.fn_current_user_has_permission('audit.view') OR public.fn_current_user_has_permission('all'))
+  AND (
+    public.fn_current_user_has_permission('budget.template.view')
+    OR public.fn_current_user_has_permission('budget.template.review')
+    OR public.fn_current_user_has_permission('budget.template.approve')
+    OR public.fn_current_user_has_permission('audit.view')
+    OR public.fn_current_user_has_permission('all')
+  )
   AND EXISTS (
     SELECT 1
     FROM public.divisional_budget_submissions s
     LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
     WHERE s.id = public.budget_workflow_history.submission_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
   )
 );
 
@@ -425,10 +639,31 @@ BEGIN
       AND policyname IN (
         'divisional_budget_submissions_read','divisional_budget_submissions_insert','divisional_budget_submissions_update','divisional_budget_submissions_delete',
         'divisional_budget_lines_read','divisional_budget_lines_insert','divisional_budget_lines_update','divisional_budget_lines_delete',
-        'budget_workflow_history_read','budget_workflow_history_insert'
+        'budget_workflow_history_read','budget_workflow_history_insert',
+        'hard10_budget_submission_write','hard10_budget_line_write'
       )
   ) THEN
-    RAISE EXCEPTION 'HARD-10 failed: unsafe legacy budget policy still exists';
+    RAISE EXCEPTION 'HARD-10 failed: unsafe or superseded broad budget policy still exists';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='divisional_budget_submissions'
+      AND policyname IN ('hard10_budget_submission_read','hard10_budget_submission_insert','hard10_budget_submission_update','hard10_budget_submission_delete')
+    GROUP BY tablename
+    HAVING count(*) = 4
+  ) THEN
+    RAISE EXCEPTION 'HARD-10 failed: command-specific budget submission policies are incomplete';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='divisional_budget_lines'
+      AND policyname IN ('hard10_budget_line_read','hard10_budget_line_insert','hard10_budget_line_update','hard10_budget_line_delete')
+    GROUP BY tablename
+    HAVING count(*) = 4
+  ) THEN
+    RAISE EXCEPTION 'HARD-10 failed: command-specific budget line policies are incomplete';
   END IF;
 END
 $verify$;
