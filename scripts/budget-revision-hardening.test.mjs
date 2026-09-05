@@ -128,4 +128,26 @@ assert.ok(
   'new revision targets must validate an exact Chart of Accounts mapping rather than accepting an arbitrary account',
 )
 
+// Existing operational allocations repointed from an activated baseline line to
+// an approved revision line must also transition lineage. Leaving source_module
+// as EXCEL_BUDGET makes the operational-allocation guard treat the revision line
+// as an activation baseline and blocks Registrar approval.
+const lineageHotfixPath = 'supabase/hotfixes/20260905150000_budget_revision_allocation_lineage.sql'
+assert.ok(fs.existsSync(lineageHotfixPath), 'budget revision allocation-lineage hotfix must exist')
+const lineageHotfix = read(lineageHotfixPath).toLowerCase()
+assert.ok(lineageHotfix.includes('create or replace function public.njss_transition_budget_revision_base'), 'lineage hotfix must patch the internal revision transition worker')
+assert.match(
+  lineageHotfix,
+  /update\s+budget_allocations[\s\S]*?source_module\s*=\s*'budget_revision'[\s\S]*?source_budget_submission_id\s*=\s*v_revision\.revision_submission_id[\s\S]*?source_budget_line_id\s*=\s*v_line\.revision_budget_line_id/i,
+  'existing revised allocations must switch to BUDGET_REVISION lineage when repointed',
+)
+assert.ok(
+  lineageHotfix.includes("old.source_module='excel_budget'") || lineageHotfix.includes("old.source_module = 'excel_budget'"),
+  'hotfix must document/guard the activated EXCEL_BUDGET baseline transition',
+)
+assert.ok(
+  lineageHotfix.includes("new.source_module is distinct from 'excel_budget'") || lineageHotfix.includes("new.source_module is distinct from 'excel_budget'"),
+  'hotfix evidence must align with the operational allocation guard non-EXCEL_BUDGET path',
+)
+
 console.log('budget revision Task 7 hardening regression checks passed')
