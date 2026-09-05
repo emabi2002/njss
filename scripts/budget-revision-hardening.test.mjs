@@ -141,12 +141,17 @@ assert.match(
   /update\s+budget_allocations[\s\S]*?source_module\s*=\s*'budget_revision'[\s\S]*?source_budget_submission_id\s*=\s*v_revision\.revision_submission_id[\s\S]*?source_budget_line_id\s*=\s*v_line\.revision_budget_line_id/i,
   'existing revised allocations must switch to BUDGET_REVISION lineage when repointed',
 )
-assert.ok(
-  lineageHotfix.includes("old.source_module='excel_budget'") || lineageHotfix.includes("old.source_module = 'excel_budget'"),
-  'hotfix must document/guard the activated EXCEL_BUDGET baseline transition',
+// The hotfix verifies the live trigger definition from inside a SQL string, so
+// quote characters appear doubled in source. Match the actual escaped preflight
+// representation rather than requiring an unescaped trigger expression.
+assert.match(
+  lineageHotfix,
+  /position\('old\.source_module=''excel_budget'''\s+in\s+v_guard\)/i,
+  'hotfix must guard the activated EXCEL_BUDGET baseline transition',
 )
-assert.ok(
-  lineageHotfix.includes("new.source_module is distinct from 'excel_budget'") || lineageHotfix.includes("new.source_module is distinct from 'excel_budget'"),
+assert.match(
+  lineageHotfix,
+  /position\('new\.source_module is distinct from ''excel_budget'''\s+in\s+v_guard\)/i,
   'hotfix evidence must align with the operational allocation guard non-EXCEL_BUDGET path',
 )
 
