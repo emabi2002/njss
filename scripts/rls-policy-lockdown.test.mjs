@@ -7,14 +7,17 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const migrationPath = path.join(root, 'supabase', 'migrations', '20260904013000_rls_and_legacy_policy_lockdown.sql')
 const cleanupPath = path.join(root, 'supabase', 'migrations', '20260904013100_budget_legacy_policy_cleanup.sql')
 const preflightPath = path.join(root, 'supabase', 'tests', 'hard10_policy_trigger_preflight.sql')
+const hard10aPath = path.join(root, 'supabase', 'hotfixes', '20260905090000_hard10a_uat_supervisor_delegation.sql')
 
 assert.ok(fs.existsSync(migrationPath), 'HARD-10 RLS lockdown migration must exist')
 assert.ok(fs.existsSync(cleanupPath), 'HARD-10 ancillary budget policy cleanup migration must exist')
 assert.ok(fs.existsSync(preflightPath), 'HARD-10 live policy/trigger actor preflight must exist')
+assert.ok(fs.existsSync(hard10aPath), 'HARD-10A UAT supervisor reconciliation hotfix must exist')
 
 const sql = fs.readFileSync(migrationPath, 'utf8').toLowerCase()
 const cleanup = fs.readFileSync(cleanupPath, 'utf8').toLowerCase()
 const preflight = fs.readFileSync(preflightPath, 'utf8').toLowerCase()
+const hard10a = fs.readFileSync(hard10aPath, 'utf8').toLowerCase()
 const combined = `${sql}\n${cleanup}`
 
 const rlsTables = [
@@ -126,6 +129,21 @@ assert.ok(sql.includes('new.budget_line_id is distinct from old.budget_line_id')
 assert.ok(preflight.includes('assigned_line_supervisor_id'), 'preflight must inspect assigned Line Supervisors')
 assert.ok(preflight.includes('njss_budget_revision_supervisor_matches'), 'preflight must verify assigned supervisor organisational match')
 assert.ok(preflight.includes('fn_current_user_data_scope_allows'), 'preflight must exercise effective organisational scope')
+
+// HARD-10A: the national UAT supervisor must keep a stable home section. Any
+// cross-location responsibility is an explicit user-level delegation, not a
+// temporary rewrite of users.department_id/users.section_id and not a role-wide
+// scope relaxation.
+assert.ok(hard10a.includes('create or replace function public.njss_budget_revision_supervisor_matches'), 'HARD-10A must harden the canonical supervisor matcher')
+assert.ok(hard10a.includes('user_data_scopes'), 'HARD-10A must recognize explicit user-level delegated scope')
+assert.ok(hard10a.includes("scope_type = 'department_wide'"), 'HARD-10A delegated assignment must be DEPARTMENT_WIDE, not SYSTEM_WIDE')
+assert.ok(hard10a.includes('department_ids'), 'HARD-10A must use the explicit delegated department list')
+assert.ok(hard10a.includes("dataset_version = 'njss-national-uat-2026-v1'"), 'HARD-10A must bind the data correction to the certified UAT dataset')
+assert.ok(hard10a.includes('uat_seed_entities'), 'HARD-10A delegated scope must be registered as UAT provenance')
+assert.ok(hard10a.includes("'user_data_scopes'"), 'HARD-10A provenance must identify the delegated-scope table')
+assert.ok(!/update\s+(public\.)?users\s+set[\s\S]{0,200}(department_id|section_id)/i.test(hard10a), 'HARD-10A must never relocate a user to manufacture assignment eligibility')
+assert.ok(!hard10a.includes("scope_type = 'system_wide'"), 'HARD-10A must not grant the UAT supervisor system-wide delegated scope')
+assert.ok(hard10a.includes("r.name = 'line supervisor'"), 'HARD-10A matcher must still require the active Line Supervisor role')
 
 assert.ok(combined.includes("masterdata.manage"), 'master-data mutations must require masterdata.manage')
 assert.ok(combined.includes("registry.manage"), 'registry mutations must require registry.manage where applicable')
