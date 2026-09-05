@@ -123,9 +123,14 @@ WITH CHECK (
   )
 );
 
--- Monthly allocations inherit budget-line/submission scope.
+-- Monthly allocations inherit strict parent organisational scope. Historical
+-- submitted_by values are not ownership authority for direct table access.
 DROP POLICY IF EXISTS hard10_monthly_allocation_read ON public.budget_monthly_allocations;
 DROP POLICY IF EXISTS hard10_monthly_allocation_write ON public.budget_monthly_allocations;
+DROP POLICY IF EXISTS hard10_monthly_allocation_insert ON public.budget_monthly_allocations;
+DROP POLICY IF EXISTS hard10_monthly_allocation_update ON public.budget_monthly_allocations;
+DROP POLICY IF EXISTS hard10_monthly_allocation_delete ON public.budget_monthly_allocations;
+
 CREATE POLICY hard10_monthly_allocation_read ON public.budget_monthly_allocations
 FOR SELECT TO authenticated
 USING (
@@ -137,23 +142,12 @@ USING (
     JOIN public.divisional_budget_submissions s ON s.id = l.submission_id
     LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
     WHERE l.id = public.budget_monthly_allocations.budget_line_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
   )
 );
-CREATE POLICY hard10_monthly_allocation_write ON public.budget_monthly_allocations
-FOR ALL TO authenticated
-USING (
-  auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.create') OR public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
-  AND EXISTS (
-    SELECT 1
-    FROM public.divisional_budget_lines l
-    JOIN public.divisional_budget_submissions s ON s.id = l.submission_id
-    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
-    WHERE l.id = public.budget_monthly_allocations.budget_line_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
-  )
-)
+
+CREATE POLICY hard10_monthly_allocation_insert ON public.budget_monthly_allocations
+FOR INSERT TO authenticated
 WITH CHECK (
   auth.uid() IS NOT NULL
   AND (public.fn_current_user_has_permission('budget.template.create') OR public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
@@ -163,13 +157,63 @@ WITH CHECK (
     JOIN public.divisional_budget_submissions s ON s.id = l.submission_id
     LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
     WHERE l.id = public.budget_monthly_allocations.budget_line_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
   )
 );
 
--- Budget-line attachments inherit submission scope.
+CREATE POLICY hard10_monthly_allocation_update ON public.budget_monthly_allocations
+FOR UPDATE TO authenticated
+USING (
+  auth.uid() IS NOT NULL
+  AND (public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_lines l
+    JOIN public.divisional_budget_submissions s ON s.id = l.submission_id
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE l.id = public.budget_monthly_allocations.budget_line_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+)
+WITH CHECK (
+  auth.uid() IS NOT NULL
+  AND (public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_lines l
+    JOIN public.divisional_budget_submissions s ON s.id = l.submission_id
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE l.id = public.budget_monthly_allocations.budget_line_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+);
+
+CREATE POLICY hard10_monthly_allocation_delete ON public.budget_monthly_allocations
+FOR DELETE TO authenticated
+USING (
+  auth.uid() IS NOT NULL
+  AND (public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_lines l
+    JOIN public.divisional_budget_submissions s ON s.id = l.submission_id
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE l.id = public.budget_monthly_allocations.budget_line_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+);
+
+-- Budget-line attachments inherit strict submission scope and editable state.
 DROP POLICY IF EXISTS hard10_budget_attachment_read ON public.budget_line_attachments;
 DROP POLICY IF EXISTS hard10_budget_attachment_write ON public.budget_line_attachments;
+DROP POLICY IF EXISTS hard10_budget_attachment_insert ON public.budget_line_attachments;
+DROP POLICY IF EXISTS hard10_budget_attachment_update ON public.budget_line_attachments;
+DROP POLICY IF EXISTS hard10_budget_attachment_delete ON public.budget_line_attachments;
+
 CREATE POLICY hard10_budget_attachment_read ON public.budget_line_attachments
 FOR SELECT TO authenticated
 USING (
@@ -180,22 +224,12 @@ USING (
     FROM public.divisional_budget_submissions s
     LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
     WHERE s.id = public.budget_line_attachments.submission_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
   )
 );
-CREATE POLICY hard10_budget_attachment_write ON public.budget_line_attachments
-FOR ALL TO authenticated
-USING (
-  auth.uid() IS NOT NULL
-  AND (public.fn_current_user_has_permission('budget.template.create') OR public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
-  AND EXISTS (
-    SELECT 1
-    FROM public.divisional_budget_submissions s
-    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
-    WHERE s.id = public.budget_line_attachments.submission_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
-  )
-)
+
+CREATE POLICY hard10_budget_attachment_insert ON public.budget_line_attachments
+FOR INSERT TO authenticated
 WITH CHECK (
   auth.uid() IS NOT NULL
   AND (public.fn_current_user_has_permission('budget.template.create') OR public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
@@ -204,9 +238,79 @@ WITH CHECK (
     FROM public.divisional_budget_submissions s
     LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
     WHERE s.id = public.budget_line_attachments.submission_id
-      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, s.submitted_by, NULL, NULL)
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
   )
 );
+
+CREATE POLICY hard10_budget_attachment_update ON public.budget_line_attachments
+FOR UPDATE TO authenticated
+USING (
+  auth.uid() IS NOT NULL
+  AND (public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_submissions s
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE s.id = public.budget_line_attachments.submission_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+)
+WITH CHECK (
+  auth.uid() IS NOT NULL
+  AND (public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_submissions s
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE s.id = public.budget_line_attachments.submission_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+);
+
+CREATE POLICY hard10_budget_attachment_delete ON public.budget_line_attachments
+FOR DELETE TO authenticated
+USING (
+  auth.uid() IS NOT NULL
+  AND (public.fn_current_user_has_permission('budget.template.edit') OR public.fn_current_user_has_permission('all'))
+  AND EXISTS (
+    SELECT 1
+    FROM public.divisional_budget_submissions s
+    LEFT JOIN public.budget_divisions bd ON bd.id = s.division_id
+    WHERE s.id = public.budget_line_attachments.submission_id
+      AND s.status IN ('DRAFT','RETURNED')
+      AND public.fn_current_user_data_scope_allows(s.department_id, bd.section_id, NULL, NULL, NULL)
+  )
+);
+
+-- Prevent a direct UPDATE from moving an attachment between submissions. A new
+-- attachment record should be created under the correct editable submission.
+CREATE OR REPLACE FUNCTION public.njss_hard10_guard_budget_attachment_parent()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF COALESCE(current_setting('njss.budget_workflow', true), '') = 'on'
+     OR COALESCE(current_setting('njss.budget_revision_create', true), '') = 'on' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.submission_id IS DISTINCT FROM OLD.submission_id THEN
+    RAISE EXCEPTION 'Budget attachments cannot be moved between submissions directly.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END
+$function$;
+
+DROP TRIGGER IF EXISTS trg_hard10_budget_attachment_parent ON public.budget_line_attachments;
+CREATE TRIGGER trg_hard10_budget_attachment_parent
+BEFORE UPDATE ON public.budget_line_attachments
+FOR EACH ROW EXECUTE FUNCTION public.njss_hard10_guard_budget_attachment_parent();
 
 -- Division ceilings inherit division scope; mutation is budget-admin only.
 DROP POLICY IF EXISTS hard10_division_ceiling_read ON public.budget_division_ceilings;
