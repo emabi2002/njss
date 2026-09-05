@@ -6,19 +6,22 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const migrationPath = path.join(root, 'supabase', 'migrations', '20260904013000_rls_and_legacy_policy_lockdown.sql')
 const cleanupPath = path.join(root, 'supabase', 'migrations', '20260904013100_budget_legacy_policy_cleanup.sql')
+const monthlyCompatibilityPath = path.join(root, 'supabase', 'migrations', '20260905152000_hard10_monthly_budget_view_compatibility.sql')
 const preflightPath = path.join(root, 'supabase', 'tests', 'hard10_policy_trigger_preflight.sql')
 const hard10aPath = path.join(root, 'supabase', 'hotfixes', '20260905082346_hard10a_uat_supervisor_delegation.sql')
 
 assert.ok(fs.existsSync(migrationPath), 'HARD-10 RLS lockdown migration must exist')
 assert.ok(fs.existsSync(cleanupPath), 'HARD-10 ancillary budget policy cleanup migration must exist')
+assert.ok(fs.existsSync(monthlyCompatibilityPath), 'HARD-10 monthly budget.view compatibility migration must exist')
 assert.ok(fs.existsSync(preflightPath), 'HARD-10 live policy/trigger actor preflight must exist')
 assert.ok(fs.existsSync(hard10aPath), 'HARD-10A UAT supervisor reconciliation hotfix must exist')
 
 const sql = fs.readFileSync(migrationPath, 'utf8').toLowerCase()
 const cleanup = fs.readFileSync(cleanupPath, 'utf8').toLowerCase()
+const monthlyCompatibility = fs.readFileSync(monthlyCompatibilityPath, 'utf8').toLowerCase()
 const preflight = fs.readFileSync(preflightPath, 'utf8').toLowerCase()
 const hard10a = fs.readFileSync(hard10aPath, 'utf8').toLowerCase()
-const combined = `${sql}\n${cleanup}`
+const combined = `${sql}\n${cleanup}\n${monthlyCompatibility}`
 
 const rlsTables = [
   'activity_templates','annual_plan_lines','approval_limits','budget_consolidations','budget_cycles',
@@ -91,7 +94,7 @@ const lineRead = policyBlock(sql, 'hard10_budget_line_read')
 const lineInsert = policyBlock(sql, 'hard10_budget_line_insert')
 const lineUpdate = policyBlock(sql, 'hard10_budget_line_update')
 const lineDelete = policyBlock(sql, 'hard10_budget_line_delete')
-const monthlyAllocationRead = policyBlock(cleanup, 'hard10_monthly_allocation_read')
+const monthlyAllocationRead = policyBlock(monthlyCompatibility, 'hard10_monthly_allocation_read')
 const expenseLedgerRead = policyBlock(cleanup, 'hard10_expense_ledger_read')
 
 // Direct table mutation is preparation/edit authority only. Submit/review/approve
@@ -139,6 +142,7 @@ assert.ok(!lineUpdate.includes('s.submitted_by'), 'budget line update scope must
 assert.ok(monthlyAllocationRead.includes('budget.view'), 'monthly allocation read must preserve budget.view detail access')
 assert.ok(!monthlyAllocationRead.includes('budget.report.view'), 'monthly allocation read must not grant raw detail through budget.report.view alone')
 assert.ok(!monthlyAllocationRead.includes('reports.view'), 'monthly allocation read must not grant raw detail through reports.view alone')
+assert.ok(monthlyCompatibility.includes('hard-10b must run after the hard-10 ancillary budget policy cleanup'), 'monthly compatibility migration must refuse standalone application')
 
 // Reference-data reads may be broad within budget/report roles, but must never
 // fall back to any-authenticated access.
