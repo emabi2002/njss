@@ -58,6 +58,25 @@ for (const unsafePolicy of [
   assert.ok(combined.includes(`drop policy if exists ${unsafePolicy}`), `unsafe legacy policy not removed: ${unsafePolicy}`)
 }
 
+// Legacy permissive policies on the ancillary budget tables are OR-combined by
+// PostgreSQL. Every superseded policy must be retired, not merely accompanied by
+// a stricter hard10_* policy.
+for (const residualPolicy of [
+  'budget_monthly_allocations_select_phase6',
+  'budget_division_ceilings_insert',
+  'budget_division_ceilings_update',
+  'budget_division_ceilings_delete',
+  'budget_reference_values_insert',
+  'budget_reference_values_update',
+  'budget_reference_values_delete',
+  'expense_ledger_insert',
+  'expense_ledger_update',
+  'expense_ledger_delete',
+  'expense_ledger_select_phase6',
+]) {
+  assert.ok(cleanup.includes(`drop policy if exists ${residualPolicy}`), `superseded ancillary policy not removed: ${residualPolicy}`)
+}
+
 function policyBlock(source, name) {
   const match = source.match(new RegExp(`create\\s+policy\\s+${name}\\b[\\s\\S]*?;`, 'i'))
   assert.ok(match, `required policy missing: ${name}`)
@@ -72,6 +91,7 @@ const lineRead = policyBlock(sql, 'hard10_budget_line_read')
 const lineInsert = policyBlock(sql, 'hard10_budget_line_insert')
 const lineUpdate = policyBlock(sql, 'hard10_budget_line_update')
 const lineDelete = policyBlock(sql, 'hard10_budget_line_delete')
+const expenseLedgerRead = policyBlock(cleanup, 'hard10_expense_ledger_read')
 
 // Direct table mutation is preparation/edit authority only. Submit/review/approve
 // remain guarded SECURITY DEFINER workflow RPC actions and must not become generic
@@ -110,6 +130,14 @@ assert.ok(!submissionRead.includes('submitted_by'), 'budget submission read scop
 assert.ok(!submissionUpdate.includes('submitted_by'), 'budget submission update scope must not bypass section scope through submitted_by ownership')
 assert.ok(!lineRead.includes('s.submitted_by'), 'budget line read scope must not inherit cross-section submitted_by ownership override')
 assert.ok(!lineUpdate.includes('s.submitted_by'), 'budget line update scope must not inherit cross-section submitted_by ownership override')
+
+// Reference-data reads may be broad within budget/report roles, but must never
+// fall back to any-authenticated access.
+assert.ok(
+  ['budget.template.view','budget.report.view','budget.module.view','budget.view','reports.view','all'].some(permission => expenseLedgerRead.includes(permission)),
+  'expense ledger read must require an explicit budget/report permission',
+)
+assert.ok(!/^create\s+policy[\s\S]*using\s*\(\s*auth\.uid\(\)\s+is\s+not\s+null\s*\)\s*;$/i.test(expenseLedgerRead.trim()), 'expense ledger read must not allow every authenticated user')
 
 // Identity and parentage are immutable through direct table updates. Workflow
 // RPCs may change controlled actor/status fields under njss.budget_workflow.
