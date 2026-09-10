@@ -54,7 +54,9 @@ function displayValue(key: string, value: unknown) {
 }
 
 function csvCell(value: unknown) {
-  const text = value === null || value === undefined ? "" : typeof value === "object" ? JSON.stringify(value) : String(value)
+  const raw = value === null || value === undefined ? "" : typeof value === "object" ? JSON.stringify(value) : String(value)
+  // Neutralize spreadsheet formula injection when exported values are opened in Excel/Sheets.
+  const text = /^[=+\-@]/.test(raw) ? `'${raw}` : raw
   return `"${text.replace(/"/g, '""')}"`
 }
 
