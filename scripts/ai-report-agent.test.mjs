@@ -63,3 +63,16 @@ test("model adapter targets the configured Ollama OpenAI-compatible endpoint wit
   assert.match(model, /chat\/completions/)
   assert.doesNotMatch(model, /SUPABASE_SERVICE_ROLE_KEY|getAdminClient/)
 })
+
+test("live smoke harness exercises the deployed authenticated AI report endpoint", () => {
+  const smoke = read("scripts/ai-report-agent-smoke.mjs")
+
+  assert.match(smoke, /NJSS_BASE_URL/)
+  assert.match(smoke, /NJSS_ACCESS_TOKEN/)
+  assert.match(smoke, /\/api\/reports\/agent/)
+  assert.match(smoke, /Authorization/)
+  assert.match(smoke, /Bearer/)
+  for (const field of ["sql", "category", "tables", "narrative", "rows", "rowCount", "truncated", "ms"]) {
+    assert.match(smoke, new RegExp(`\\b${field}\\b`))
+  }
+})
