@@ -2,6 +2,8 @@
 -- Access is intentionally selective: users must hold reports.ai.use through
 -- the dedicated AI Reporting User role (or the system-wide `all` permission).
 -- Report-domain permissions and RLS remain authoritative after entry.
+-- The AI Reporting User role is intentionally not a protected/business role,
+-- so it does not interfere with the four fixed NJSS workflow groups.
 
 INSERT INTO public.menu_items (
   code,
@@ -79,7 +81,7 @@ VALUES (
   'OWN_RECORDS',
   false,
   false,
-  true,
+  false,
   true
 )
 ON CONFLICT (name) DO UPDATE
