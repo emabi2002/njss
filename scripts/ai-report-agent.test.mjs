@@ -4,13 +4,16 @@ import { readFileSync } from "node:fs"
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
 
-test("AI report API keeps user-scoped RLS and requires dedicated AI access", () => {
+test("AI report API and page route require dedicated AI access while keeping user-scoped RLS", () => {
   const route = read("app/api/reports/agent/route.ts")
+  const server = read("lib/rbac/server.ts")
   const execute = read("reporting-agent/execute.ts")
 
   assert.match(route, /getServerAccessContext/)
   assert.match(route, /reports\.ai\.use/)
   assert.doesNotMatch(route, /required_permissions:\s*\[\"reports\.view\"\]/)
+  assert.match(server, /dashboard\\\/reports\\\/ai/)
+  assert.match(server, /reports\.ai\.use/)
   assert.match(execute, /createRequestSupabaseClient/)
   assert.match(execute, /exec_report_sql/)
   assert.doesNotMatch(route, /SUPABASE_SERVICE_ROLE_KEY|getAdminClient/)
