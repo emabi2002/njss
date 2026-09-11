@@ -128,6 +128,9 @@ jobs:
       - name: RLS and legacy policy lockdown checks
         run: node scripts/rls-policy-lockdown.test.mjs
 
+      - name: AI report agent contract checks
+        run: node scripts/ai-report-agent.test.mjs
+
       - name: Budget RPC PostgreSQL runtime checks
         env:
           NJSS_TEST_DATABASE_URL: postgresql://postgres:njss-ci-only@127.0.0.1:5432/njss_rpc_test
