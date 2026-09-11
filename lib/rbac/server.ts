@@ -6,6 +6,7 @@ import type { DataScopeType, PermissionCode, RbacRole, UserAccessContext } from 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 const SUPABASE_AUTH_COOKIE = 'njss-crems-auth'
+const AI_REPORT_PERMISSION: PermissionCode = 'reports.ai.use'
 
 function bearerToken(request: NextRequest) {
   const header = request.headers.get('authorization') || ''
@@ -161,7 +162,8 @@ export async function guardDashboardRoute(request: NextRequest) {
     return NextResponse.redirect(loginUrl)
   }
 
-  const required = getRoutePermissions(request.nextUrl.pathname)
+  const isAiReportingRoute = /^\/dashboard\/reports\/ai($|\/)/.test(request.nextUrl.pathname)
+  const required = isAiReportingRoute ? [AI_REPORT_PERMISSION] : getRoutePermissions(request.nextUrl.pathname)
   if (!hasAnyServerPermission(context, required)) {
     await logServerAccessEvent(request, context, {
       action: 'UNAUTHORIZED_ACCESS_ATTEMPT',

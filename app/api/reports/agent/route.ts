@@ -9,17 +9,19 @@ import { ReportAgentError, runReportAgent, type ReportAgentRequest } from "@/rep
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+const AI_REPORT_PERMISSION = "reports.ai.use"
+
 export async function POST(request: NextRequest) {
   const context = await getServerAccessContext(request)
   if (!context) {
     return NextResponse.json({ error: "Authentication required", code: "UNAUTHENTICATED" }, { status: 401 })
   }
 
-  if (!hasAnyServerPermission(context, ["reports.view"])) {
+  if (!hasAnyServerPermission(context, [AI_REPORT_PERMISSION])) {
     await logServerAccessEvent(request, context, {
       action: "ACCESS_DENIED",
       entityType: "AI_REPORT",
-      metadata: { required_permissions: ["reports.view"] },
+      metadata: { required_permissions: [AI_REPORT_PERMISSION] },
     })
     return NextResponse.json({ error: "Access denied", code: "PERMISSION_DENIED" }, { status: 403 })
   }

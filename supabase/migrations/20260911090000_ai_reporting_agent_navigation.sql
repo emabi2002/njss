@@ -1,6 +1,7 @@
 -- Register the NJSS AI Report Assistant under the existing Reports module.
--- Access is limited to users who already hold reports.view; category-specific
--- permissions are checked again by report_agent_can before any query executes.
+-- Access is intentionally selective: users must hold reports.ai.use through
+-- the dedicated AI Reporting User role (or the system-wide `all` permission).
+-- Report-domain permissions and RLS remain authoritative after entry.
 
 INSERT INTO public.menu_items (
   code,
@@ -21,7 +22,7 @@ VALUES (
   '/dashboard/reports/ai',
   'BarChart3',
   82,
-  ARRAY['reports.view']::text[],
+  ARRAY['reports.ai.use']::text[],
   true
 )
 ON CONFLICT (code) DO UPDATE
@@ -35,3 +36,64 @@ SET
   required_permissions = EXCLUDED.required_permissions,
   is_active = EXCLUDED.is_active,
   updated_at = now();
+
+INSERT INTO public.permissions (
+  code,
+  module_code,
+  menu_code,
+  action,
+  label,
+  description,
+  is_active
+)
+VALUES (
+  'reports.ai.use',
+  'reports',
+  'reports.ai_assistant',
+  'view',
+  'Use AI Report Assistant',
+  'Access the NJSS natural-language AI reporting assistant. Report-domain permissions and RLS continue to restrict the data that can be queried.',
+  true
+)
+ON CONFLICT (code) DO UPDATE
+SET
+  module_code = EXCLUDED.module_code,
+  menu_code = EXCLUDED.menu_code,
+  action = EXCLUDED.action,
+  label = EXCLUDED.label,
+  description = EXCLUDED.description,
+  is_active = EXCLUDED.is_active;
+
+INSERT INTO public.roles (
+  name,
+  description,
+  data_scope_type,
+  is_system_role,
+  is_business_role,
+  is_protected,
+  is_active
+)
+VALUES (
+  'AI Reporting User',
+  'Allows selected users to open and use the NJSS AI Report Assistant. Existing functional permissions and RLS determine which report domains and records they can query.',
+  'OWN_RECORDS',
+  false,
+  false,
+  true,
+  true
+)
+ON CONFLICT (name) DO UPDATE
+SET
+  description = EXCLUDED.description,
+  is_system_role = EXCLUDED.is_system_role,
+  is_business_role = EXCLUDED.is_business_role,
+  is_protected = EXCLUDED.is_protected,
+  is_active = EXCLUDED.is_active,
+  updated_at = now();
+
+INSERT INTO public.role_permissions (role_id, permission, is_allowed)
+SELECT r.id, 'reports.ai.use', true
+FROM public.roles r
+WHERE r.name = 'AI Reporting User'
+ON CONFLICT (role_id, permission) DO UPDATE
+SET is_allowed = EXCLUDED.is_allowed;

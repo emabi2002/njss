@@ -4,12 +4,16 @@ import { readFileSync } from "node:fs"
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
 
-test("AI report API keeps user-scoped RLS and never uses admin/service-role execution", () => {
+test("AI report API and page route require dedicated AI access while keeping user-scoped RLS", () => {
   const route = read("app/api/reports/agent/route.ts")
+  const server = read("lib/rbac/server.ts")
   const execute = read("reporting-agent/execute.ts")
 
   assert.match(route, /getServerAccessContext/)
-  assert.match(route, /reports\.view/)
+  assert.match(route, /reports\.ai\.use/)
+  assert.doesNotMatch(route, /required_permissions:\s*\[\"reports\.view\"\]/)
+  assert.match(server, /dashboard\\\/reports\\\/ai/)
+  assert.match(server, /reports\.ai\.use/)
   assert.match(execute, /createRequestSupabaseClient/)
   assert.match(execute, /exec_report_sql/)
   assert.doesNotMatch(route, /SUPABASE_SERVICE_ROLE_KEY|getAdminClient/)
@@ -30,7 +34,7 @@ test("SQL safety guard explicitly rejects mutation and multi-statement output", 
   assert.match(guard, /ALLOWED_REPORT_TABLES/)
 })
 
-test("Reports module exposes a natural-language AI report workspace", () => {
+test("Reports module exposes a selectively authorized natural-language AI report workspace", () => {
   const page = read("app/dashboard/reports/ai/page.tsx")
   const panel = read("components/reports/AiReportPanel.tsx")
   const migration = read("supabase/migrations/20260911090000_ai_reporting_agent_navigation.sql")
@@ -44,7 +48,9 @@ test("Reports module exposes a natural-language AI report workspace", () => {
   assert.match(panel, /rowCount/)
   assert.match(panel, /CSV/)
   assert.match(migration, /\/dashboard\/reports\/ai/)
-  assert.match(migration, /reports\.view/)
+  assert.match(migration, /reports\.ai\.use/)
+  assert.match(migration, /AI Reporting User/)
+  assert.match(migration, /role_permissions/)
 })
 
 test("agent exposes the handoff response contract", () => {
