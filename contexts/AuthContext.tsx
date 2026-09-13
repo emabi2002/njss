@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { getUserProfile, type AuthUser } from '@/lib/auth'
+import type { AuthUser } from '@/lib/auth'
 import { authFetch } from '@/lib/auth-fetch'
 import type { Permission } from '@/lib/permissions'
 import type { RbacDataScope, RbacMenuItem, RbacModule } from '@/lib/rbac/types'
@@ -12,16 +12,12 @@ import {
   canPerformAction,
   canPerformAllActions,
   canPerformAnyAction,
-  getUserDataScopes,
-  getUserPermissions,
-  getUserRoles,
-  loadRbacModules,
-  loadRbacNavigation,
   logAccessEvent,
 } from '@/lib/rbac/client'
 
 // Authentication is provided exclusively by Supabase Auth. RBAC profile, roles,
-// permissions, menus and data scopes are loaded from the database after login.
+// permissions, menus and data scopes are loaded from the authenticated server
+// access context after login.
 
 type AuthContextType = {
   user: User | null
@@ -37,6 +33,8 @@ type AuthContextType = {
   canAll: (perms: Permission[]) => boolean
   canOnRecord: (perm: Permission, record: Parameters<typeof canAccessRecord>[1]) => boolean
   loading: boolean
+  /** true only after the database-backed profile, permissions, scopes and navigation have resolved. */
+  accessReady: boolean
   /** null while unknown, true when an administrator-issued password is still in force. */
   mustChangePassword: boolean | null
   refreshPasswordState: () => Promise<void>
@@ -45,6 +43,23 @@ type AuthContextType = {
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
 }
+
+type ServerAccessResponse = {
+  userId: string
+  authUserId?: string | null
+  email: string
+  name: string
+  roles?: Array<{ id: string; name: string }>
+  roleNames?: string[]
+  permissions?: string[]
+  scopes?: RbacDataScope[]
+  departmentId?: string | null
+  sectionId?: string | null
+  menus?: RbacMenuItem[]
+  modules?: RbacModule[]
+}
+
+const FALLBACK_ROLE = 'Executive Viewer'
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
@@ -60,12 +75,47 @@ const AuthContext = createContext<AuthContextType>({
   canAll: () => false,
   canOnRecord: () => false,
   loading: true,
+  accessReady: false,
   mustChangePassword: null,
   refreshPasswordState: async () => {},
   isTestingFallback: false,
   signOut: async () => {},
   refreshProfile: async () => {},
 })
+
+async function fetchServerAccess(authUser: User, fallbackEmail: string) {
+  const response = await authFetch('/api/account/access')
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.error || 'Unable to load account access.')
+  }
+
+  const access = (await response.json()) as ServerAccessResponse
+  const roleNames = access.roleNames?.length
+    ? access.roleNames
+    : (access.roles || []).map((role) => role.name).filter(Boolean)
+  const effectiveRoles = roleNames.length ? roleNames : [FALLBACK_ROLE]
+
+  const profile: AuthUser = {
+    id: access.userId,
+    authUserId: access.authUserId || authUser.id,
+    email: access.email || fallbackEmail,
+    name: access.name || fallbackEmail.split('@')[0] || 'User',
+    role: effectiveRoles[0],
+    roles: effectiveRoles,
+    roleIds: (access.roles || []).map((role) => role.id),
+    departmentId: access.departmentId ?? null,
+    sectionId: access.sectionId ?? null,
+  }
+
+  return {
+    profile,
+    permissions: access.permissions || [],
+    scopes: access.scopes || [],
+    menus: access.menus || [],
+    modules: access.modules || [],
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
@@ -75,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [menus, setMenus] = useState<RbacMenuItem[]>([])
   const [modules, setModules] = useState<RbacModule[]>([])
   const [loading, setLoading] = useState(true)
+  const [accessReady, setAccessReady] = useState(false)
   const [mustChangePassword, setMustChangePassword] = useState<boolean | null>(null)
 
   const loadPasswordState = async () => {
@@ -93,38 +144,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    // Navigation metadata is authenticated-only (migrations 016/029 revoke anon
-    // access), so skip the round-trip entirely when there is no session and clear
-    // any menus left over from a previous one.
-    if (!user) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMenus([])
-      setModules([])
-      return
-    }
-    loadRbacNavigation(permissions).then(setMenus)
-    loadRbacModules().then(setModules)
-  }, [permissions, user])
-
-  useEffect(() => {
     let mounted = true
 
     const loadAccessContext = async (authUser: User, fallbackEmail: string) => {
-      const p = await getUserProfile(authUser.id, fallbackEmail)
-      if (!mounted || !p) return
-
-      const roles = p.roles?.length ? p.roles : [p.role].filter(Boolean)
-      const roleRows = await getUserRoles(p.id).catch(() => [])
-      const effectivePermissions = await getUserPermissions(p.id)
-      const effectiveScopes = await getUserDataScopes(
-        p.id,
-        roleRows.length ? roleRows : roles.map((name) => ({ id: name, name, description: null })),
-      )
-
-      if (!mounted) return
-      setProfile(p)
-      setPermissions(effectivePermissions)
-      setScopes(effectiveScopes)
+      setAccessReady(false)
+      try {
+        const access = await fetchServerAccess(authUser, fallbackEmail)
+        if (!mounted) return
+        setProfile(access.profile)
+        setPermissions(access.permissions)
+        setScopes(access.scopes)
+        setMenus(access.menus || [])
+        setModules(access.modules || [])
+      } catch (error) {
+        if (!mounted) return
+        console.warn('Server RBAC access load failed:', error)
+        setPermissions([])
+        setScopes([])
+        setMenus([])
+        setModules([])
+      } finally {
+        if (mounted) setAccessReady(true)
+      }
     }
 
     async function loadSession() {
@@ -134,7 +175,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return
 
       if (session?.user) {
+        setAccessReady(false)
         setUser(session.user)
+        setMenus([])
+        setModules([])
         setProfile({
           id: session.user.id,
           authUserId: session.user.id,
@@ -153,6 +197,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null)
         setPermissions([])
         setScopes([])
+        setMenus([])
+        setModules([])
+        setAccessReady(true)
         setMustChangePassword(null)
         setLoading(false)
       }
@@ -164,7 +211,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return
 
       if (session?.user) {
+        setAccessReady(false)
         setUser(session.user)
+        setMenus([])
+        setModules([])
         setProfile({
           id: session.user.id,
           authUserId: session.user.id,
@@ -183,6 +233,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null)
         setPermissions([])
         setScopes([])
+        setMenus([])
+        setModules([])
+        setAccessReady(true)
         setMustChangePassword(null)
       }
 
@@ -231,26 +284,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(null)
       setPermissions([])
       setScopes([])
+      setMenus([])
+      setModules([])
+      setAccessReady(true)
       setMustChangePassword(null)
       if (typeof window !== 'undefined') window.location.href = '/login'
     }
   }
 
   const refreshProfile = async () => {
-    if (user) {
-      const p = await getUserProfile(user.id, user.email || '')
-      setProfile(p)
-      if (p) {
-        const roleNames = p.roles?.length ? p.roles : [p.role]
-        const roleRows = await getUserRoles(p.id).catch(() => [])
-        setPermissions(await getUserPermissions(p.id))
-        setScopes(
-          await getUserDataScopes(
-            p.id,
-            roleRows.length ? roleRows : roleNames.map((name) => ({ id: name, name, description: null })),
-          ),
-        )
-      }
+    if (!user) return
+
+    setAccessReady(false)
+    try {
+      const access = await fetchServerAccess(user, user.email || '')
+      setProfile(access.profile)
+      setPermissions(access.permissions)
+      setScopes(access.scopes)
+      setMenus(access.menus || [])
+      setModules(access.modules || [])
+    } catch (error) {
+      console.warn('Server RBAC refresh failed:', error)
+      setPermissions([])
+      setScopes([])
+      setMenus([])
+      setModules([])
+    } finally {
+      setAccessReady(true)
     }
   }
 
@@ -274,6 +334,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         canAll,
         canOnRecord,
         loading,
+        accessReady,
         mustChangePassword,
         refreshPasswordState,
         isTestingFallback: false,

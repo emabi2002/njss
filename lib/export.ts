@@ -45,9 +45,8 @@ export function exportToCSV(filename: string, rows: ExportRow[]): void {
   triggerDownload(blob, filename.endsWith(".csv") ? filename : `${filename}.csv`)
 }
 
-// Download a true Excel workbook (.xls). Uses the Office HTML/XML format which
-// Excel, LibreOffice and Google Sheets open natively, with styled headers and
-// numbers kept as real numbers so spreadsheet formulas work.
+// Download a true Excel workbook (.xls). Excel/CSV remain data-focused exports;
+// the official institutional header is reserved for PDF and browser Print.
 export function exportToExcel(
   filename: string,
   rows: ExportRow[],
@@ -68,16 +67,6 @@ export function exportToExcel(
     return `<td>${esc(String(v))}</td>`
   }
 
-  const org = getOrg()
-  const addr = orgAddressLine(org)
-  const contact = orgContactLine(org)
-  const orgNameRow = `<tr><th colspan="${headers.length}" style="font-size:15px;text-align:left;background:#8a1420;color:#fff;padding:6px;">${esc(org.name)}</th></tr>`
-  const orgAddrRow = addr
-    ? `<tr><td colspan="${headers.length}" style="font-size:11px;color:#334155;padding:3px 6px;">${esc(addr)}</td></tr>`
-    : ""
-  const orgContactRow = contact
-    ? `<tr><td colspan="${headers.length}" style="font-size:11px;color:#334155;padding:3px 6px;">${esc(contact)}</td></tr>`
-    : ""
   const titleRow = opts?.title
     ? `<tr><td colspan="${headers.length}" style="font-size:13px;font-weight:bold;color:#0f172a;padding:6px;">${esc(opts.title)}</td></tr>`
     : ""
@@ -109,7 +98,7 @@ export function exportToExcel(
 </x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
 <style>td,th{border:1px solid #cbd5e1;font-family:Calibri,Arial,sans-serif;}</style>
 </head>
-<body><table>${orgNameRow}${orgAddrRow}${orgContactRow}${titleRow}${subtitleRow}${headRow}${bodyRows}</table></body></html>`
+<body><table>${titleRow}${subtitleRow}${headRow}${bodyRows}</table></body></html>`
 
   const blob = new Blob(["\ufeff" + html], { type: "application/vnd.ms-excel;charset=utf-8;" })
   triggerDownload(blob, filename.endsWith(".xls") ? filename : `${filename}.xls`)
@@ -130,8 +119,9 @@ export function exportToPDF(opts: {
   const addr = orgAddressLine(org)
   const contact = orgContactLine(org)
 
-  // Branded organization header band
+  // Official organization header sourced from System Settings.
   let bandH = 16
+  if (org.subtitle) bandH += 5
   if (addr) bandH += 5
   if (contact) bandH += 5
   doc.setFillColor(138, 20, 32) // PNG red
@@ -141,7 +131,7 @@ export function exportToPDF(opts: {
   let textX = 14
   const logo = getLogoForPdf()
   if (logo && logo.h > 0 && logo.dataUrl) {
-    const drawH = Math.min(bandH - 6, 14)
+    const drawH = Math.min(bandH - 6, 18)
     const drawW = drawH * (logo.w / logo.h)
     try {
       doc.addImage(logo.dataUrl, "PNG", 10, (bandH - drawH) / 2, drawW, drawH)
@@ -159,6 +149,7 @@ export function exportToPDF(opts: {
   hy += 5
   doc.setFont("helvetica", "normal")
   doc.setFontSize(7.5)
+  if (org.subtitle) { doc.text(org.subtitle, textX, hy); hy += 4.5 }
   if (addr) { doc.text(addr, textX, hy); hy += 4.5 }
   if (contact) { doc.text(contact, textX, hy); hy += 4.5 }
 
@@ -256,6 +247,7 @@ export function printRows(opts: {
     <div class="njss-print-brand">
       ${org.logo_url ? `<img class="njss-print-logo" src="${esc(org.logo_url)}" alt="" />` : ""}
       <h1>${esc(org.name)}</h1>
+      ${org.subtitle ? `<div class="njss-print-org">${esc(org.subtitle)}</div>` : ""}
       ${addr ? `<div class="njss-print-org">${esc(addr)}</div>` : ""}
       ${contact ? `<div class="njss-print-org">${esc(contact)}</div>` : ""}
       <p>${esc(opts.title)}</p>
@@ -263,7 +255,7 @@ export function printRows(opts: {
     <div class="njss-print-meta">${
       opts.subtitle ? esc(opts.subtitle) + " &nbsp;•&nbsp; " : ""
     }Generated ${esc(new Date().toLocaleString("en-GB"))}</div>
-    <table><thead>${thead}</thead><tbody>${tbody}</tbody></table>
+    <table><thead>${thead}</thead><tbody>${tbody}</table>
     <div class="njss-print-foot">${esc(org.name)}${org.subtitle ? " — " + esc(org.subtitle) : ""}</div>`
 
   ensurePrintStyle()

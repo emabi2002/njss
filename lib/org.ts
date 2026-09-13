@@ -1,6 +1,7 @@
+import { authFetch } from './auth-fetch'
 import { supabase, isSupabaseNetworkEnabled } from './supabase'
 
-// Company / organization profile used to brand every report header and download.
+// Company / organization profile used to brand official printable reports.
 export type OrganizationProfile = {
   name: string
   short_name: string
@@ -41,8 +42,8 @@ const LS_KEY = 'njss_org_profile'
 const SETTING_KEY = 'organization'
 let cache: OrganizationProfile | null = null
 
-// Synchronous accessor used by the (synchronous) PDF / Excel / Print generators.
-// Falls back to localStorage, then to sensible defaults.
+// Synchronous accessor used by the PDF / Print generators.
+// The authenticated dashboard bootstrap refreshes this cache from System Settings.
 export function getOrg(): OrganizationProfile {
   if (cache) return cache
   if (typeof window !== 'undefined') {
@@ -70,18 +71,14 @@ export function setOrgCache(org: OrganizationProfile) {
   }
 }
 
-// Load the profile from the database and refresh the cache.
+// Load the authoritative profile through the authenticated server endpoint and refresh the cache.
 export async function loadOrganization(): Promise<OrganizationProfile> {
-  if (!isSupabaseNetworkEnabled) return getOrg()
-
   try {
-    const { data } = await supabase
-      .from('system_settings')
-      .select('setting_value')
-      .eq('setting_key', SETTING_KEY)
-      .maybeSingle()
-    const value = (data?.setting_value || {}) as Partial<OrganizationProfile>
-    const org = { ...DEFAULT_ORG, ...value }
+    const response = await authFetch('/api/settings/organization')
+    if (!response.ok) return getOrg()
+
+    const payload = await response.json() as { organization?: Partial<OrganizationProfile> }
+    const org = { ...DEFAULT_ORG, ...(payload.organization || {}) }
     setOrgCache(org)
     preloadLogo(org.logo_url)
     return org
@@ -208,7 +205,7 @@ export function fileToLogoDataUrl(file: File, maxDim = 256): Promise<string> {
   })
 }
 
-// --- Header formatting helpers (shared by PDF / Excel / Print) ---
+// --- Header formatting helpers (shared by PDF / Print) ---
 
 export function orgAddressLine(org: OrganizationProfile): string {
   return [org.address_line1, org.address_line2, org.city, org.province, org.postal_code, org.country]

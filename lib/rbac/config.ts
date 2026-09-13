@@ -40,6 +40,7 @@ export const MENU_ITEMS: RbacMenuItem[] = [
   { code: 'budget.control', module_code: 'njss_operations', label: 'Budget', href: '/dashboard/budget', icon: 'Wallet', sort_order: 30, required_permissions: ['budget.view', 'budget.module.view'], is_active: true },
   { code: 'budget.revisions', module_code: 'njss_operations', label: 'Budget Revision & Supplementary Budget', href: '/dashboard/budget/revisions', icon: 'ClipboardList', sort_order: 35, required_permissions: ['budget.revision.view', 'budget.revision.create', 'budget.revision.edit', 'budget.revision.submit', 'budget.revision.approve', 'budget.revision.return', 'budget.revision.reject', 'budget.revision.report'], is_active: true },
   { code: 'budget.funding', module_code: 'njss_operations', label: 'Funding', href: '/dashboard/budget/funding', icon: 'Banknote', sort_order: 40, required_permissions: ['funding.view'], is_active: true },
+  { code: 'workflow.tasks', module_code: 'njss_operations', label: 'My Tasks & Approvals', href: '/dashboard/tasks', icon: 'ClipboardList', sort_order: 45, required_permissions: ['workflow.tasks.view'], is_active: true },
   { code: 'finance.ff3', module_code: 'njss_operations', label: 'FF3', href: '/dashboard/ff3', icon: 'FileText', sort_order: 50, required_permissions: ['ff3.view', 'ff3.create', 'ff3.endorse', 'ff3.approve', 'ff3.reject'], is_active: true },
   { code: 'finance.ff3.new', module_code: 'njss_operations', parent_code: 'finance.ff3', label: 'New FF3', href: '/dashboard/ff3/new', icon: 'FileText', sort_order: 51, required_permissions: ['ff3.create'], is_active: true },
   { code: 'budget.commitments', module_code: 'njss_operations', label: 'Commitments', href: '/dashboard/commitments', icon: 'FileCheck', sort_order: 60, required_permissions: ['commitment.view', 'budget.control.view', 'budget.view'], is_active: true },
@@ -152,6 +153,7 @@ const SYSTEM_SUPPORT_PERMISSIONS = [
 export const PERMISSION_CATALOG: RbacPermission[] = [
   { code: 'all', module_code: 'administration', action: 'manage', label: 'Full system access', is_active: true },
   { code: 'dashboard.view', module_code: 'njss_operations', action: 'view', label: 'View dashboard', is_active: true },
+  { code: 'workflow.tasks.view', module_code: 'njss_operations', action: 'view', label: 'View My Tasks / Approvals', is_active: true },
   ...BUDGET_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'njss_operations', action: actionFromCode(code), is_active: true }) as RbacPermission),
   { code: 'budget.revision.return', module_code: 'njss_operations', action: 'edit', label: 'Return budget revisions', is_active: true },
   ...FINANCE_PERMISSIONS.map(([code, label]) => ({ code, label, module_code: 'njss_operations', action: actionFromCode(code), is_active: true }) as RbacPermission),
@@ -194,6 +196,7 @@ export const ICONS: Record<string, LucideIcon> = {
 
 export const ROUTE_PERMISSIONS: Array<{ pattern: RegExp; permissions: PermissionCode[] }> = [
   { pattern: /^\/dashboard$/, permissions: ['dashboard.view'] },
+  { pattern: /^\/dashboard\/tasks($|\/)/, permissions: ['workflow.tasks.view'] },
   { pattern: /^\/dashboard\/budget\/revisions($|\/)/, permissions: ['budget.revision.view', 'budget.revision.create', 'budget.revision.edit', 'budget.revision.submit', 'budget.revision.approve', 'budget.revision.return', 'budget.revision.reject', 'budget.revision.report'] },
   { pattern: /^\/dashboard\/budget\/funding($|\/)/, permissions: ['funding.view'] },
   { pattern: /^\/dashboard\/budget($|\/)/, permissions: ['budget.view', 'budget.module.view'] },
