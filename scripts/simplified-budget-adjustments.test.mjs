@@ -2,14 +2,20 @@ import fs from 'node:fs'
 import assert from 'node:assert/strict'
 
 const migrationPath = 'supabase/migrations/20260917020000_budget_supplementary_reallocation.sql'
+const requestScopePath = 'supabase/migrations/20260917026000_budget_reallocation_request_scope.sql'
+const navigationPath = 'supabase/migrations/20260917024000_budget_adjustments_navigation.sql'
 const clientPath = 'lib/head-office-budget.ts'
 const panelPath = 'app/dashboard/budget-template/BudgetAdjustmentsPanel.tsx'
 
 assert.equal(fs.existsSync(migrationPath), true, 'Supplementary/reallocation migration must exist')
+assert.equal(fs.existsSync(requestScopePath), true, 'Reallocation request-scope hardening must exist')
+assert.equal(fs.existsSync(navigationPath), true, 'Budget Adjustments navigation migration must exist')
 assert.equal(fs.existsSync(clientPath), true, 'Head Office budget client must exist')
 assert.equal(fs.existsSync(panelPath), true, 'Budget Adjustments panel must exist')
 
 const sql = fs.readFileSync(migrationPath, 'utf8')
+const requestScope = fs.readFileSync(requestScopePath, 'utf8')
+const navigation = fs.readFileSync(navigationPath, 'utf8')
 const client = fs.readFileSync(clientPath, 'utf8')
 const panel = fs.readFileSync(panelPath, 'utf8')
 
@@ -57,6 +63,14 @@ assert.match(sql, /p_amount\s*>\s*v_source_available_budget|v_reallocation\.amou
 assert.match(sql, /set search_path = public, auth/i, 'SECURITY DEFINER functions must pin search_path')
 assert.match(sql, /enable row level security/i, 'Adjustment tables must use RLS')
 assert.match(sql, /revoke\s+(insert|update|delete|all)/i, 'Direct authenticated mutation must be revoked')
+
+assert.match(requestScope, /njss_current_user_has_role\s*\(\s*'Division Director'\s*\)/i, 'Reallocation requests must verify Division Director authority')
+assert.match(requestScope, /njss_current_user_has_role\s*\(\s*'Registrar'\s*\)/i, 'Registrar must be able to initiate a reallocation under Registrar prerogative')
+assert.match(requestScope, /u\.department_id\s+into\s+v_requester_division_id/i, 'Division Director source scope must be checked against the requester Division')
+assert.match(requestScope, /v_requester_division_id\s*<>\s*v_source_division_id/i, 'Division Directors must be blocked from requesting another Division source budget')
+
+assert.match(navigation, /budget\.adjustments/i)
+assert.match(navigation, /\/dashboard\/budget-template\/adjustments/i)
 
 for (const fn of [
   'getCurrentBudgetPosition',
