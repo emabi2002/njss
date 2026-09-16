@@ -5,7 +5,7 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  // These two controlled budget workspaces perform authenticated async data
+  // These controlled budget workspaces perform authenticated async data
   // hydration on initial mount/year-selection changes. The state updates occur
   // inside the awaited loader callbacks rather than as derived synchronous
   // effect state, so keep the exception tightly scoped to these workspaces.
@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     files: [
       "app/dashboard/budget-template/page.tsx",
       "app/dashboard/budget/activation/page.tsx",
+      "app/dashboard/budget-template/BudgetAdjustmentsPanel.tsx",
+      "app/dashboard/budget-template/adjustments/page.tsx",
     ],
     rules: {
       "react-hooks/set-state-in-effect": "off",
