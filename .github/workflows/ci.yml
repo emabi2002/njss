@@ -86,6 +86,9 @@ jobs:
       - name: Master-data cleanup regression checks
         run: node scripts/master-data-cleanup.test.mjs
 
+      - name: Simplified Head Office budget foundation regression
+        run: node scripts/simplified-budget-foundation.test.mjs
+
       - name: Budget division selector regression checks
         run: node scripts/budget-division-selector.test.mjs
 
