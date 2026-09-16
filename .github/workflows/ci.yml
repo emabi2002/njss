@@ -77,6 +77,8 @@ jobs:
         run: node scripts/simplified-budget-adjustments.test.mjs
       - name: Head Office budget adjustments client contract
         run: node scripts/head-office-budget-adjustments-client.test.mjs
+      - name: Simplified budget adjustments UI contract
+        run: node scripts/simplified-budget-adjustments-ui.test.mjs
       - name: Head Office budget client contract
         run: node scripts/head-office-budget-client.test.mjs
       - name: Budget document private-storage contract
