@@ -32,4 +32,15 @@ assert.match(sql, /enable row level security/i, 'New budget tables must use RLS'
 assert.match(sql, /revoke\s+(insert|update|delete|all)/i, 'Direct client mutation privileges must be revoked')
 assert.match(sql, /set search_path = public, auth/i, 'SECURITY DEFINER functions must pin search_path')
 
+const registerStart = sql.toLowerCase().indexOf('create or replace function public.register_budget_document')
+const registerEnd = sql.toLowerCase().indexOf('create or replace function public.lock_division_budget', registerStart)
+assert.ok(registerStart >= 0 && registerEnd > registerStart, 'Budget document registration function must be extractable')
+const registerSql = sql.slice(registerStart, registerEnd)
+assert.match(registerSql, /from\s+storage\.objects/i, 'Budget document registration must verify the uploaded storage object exists')
+assert.match(registerSql, /bucket_id\s*=\s*'njss-budget-documents'/i, 'Budget document registration must verify the private budget bucket')
+assert.match(registerSql, /name\s*=\s*p_storage_path/i, 'Budget document registration must verify the exact uploaded storage path')
+assert.match(registerSql, /p_supersedes_document_id\s+is\s+not\s+null/i, 'Controlled document versioning must validate a supplied predecessor')
+assert.match(registerSql, /d\.document_type\s*=\s*p_document_type/i, 'A superseded document must belong to the same document type')
+assert.match(registerSql, /d\.related_entity_type\s*=\s*p_related_entity_type/i, 'A superseded document must belong to the same entity type')
+
 console.log('Simplified budget foundation migration contract passed')
