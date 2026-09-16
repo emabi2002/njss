@@ -41,117 +41,91 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
       - name: RBAC regression checks
         run: node lib/rbac/four-group-rbac.test.mjs
-
       - name: Access Control readiness regression checks
         run: node lib/rbac/access-control-readiness.test.mjs
-
       - name: Server access-context regression checks
         run: node lib/rbac/server-access-context.test.mjs
-
       - name: Admin runtime fallback regression checks
         run: node lib/rbac/admin-runtime-fallback.test.mjs
-
       - name: User CRUD Edge routing regression checks
         run: node lib/rbac/user-crud-edge.test.mjs
-
       - name: Access Control privileged Edge routing regression checks
         run: node lib/rbac/access-admin-edge.test.mjs
-
       - name: Scoped dashboard regression checks
         run: node lib/rbac/dashboard-scope.test.mjs
-
       - name: Management reporting and drill-down regression checks
         run: node lib/rbac/management-reports.test.mjs
-
       - name: System Settings printable report branding regression checks
         run: node lib/rbac/report-branding.test.mjs
-
       - name: Role-aware workflow inbox regression checks
         run: node lib/rbac/workflow-inbox.test.mjs
-
       - name: Full and differential backup regression checks
         run: node lib/backup/full-differential-backup.test.mjs
-
       - name: Master-data cleanup regression checks
         run: node scripts/master-data-cleanup.test.mjs
-
       - name: Simplified Head Office budget foundation regression
         run: node scripts/simplified-budget-foundation.test.mjs
-
+      - name: Simplified budget adjustments and reallocations
+        run: node scripts/simplified-budget-adjustments.test.mjs
+      - name: Simplified budget event-only dimensions
+        run: node scripts/simplified-budget-event-dimensions.test.mjs
+      - name: Simplified budget adjustments navigation
+        run: node scripts/simplified-budget-adjustments-navigation.test.mjs
+      - name: Head Office budget adjustments client contract
+        run: node scripts/head-office-budget-adjustments-client.test.mjs
+      - name: Simplified budget adjustments UI contract
+        run: node scripts/simplified-budget-adjustments-ui.test.mjs
       - name: Head Office budget client contract
         run: node scripts/head-office-budget-client.test.mjs
-
       - name: Budget document private-storage contract
         run: node scripts/budget-document-storage.test.mjs
-
       - name: Simplified annual budget workspace contract
         run: node scripts/simplified-budget-entry-ui.test.mjs
-
       - name: Budget lock and official-document control
         run: node scripts/budget-lock-document-control.test.mjs
-
       - name: Simplified annual budget activation regression
         run: node scripts/simplified-budget-activation.test.mjs
-
       - name: Legacy financial-control backend preservation
         run: node scripts/legacy-budget-backend-preservation.test.mjs
-
       - name: Budget division selector regression checks
         run: node scripts/budget-division-selector.test.mjs
-
       - name: Budget checkbox row-selection regression checks
         run: node scripts/budget-row-selection.test.mjs
-
       - name: Budget entry full-width layout regression checks
         run: node scripts/budget-entry-layout.test.mjs
-
       - name: Budget revision reporting regression checks
         run: node scripts/budget-revision-reporting.test.mjs
-
       - name: Password recovery route regression checks
         run: node scripts/national-uat/password-recovery-route.test.mjs
-
       - name: Repository governance regression checks
         run: node scripts/repository-governance.test.mjs
-
       - name: Migration governance regression checks
         run: node scripts/migration-governance.test.mjs
-
       - name: Critical SECURITY DEFINER RPC lockdown checks
         run: node scripts/critical-rpc-lockdown.test.mjs
-
       - name: RLS and legacy policy lockdown checks
         run: node scripts/rls-policy-lockdown.test.mjs
-
       - name: AI report agent contract checks
         run: node scripts/ai-report-agent.test.mjs
-
       - name: Budget RPC PostgreSQL runtime checks
         env:
           NJSS_TEST_DATABASE_URL: postgresql://postgres:njss-ci-only@127.0.0.1:5432/njss_rpc_test
         run: node scripts/critical-rpc-runtime.test.mjs
-
       - name: Client table privilege PostgreSQL runtime checks
         env:
           NJSS_TEST_DATABASE_URL: postgresql://postgres:njss-ci-only@127.0.0.1:5432/njss_rpc_test
         run: node scripts/client-table-privileges-runtime.test.mjs
-
       - name: Lint
         run: bun run lint
-
       - name: Typecheck
         run: bun run typecheck
-
       - name: Build
         run: bun run build
