@@ -161,6 +161,20 @@ export async function getHeadOfficeBudgetDashboard(financialYear: number): Promi
   }
 }
 
+export async function getAnnualBudgetActivationAuthorities(cycleId: string): Promise<BudgetDocument[]> {
+  const { data, error } = await supabase
+    .from('budget_documents')
+    .select('*')
+    .eq('related_entity_type', 'ANNUAL_BUDGET_CYCLE')
+    .eq('related_entity_id', cycleId)
+    .eq('document_type', 'REGISTRAR_ACTIVATION_AUTHORITY')
+    .order('version_number', { ascending: false })
+    .order('uploaded_at', { ascending: false })
+
+  if (error) throw error
+  return (data || []) as BudgetDocument[]
+}
+
 export async function getDivisionBudget(divisionBudgetId: string): Promise<DivisionBudgetDetail> {
   const budgetResult = await supabase
     .from('division_budgets')
