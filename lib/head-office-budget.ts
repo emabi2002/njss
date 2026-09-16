@@ -378,16 +378,12 @@ export async function activateAnnualBudget(cycleId: string, authorityDocumentId:
 }
 
 export async function getCurrentBudgetPosition(financialYear: number): Promise<BudgetPosition[]> {
-  const { data, error } = await supabase
-    .from('v_current_budget_position')
-    .select('*')
-    .eq('financial_year', financialYear)
-    .order('division_name')
-    .order('section_name')
-    .order('finance_code')
+  const { data, error } = await supabase.rpc('get_current_budget_position', {
+    p_financial_year: financialYear,
+  })
 
   if (error) throw error
-  return (data || []).map((row) => ({
+  return ((data || []) as Record<string, unknown>[]).map((row) => ({
     ...row,
     original_budget: numeric(row.original_budget),
     supplementary_adjustments: numeric(row.supplementary_adjustments),
