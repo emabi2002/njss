@@ -95,6 +95,9 @@ jobs:
       - name: Budget document private-storage contract
         run: node scripts/budget-document-storage.test.mjs
 
+      - name: Simplified annual budget workspace contract
+        run: node scripts/simplified-budget-entry-ui.test.mjs
+
       - name: Budget division selector regression checks
         run: node scripts/budget-division-selector.test.mjs
 
