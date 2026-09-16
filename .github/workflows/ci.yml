@@ -75,6 +75,8 @@ jobs:
         run: node scripts/simplified-budget-foundation.test.mjs
       - name: Simplified budget adjustments and reallocations
         run: node scripts/simplified-budget-adjustments.test.mjs
+      - name: Simplified budget event-only dimensions
+        run: node scripts/simplified-budget-event-dimensions.test.mjs
       - name: Head Office budget adjustments client contract
         run: node scripts/head-office-budget-adjustments-client.test.mjs
       - name: Simplified budget adjustments UI contract
