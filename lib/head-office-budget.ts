@@ -106,6 +106,9 @@ export type DivisionBudgetDetail = {
   documents: BudgetDocument[]
 }
 
+type DashboardLineSummary = { original_amount: number | string | null }
+type DashboardDocumentSummary = { document_type: string }
+
 const numeric = (value: unknown) => Number(value || 0)
 
 export async function createOrGetHeadOfficeBudgetCycle(financialYear: number) {
@@ -142,12 +145,12 @@ export async function getHeadOfficeBudgetDashboard(financialYear: number): Promi
   if (divisionResult.error) throw divisionResult.error
 
   const divisions = (divisionResult.data || []).map((row) => {
-    const lines = Array.isArray(row.lines) ? row.lines : []
-    const documents = Array.isArray(row.documents) ? row.documents : []
+    const lines = (Array.isArray(row.lines) ? row.lines : []) as DashboardLineSummary[]
+    const documents = (Array.isArray(row.documents) ? row.documents : []) as DashboardDocumentSummary[]
     return {
       ...row,
-      division_total: lines.reduce((sum, line) => sum + numeric(line.original_amount), 0),
-      official_document_count: documents.filter((document) => document.document_type === 'OFFICIAL_APPROVED_BUDGET').length,
+      division_total: lines.reduce((sum: number, line: DashboardLineSummary) => sum + numeric(line.original_amount), 0),
+      official_document_count: documents.filter((document: DashboardDocumentSummary) => document.document_type === 'OFFICIAL_APPROVED_BUDGET').length,
     } as DivisionBudgetDashboardRow
   })
 
