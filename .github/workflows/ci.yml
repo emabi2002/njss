@@ -101,6 +101,9 @@ jobs:
       - name: Budget lock and official-document control
         run: node scripts/budget-lock-document-control.test.mjs
 
+      - name: Simplified annual budget activation regression
+        run: node scripts/simplified-budget-activation.test.mjs
+
       - name: Budget division selector regression checks
         run: node scripts/budget-division-selector.test.mjs
 
