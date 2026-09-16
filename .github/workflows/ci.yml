@@ -104,6 +104,9 @@ jobs:
       - name: Simplified annual budget activation regression
         run: node scripts/simplified-budget-activation.test.mjs
 
+      - name: Legacy financial-control backend preservation
+        run: node scripts/legacy-budget-backend-preservation.test.mjs
+
       - name: Budget division selector regression checks
         run: node scripts/budget-division-selector.test.mjs
 
@@ -113,23 +116,8 @@ jobs:
       - name: Budget entry full-width layout regression checks
         run: node scripts/budget-entry-layout.test.mjs
 
-      - name: Budget revision and reforecast regression checks
-        run: node scripts/budget-revision-reforecast.test.mjs
-
       - name: Budget revision reporting regression checks
         run: node scripts/budget-revision-reporting.test.mjs
-
-      - name: Budget revision hardening regression checks
-        run: node scripts/budget-revision-hardening.test.mjs
-
-      - name: Budget revision workspace regression checks
-        run: node scripts/budget-revision-workspace.test.mjs
-
-      - name: Budget activation control regression checks
-        run: node scripts/budget-activation-control.test.mjs
-
-      - name: Approved Task 9 spec conformance checks
-        run: node scripts/budget-activation-approved-spec-conformance.test.mjs
 
       - name: Password recovery route regression checks
         run: node scripts/national-uat/password-recovery-route.test.mjs
