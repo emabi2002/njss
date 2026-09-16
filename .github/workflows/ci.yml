@@ -83,6 +83,16 @@ jobs:
         run: node scripts/head-office-budget-adjustments-client.test.mjs
       - name: Simplified budget adjustments UI contract
         run: node scripts/simplified-budget-adjustments-ui.test.mjs
+      - name: FF3 simplified budget-control foundation
+        run: node scripts/ff3-budget-control-blocking.test.mjs
+      - name: FF3 workflow budget blocking
+        run: node scripts/ff3-budget-transition-blocking.test.mjs
+      - name: FF3 authoritative budget client
+        run: node scripts/ff3-budget-control-client.test.mjs
+      - name: FF3 manager budget-state visibility
+        run: node scripts/ff3-budget-control-manager-ui.test.mjs
+      - name: FF3 automatic budget refresh
+        run: node scripts/ff3-budget-auto-refresh.test.mjs
       - name: Head Office budget client contract
         run: node scripts/head-office-budget-client.test.mjs
       - name: Budget document private-storage contract
