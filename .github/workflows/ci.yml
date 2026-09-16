@@ -104,6 +104,9 @@ jobs:
       - name: Simplified annual budget activation regression
         run: node scripts/simplified-budget-activation.test.mjs
 
+      - name: Simplified supplementary budget and reallocation regression
+        run: node scripts/simplified-budget-adjustments.test.mjs
+
       - name: Legacy financial-control backend preservation
         run: node scripts/legacy-budget-backend-preservation.test.mjs
 
