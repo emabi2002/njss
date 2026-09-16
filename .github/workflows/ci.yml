@@ -92,6 +92,9 @@ jobs:
       - name: Head Office budget client contract
         run: node scripts/head-office-budget-client.test.mjs
 
+      - name: Budget document private-storage contract
+        run: node scripts/budget-document-storage.test.mjs
+
       - name: Budget division selector regression checks
         run: node scripts/budget-division-selector.test.mjs
 
