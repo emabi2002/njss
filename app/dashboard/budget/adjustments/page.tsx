@@ -106,7 +106,10 @@ export default function BudgetAdjustmentsPage() {
   }, [financialYear])
 
   useEffect(() => {
-    void load()
+    const timer = window.setTimeout(() => {
+      void load()
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [load])
 
   const divisionByBudgetId = useMemo(() => new Map((dashboard?.divisions || []).map((row) => [row.id, row])), [dashboard])
