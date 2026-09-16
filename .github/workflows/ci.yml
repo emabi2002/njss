@@ -98,6 +98,9 @@ jobs:
       - name: Simplified annual budget workspace contract
         run: node scripts/simplified-budget-entry-ui.test.mjs
 
+      - name: Budget lock and official-document control
+        run: node scripts/budget-lock-document-control.test.mjs
+
       - name: Budget division selector regression checks
         run: node scripts/budget-division-selector.test.mjs
 
