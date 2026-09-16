@@ -8,6 +8,7 @@ const source = fs.readFileSync(clientPath, 'utf8')
 for (const fn of [
   'getHeadOfficeBudgetDashboard',
   'getDivisionBudget',
+  'getAnnualBudgetActivationAuthorities',
   'createOrGetHeadOfficeBudgetCycle',
   'createOrGetDivisionBudget',
   'updateDivisionBudgetDraftHeader',
@@ -32,5 +33,7 @@ assert.equal(source.includes(".from('annual_budget_cycles')"), true)
 assert.equal(source.includes(".from('division_budgets')"), true)
 assert.equal(source.includes(".from('division_budget_lines')"), true)
 assert.equal(source.includes(".from('budget_documents')"), true)
+assert.equal(source.includes(".eq('related_entity_type', 'ANNUAL_BUDGET_CYCLE')"), true)
+assert.equal(source.includes(".eq('document_type', 'REGISTRAR_ACTIVATION_AUTHORITY')"), true)
 
 console.log('Head Office budget client contract passed')
