@@ -2,9 +2,12 @@ import fs from 'node:fs'
 import assert from 'node:assert/strict'
 
 const migrationPath = 'supabase/migrations/20260917010000_simplified_head_office_budget_foundation.sql'
+const hardeningPath = 'supabase/migrations/20260917011000_budget_document_evidence_hardening.sql'
 
 assert.equal(fs.existsSync(migrationPath), true, 'Simplified Head Office budget migration must exist')
+assert.equal(fs.existsSync(hardeningPath), true, 'Budget document evidence hardening migration must exist')
 const sql = fs.readFileSync(migrationPath, 'utf8')
+const hardeningSql = fs.readFileSync(hardeningPath, 'utf8')
 
 for (const name of ['annual_budget_cycles', 'division_budgets', 'division_budget_lines', 'budget_documents']) {
   assert.match(sql, new RegExp(`create table(?: if not exists)? public\\.${name}`, 'i'), `${name} must be created`)
@@ -32,15 +35,13 @@ assert.match(sql, /enable row level security/i, 'New budget tables must use RLS'
 assert.match(sql, /revoke\s+(insert|update|delete|all)/i, 'Direct client mutation privileges must be revoked')
 assert.match(sql, /set search_path = public, auth/i, 'SECURITY DEFINER functions must pin search_path')
 
-const registerStart = sql.toLowerCase().indexOf('create or replace function public.register_budget_document')
-const registerEnd = sql.toLowerCase().indexOf('create or replace function public.lock_division_budget', registerStart)
-assert.ok(registerStart >= 0 && registerEnd > registerStart, 'Budget document registration function must be extractable')
-const registerSql = sql.slice(registerStart, registerEnd)
-assert.match(registerSql, /from\s+storage\.objects/i, 'Budget document registration must verify the uploaded storage object exists')
-assert.match(registerSql, /bucket_id\s*=\s*'njss-budget-documents'/i, 'Budget document registration must verify the private budget bucket')
-assert.match(registerSql, /name\s*=\s*p_storage_path/i, 'Budget document registration must verify the exact uploaded storage path')
-assert.match(registerSql, /p_supersedes_document_id\s+is\s+not\s+null/i, 'Controlled document versioning must validate a supplied predecessor')
-assert.match(registerSql, /d\.document_type\s*=\s*p_document_type/i, 'A superseded document must belong to the same document type')
-assert.match(registerSql, /d\.related_entity_type\s*=\s*p_related_entity_type/i, 'A superseded document must belong to the same entity type')
+assert.match(hardeningSql, /create or replace function public\.register_budget_document/i, 'Hardening must replace the controlled document registration function')
+assert.match(hardeningSql, /from\s+storage\.objects/i, 'Budget document registration must verify the uploaded storage object exists')
+assert.match(hardeningSql, /bucket_id\s*=\s*'njss-budget-documents'/i, 'Budget document registration must verify the private budget bucket')
+assert.match(hardeningSql, /o\.name\s*=\s*p_storage_path/i, 'Budget document registration must verify the exact uploaded storage path')
+assert.match(hardeningSql, /p_supersedes_document_id\s+is\s+not\s+null/i, 'Controlled document versioning must validate a supplied predecessor')
+assert.match(hardeningSql, /d\.document_type\s*=\s*p_document_type/i, 'A superseded document must belong to the same document type')
+assert.match(hardeningSql, /d\.related_entity_type\s*=\s*p_related_entity_type/i, 'A superseded document must belong to the same entity type')
+assert.match(hardeningSql, /p_related_entity_id\s+is\s+distinct\s+from\s+p_division_budget_id/i, 'Official Division evidence must be linked to the same Division budget')
 
 console.log('Simplified budget foundation migration contract passed')
