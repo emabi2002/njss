@@ -89,6 +89,9 @@ jobs:
       - name: Simplified Head Office budget foundation regression
         run: node scripts/simplified-budget-foundation.test.mjs
 
+      - name: Head Office budget client contract
+        run: node scripts/head-office-budget-client.test.mjs
+
       - name: Budget division selector regression checks
         run: node scripts/budget-division-selector.test.mjs
 
