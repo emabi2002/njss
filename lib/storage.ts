@@ -6,6 +6,7 @@ export const BUCKETS = {
   FF4_ATTACHMENTS: 'ff4-attachments',
   QUOTATIONS: 'quotations',
   SUPPLIER_DOCUMENTS: 'supplier-documents',
+  BUDGET_DOCUMENTS: 'njss-budget-documents',
 } as const
 
 export type BucketName = typeof BUCKETS[keyof typeof BUCKETS]
@@ -58,6 +59,38 @@ export async function uploadFile(
     size: file.size,
     type: file.type,
     url: urlData.publicUrl,
+    path: data.path,
+    uploadedAt: new Date().toISOString(),
+  }
+}
+
+// Upload to a private bucket without ever generating a public URL. Callers use
+// getSignedUrl() when an authorised user needs to view/download the document.
+export async function uploadPrivateFile(
+  bucket: BucketName,
+  recordPath: string,
+  file: File
+): Promise<UploadedFile> {
+  const filePath = generateFilePath(bucket, recordPath, file.name)
+
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .upload(filePath, file, {
+      cacheControl: '3600',
+      upsert: false,
+    })
+
+  if (error) {
+    console.error('Private upload error:', error)
+    throw new Error(`Failed to upload file: ${error.message}`)
+  }
+
+  return {
+    id: data.id || data.path,
+    name: file.name,
+    size: file.size,
+    type: file.type,
+    url: '',
     path: data.path,
     uploadedAt: new Date().toISOString(),
   }
