@@ -2,6 +2,8 @@ import { supabase } from './supabase'
 
 export type AnnualBudgetCycleStatus = 'PREPARATION' | 'READY_FOR_ACTIVATION' | 'ACTIVE' | 'CLOSED'
 export type DivisionBudgetStatus = 'DRAFT' | 'LOCKED'
+export type SupplementaryAdjustmentStatus = 'DRAFT' | 'POSTED'
+export type BudgetReallocationStatus = 'REQUESTED' | 'REGISTRAR_APPROVED' | 'EXECUTED' | 'REJECTED' | 'CANCELLED'
 
 export type AnnualBudgetCycle = {
   id: string
@@ -104,6 +106,81 @@ export type DivisionBudgetDetail = {
   budget: DivisionBudget
   lines: DivisionBudgetLine[]
   documents: BudgetDocument[]
+}
+
+export type BudgetPosition = {
+  financial_year: number
+  annual_budget_cycle_id: string
+  annual_cycle_status: AnnualBudgetCycleStatus
+  is_authoritative: boolean
+  division_id: string
+  division_code: string
+  division_name: string
+  section_id: string
+  section_code: string
+  section_name: string
+  expense_ledger_id: string
+  ledger_number: string
+  finance_code: string
+  ledger_description: string
+  original_budget: number
+  supplementary_adjustments: number
+  reallocations_in: number
+  reallocations_out: number
+  current_approved_budget: number
+  outstanding_commitments: number
+  actual_expenditure: number
+  available_budget: number
+}
+
+export type SupplementaryAdjustment = {
+  id: string
+  transaction_number: string
+  annual_budget_cycle_id: string
+  financial_year: number
+  division_budget_id: string
+  section_id: string
+  expense_ledger_id: string
+  adjustment_amount: number
+  status: SupplementaryAdjustmentStatus
+  reason: string
+  authority_reference: string | null
+  authority_document_id: string | null
+  created_by: string
+  created_at: string
+  posted_by: string | null
+  posted_at: string | null
+  updated_at: string
+}
+
+export type BudgetReallocation = {
+  id: string
+  reallocation_number: string
+  annual_budget_cycle_id: string
+  financial_year: number
+  status: BudgetReallocationStatus
+  reason: string
+  requesting_division_id: string | null
+  requested_by: string
+  requested_at: string
+  source_division_budget_id: string
+  source_section_id: string
+  source_expense_ledger_id: string
+  destination_division_budget_id: string
+  destination_section_id: string
+  destination_expense_ledger_id: string
+  amount: number
+  authority_reference: string | null
+  authority_document_id: string | null
+  registrar_approved_by: string | null
+  registrar_approved_at: string | null
+  rejection_reason: string | null
+  rejected_by: string | null
+  rejected_at: string | null
+  executed_by: string | null
+  executed_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 type DashboardLineSummary = { original_amount: number | string | null }
@@ -296,6 +373,129 @@ export async function activateAnnualBudget(cycleId: string, authorityDocumentId:
   const { error } = await supabase.rpc('activate_annual_budget', {
     p_cycle_id: cycleId,
     p_authority_document_id: authorityDocumentId,
+  })
+  if (error) throw error
+}
+
+export async function getCurrentBudgetPosition(financialYear: number): Promise<BudgetPosition[]> {
+  const { data, error } = await supabase.rpc('get_current_budget_position', {
+    p_financial_year: financialYear,
+  })
+
+  if (error) throw error
+  return ((data || []) as Record<string, unknown>[]).map((row) => ({
+    ...row,
+    original_budget: numeric(row.original_budget),
+    supplementary_adjustments: numeric(row.supplementary_adjustments),
+    reallocations_in: numeric(row.reallocations_in),
+    reallocations_out: numeric(row.reallocations_out),
+    current_approved_budget: numeric(row.current_approved_budget),
+    outstanding_commitments: numeric(row.outstanding_commitments),
+    actual_expenditure: numeric(row.actual_expenditure),
+    available_budget: numeric(row.available_budget),
+  })) as BudgetPosition[]
+}
+
+export async function getSupplementaryAdjustments(financialYear: number): Promise<SupplementaryAdjustment[]> {
+  const { data, error } = await supabase
+    .from('budget_supplementary_adjustments')
+    .select('*')
+    .eq('financial_year', financialYear)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data || []).map((row) => ({ ...row, adjustment_amount: numeric(row.adjustment_amount) })) as SupplementaryAdjustment[]
+}
+
+export async function getBudgetReallocations(financialYear: number): Promise<BudgetReallocation[]> {
+  const { data, error } = await supabase
+    .from('budget_reallocations')
+    .select('*')
+    .eq('financial_year', financialYear)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data || []).map((row) => ({ ...row, amount: numeric(row.amount) })) as BudgetReallocation[]
+}
+
+export async function createSupplementaryAdjustmentDraft(input: {
+  financialYear: number
+  divisionBudgetId: string
+  sectionId: string
+  expenseLedgerId: string
+  adjustmentAmount: number
+  reason: string
+  authorityReference?: string | null
+}) {
+  const { data, error } = await supabase.rpc('create_supplementary_adjustment_draft', {
+    p_financial_year: input.financialYear,
+    p_division_budget_id: input.divisionBudgetId,
+    p_section_id: input.sectionId,
+    p_expense_ledger_id: input.expenseLedgerId,
+    p_adjustment_amount: input.adjustmentAmount,
+    p_reason: input.reason,
+    p_authority_reference: input.authorityReference || null,
+  })
+  if (error) throw error
+  return data as string
+}
+
+export async function postSupplementaryAdjustment(adjustmentId: string, authorityDocumentId: string) {
+  const { error } = await supabase.rpc('post_supplementary_adjustment', {
+    p_adjustment_id: adjustmentId,
+    p_authority_document_id: authorityDocumentId,
+  })
+  if (error) throw error
+}
+
+export async function requestBudgetReallocation(input: {
+  financialYear: number
+  sourceDivisionBudgetId: string
+  sourceSectionId: string
+  sourceExpenseLedgerId: string
+  destinationDivisionBudgetId: string
+  destinationSectionId: string
+  destinationExpenseLedgerId: string
+  amount: number
+  reason: string
+}) {
+  const { data, error } = await supabase.rpc('request_budget_reallocation', {
+    p_financial_year: input.financialYear,
+    p_source_division_budget_id: input.sourceDivisionBudgetId,
+    p_source_section_id: input.sourceSectionId,
+    p_source_expense_ledger_id: input.sourceExpenseLedgerId,
+    p_destination_division_budget_id: input.destinationDivisionBudgetId,
+    p_destination_section_id: input.destinationSectionId,
+    p_destination_expense_ledger_id: input.destinationExpenseLedgerId,
+    p_amount: input.amount,
+    p_reason: input.reason,
+  })
+  if (error) throw error
+  return data as string
+}
+
+export async function approveBudgetReallocation(input: {
+  reallocationId: string
+  authorityReference: string
+  authorityDocumentId?: string | null
+}) {
+  const { error } = await supabase.rpc('approve_budget_reallocation', {
+    p_reallocation_id: input.reallocationId,
+    p_authority_reference: input.authorityReference,
+    p_authority_document_id: input.authorityDocumentId || null,
+  })
+  if (error) throw error
+}
+
+export async function rejectBudgetReallocation(reallocationId: string, reason: string) {
+  const { error } = await supabase.rpc('reject_budget_reallocation', {
+    p_reallocation_id: reallocationId,
+    p_reason: reason,
+  })
+  if (error) throw error
+}
+
+export async function executeBudgetReallocation(reallocationId: string) {
+  const { error } = await supabase.rpc('execute_budget_reallocation', {
+    p_reallocation_id: reallocationId,
   })
   if (error) throw error
 }
