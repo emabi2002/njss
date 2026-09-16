@@ -2,11 +2,11 @@ import fs from 'node:fs'
 import assert from 'node:assert/strict'
 
 const page = fs.readFileSync('app/dashboard/budget-template/page.tsx', 'utf8')
-const css = fs.readFileSync('app/globals.css', 'utf8')
 
-assert.equal(page.includes('placeholder="Search division"'), true, 'The existing division filter is the row being suppressed')
-assert.equal(page.includes('<option value="">Select active division from database</option>'), true, 'The real division selector must remain')
-assert.equal(css.includes('div:has(> input[placeholder="Search division"])'), true, 'The redundant division search row must be hidden')
-assert.equal(css.includes('display: none !important'), true, 'The redundant division search row must not be visible')
+assert.equal(page.includes('data-testid="division-budget-selector"'), true, 'Annual Budget must expose one clear Division selector')
+assert.equal(page.includes('Select Division'), true, 'Division selector must use clear Head Office wording')
+assert.equal(page.includes('placeholder="Search division"'), false, 'The superseded duplicate Division search row must be removed')
+assert.equal(page.includes('Division / cost centre'), false, 'Annual Budget must not expose legacy cost-centre selection')
+assert.equal(page.includes('filteredSections'), true, 'Section rows must resolve from the selected Division')
 
-console.log('Budget division selector regression checks passed')
+console.log('Simplified Budget Division selector regression checks passed')
