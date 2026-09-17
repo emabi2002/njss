@@ -1265,47 +1265,62 @@ export async function checkBudgetAvailability(params: {
   budgetAllocationId?: string | null
   amount: number
 }) {
-  let q = supabase.from('v_authoritative_budget_position').select('*').eq('financial_year', params.financialYear)
-  if (params.budgetAllocationId) q = q.eq('budget_allocation_id', params.budgetAllocationId)
-  else {
-    if (params.expenseCodeId) q = q.eq('expense_code_registry_id', params.expenseCodeId)
-    if (params.sectionId) q = q.eq('section_id', params.sectionId)
-    if (params.departmentId) q = q.eq('department_id', params.departmentId)
-    if (params.costCentreId) q = q.eq('cost_centre_id', params.costCentreId)
-    if (params.fundingSourceId) q = q.eq('funding_source_id', params.fundingSourceId)
-    if (params.projectId) q = q.eq('project_id', params.projectId)
-  }
-  const { data: rows, error } = await q
+  const { data, error } = await supabase.rpc('check_ff3_budget_availability', {
+    p_financial_year: params.financialYear,
+    p_expense_code_registry_id: params.expenseCodeId || null,
+    p_section_id: params.sectionId || null,
+    p_department_id: params.departmentId || null,
+    p_cost_centre_id: params.costCentreId || null,
+    p_funding_source_id: params.fundingSourceId || null,
+    p_project_id: params.projectId || null,
+    p_budget_allocation_id: params.budgetAllocationId || null,
+    p_amount: Number(params.amount || 0),
+  })
   if (error) throw error
 
-  const scopedRows = (await filterRowsToCurrentScope(rows)) as AuthoritativeBudgetPosition[]
-  const exactAllocation = scopedRows.length === 1 ? scopedRows[0] : null
-  const revised = scopedRows.reduce((s, a) => s + (a.approved_budget || 0), 0)
-  const funded = scopedRows.reduce((s, a) => s + (a.funded_amount || 0), 0)
-  const released = scopedRows.reduce((s, a) => s + (a.released_amount || 0), 0)
-  const pending = scopedRows.reduce((s, a) => s + (a.pending_amount || 0), 0)
-  const committed = scopedRows.reduce((s, a) => s + (a.outstanding_commitment || 0), 0)
-  const spent = scopedRows.reduce((s, a) => s + (a.actual_expenditure || 0), 0)
-  const available = released - committed - spent
-  const approvedAvailable = revised - committed - spent
+  const row = (data || {}) as Record<string, unknown>
+  const budgetControlSource = String(row.budget_control_source || 'LEGACY')
+  const budgetControlStatus = String(row.budget_control_status || 'UNASSESSED')
+  const currentApproved = Number(row.current_approved_budget || 0)
+  const released = Number(row.released_amount || 0)
+  const pending = Number(row.pending_amount || 0)
+  const committed = Number(row.outstanding_commitments || 0)
+  const spent = Number(row.actual_expenditure || 0)
+  const available = Number(row.available_budget || 0)
+  const shortfall = Number(row.shortfall || 0)
+  const allocationCount = Number(row.allocation_count || 0)
+  const budgetAllocationId = typeof row.budget_allocation_id === 'string' && row.budget_allocation_id ? row.budget_allocation_id : null
+  const expenseLedgerId = typeof row.expense_ledger_id === 'string' && row.expense_ledger_id ? row.expense_ledger_id : null
+  const mappingStatus = String(row.mapping_status || 'BUDGET_MAPPING_REQUIRED')
+  const commitmentMappingStatus = String(row.commitment_mapping_status || mappingStatus)
+  const withinBudget = row.within_budget === true
+  const hasAllocation = row.has_allocation === true
+
   return {
-    budgetAllocationId: exactAllocation?.budget_allocation_id || null,
-    mappingStatus: scopedRows.length === 1 ? 'RESOLVED' : scopedRows.length === 0 ? 'BUDGET_MAPPING_REQUIRED' : 'BUDGET_MAPPING_REQUIRED_AMBIGUOUS',
-    allocationCount: scopedRows.length,
-    revised,
-    funded,
+    budgetControlSource,
+    budgetControlStatus,
+    budgetAllocationId,
+    expenseLedgerId,
+    mappingStatus,
+    commitmentMappingStatus,
+    allocationCount,
+    revised: currentApproved,
+    currentApproved,
+    funded: 0,
     released,
     pending,
     committed,
     spent,
     available,
-    approvedAvailable,
+    approvedAvailable: currentApproved - committed - spent,
     projectedAvailableAfterPending: available - pending,
-    unreleased: funded - released,
-    unfunded: revised - funded,
-    requested: params.amount,
-    withinBudget: scopedRows.length === 1 && params.amount <= available,
-    hasAllocation: scopedRows.length === 1,
+    unreleased: 0,
+    unfunded: 0,
+    requested: Number(params.amount || 0),
+    shortfall,
+    withinBudget,
+    hasAllocation,
+    positionResolved: row.position_resolved === true,
   }
 }
 
