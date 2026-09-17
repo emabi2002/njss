@@ -30,17 +30,17 @@ for (const needle of [
   'shortfall',
   'within_budget',
   'SECURITY DEFINER',
-  "SET search_path = public, auth, pg_temp",
+  'SET search_path = public, auth, pg_temp',
 ]) {
   assert.ok(sql.includes(needle), `migration must contain ${needle}`)
 }
 
 assert.ok(
-  sql.includes("WHEN v_has_simplified_cycle THEN 'SIMPLIFIED'") || sql.includes("'SIMPLIFIED'::text"),
-  'simplified budget source must be selected when an active simplified cycle exists',
+  sql.includes("CASE WHEN v_has_simplified_cycle THEN 'SIMPLIFIED' ELSE 'LEGACY' END"),
+  'simplified budget source must be selected only when an active simplified cycle exists',
 )
 assert.ok(
-  sql.includes("'LEGACY'::text") || sql.includes("'LEGACY'"),
+  sql.includes("'LEGACY'"),
   'legacy budget source must remain available before simplified activation',
 )
 assert.ok(
