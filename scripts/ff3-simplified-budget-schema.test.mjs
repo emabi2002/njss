@@ -19,16 +19,26 @@ for (const needle of [
   "'INSUFFICIENT_BUDGET_BLOCKED'",
   "'NO_ACTIVE_BUDGET'",
   "'POSTING_MAPPING_REQUIRED'",
-  'get_current_budget_position',
+  'njss_calculate_ff3_budget',
+  'check_head_office_ff3_budget',
   'finance_posting_mappings',
+  'budget_supplementary_adjustments',
+  'budget_reallocations',
+  'ff3_commitments',
+  'payment_transactions',
   'njss_evaluate_ff3_budget',
   'njss_refresh_ff3_budget_states',
   "source_module = 'HEAD_OFFICE_SIMPLIFIED'",
   'SECURITY DEFINER',
-  "SET search_path = public, pg_temp",
+  'SET search_path = public, pg_temp',
 ]) {
   assert.ok(sql.includes(needle), `Phase 3 migration must contain ${needle}`)
 }
+
+// The public FF3 check is exact-key and permission-checked; the unrestricted internal
+// calculator is not executable directly by authenticated clients.
+assert.ok(sql.includes("fn_current_user_has_permission('ff3.submit')"), 'FF3 budget checker must enforce an FF3 permission')
+assert.ok(sql.includes('REVOKE EXECUTE ON FUNCTION public.njss_calculate_ff3_budget'), 'internal calculator must be private')
 
 for (const destructive of [
   'DROP TABLE public.ff3_headers',
