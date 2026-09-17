@@ -43,6 +43,20 @@ type SafeDeleteResponse = {
   usage?: DeleteUsage[]
 }
 
+type SafeDeleteUsage = {
+  table: string
+  column: string
+  count: number
+}
+
+type SafeDeleteResult = {
+  deleted?: boolean
+  blocked?: boolean
+  message?: string
+  reference_count?: number
+  usage?: SafeDeleteUsage[]
+}
+
 type Mode = "divisions" | "sections"
 
 type EditorState = {
@@ -112,6 +126,7 @@ export default function OrganisationSetupPage() {
   const [selectedDivisionId, setSelectedDivisionId] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState("")
   const [deletingId, setDeletingId] = useState("")
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [error, setError] = useState("")
@@ -319,6 +334,61 @@ export default function OrganisationSetupPage() {
       .eq("id", row.id)
     if (updateError) setError(updateError.message)
     else await loadData()
+  }
+
+  const deleteOrganisationRecord = async (
+    recordType: "DIVISION" | "SECTION",
+    recordId: string,
+    recordLabel: string
+  ) => {
+    if (!can("all")) {
+      setError("Permanent deletion is restricted to the System Administrator.")
+      return
+    }
+
+    const subject = recordType === "DIVISION" ? "Division" : "Section / Unit"
+    const confirmed = window.confirm(
+      `Permanently delete ${subject} "${recordLabel}"? This cannot be undone. NJSS will block deletion if the record has any history or activity.`
+    )
+    if (!confirmed) return
+
+    setDeletingId(recordId)
+    setError("")
+    setSuccess("")
+
+    const { data, error: deleteError } = await supabase.rpc(
+      "njss_delete_organisation_record",
+      {
+        p_record_type: recordType,
+        p_record_id: recordId,
+      }
+    )
+
+    setDeletingId("")
+
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+
+    const result = (data || {}) as SafeDeleteResult
+    if (!result.deleted) {
+      const usage = (result.usage || [])
+        .slice(0, 5)
+        .map((item) => `${item.table}: ${item.count}`)
+        .join(", ")
+      setError(
+        `${result.message || "This organisation record cannot be deleted."}${usage ? ` Usage: ${usage}.` : ""} Deactivate it instead.`
+      )
+      return
+    }
+
+    setSuccess(result.message || `${subject} permanently deleted.`)
+    if (recordType === "DIVISION" && selectedDivisionId === recordId) {
+      setSelectedDivisionId("")
+    }
+    setEditor(null)
+    await loadData()
   }
 
   const deleteOrganisationRecord = async (
@@ -581,6 +651,16 @@ export default function OrganisationSetupPage() {
                     <div className="flex justify-end gap-1">
                       <button onClick={() => startEditDivision(row)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" title="Edit Division"><Pencil className="h-4 w-4" /></button>
                       <button onClick={() => toggleDivision(row)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" title={row.is_active ? "Deactivate Division" : "Activate Division"}><Power className="h-4 w-4" /></button>
+                      {can("all") && (
+                        <button
+                          onClick={() => void deleteOrganisationRecord("DIVISION", row.id, `${row.code} — ${row.name}`)}
+                          disabled={deletingId === row.id}
+                          className="rounded-md p-2 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          title="Permanently delete Division"
+                        >
+                          {deletingId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
+                      )}
                       {canDelete && (
                         <button
                           onClick={() => deleteOrganisationRecord("DIVISION", row)}
@@ -604,6 +684,16 @@ export default function OrganisationSetupPage() {
                     <div className="flex justify-end gap-1">
                       <button onClick={() => startEditSection(row)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" title="Edit Section / Unit"><Pencil className="h-4 w-4" /></button>
                       <button onClick={() => toggleSection(row)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" title={row.is_active ? "Deactivate Section / Unit" : "Activate Section / Unit"}><Power className="h-4 w-4" /></button>
+                      {can("all") && (
+                        <button
+                          onClick={() => void deleteOrganisationRecord("SECTION", row.id, `${row.code} — ${row.name}`)}
+                          disabled={deletingId === row.id}
+                          className="rounded-md p-2 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          title="Permanently delete Section / Unit"
+                        >
+                          {deletingId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
+                      )}
                       {canDelete && (
                         <button
                           onClick={() => deleteOrganisationRecord("SECTION", row)}
