@@ -30,7 +30,28 @@ type ExpenseCategory = { id: string; code: string; name: string }
 type ExpenseItem = { id: string; code: string; name: string; expense_category_id: string | null }
 type ExpenseCode = ExpenseCodeOption
 type BudgetInfo = { available_balance: number; quarterly_released: number }
-type BudgetCheck = { budgetAllocationId: string | null; mappingStatus: string; allocationCount: number; revised: number; released: number; pending: number; committed: number; spent: number; available: number; projectedAvailableAfterPending: number; hasAllocation: boolean; withinBudget?: boolean } | null
+type BudgetCheck = {
+  budgetControlSource: string
+  budgetControlStatus: string
+  budgetAllocationId: string | null
+  expenseLedgerId: string | null
+  mappingStatus: string
+  commitmentMappingStatus: string
+  allocationCount: number
+  revised: number
+  currentApproved: number
+  released: number
+  pending: number
+  committed: number
+  spent: number
+  available: number
+  approvedAvailable: number
+  projectedAvailableAfterPending: number
+  hasAllocation: boolean
+  withinBudget?: boolean
+  shortfall: number
+  positionResolved: boolean
+} | null
 type FF3ItemDraft = {
   line_number: number
   item_code: string
@@ -278,7 +299,7 @@ export default function NewFF3Page() {
   const validItems = items.filter((item) => !isBlankItem(item) && isValidItem(item))
   const invalidItems = items.filter((item) => !isBlankItem(item) && !isValidItem(item))
   const totalEstimate = validItems.reduce((sum, item) => sum + lineTotal(item), 0)
-  const effectiveAvailable = budgetCheck?.hasAllocation ? budgetCheck.available : budgetInfo.available_balance
+  const effectiveAvailable = budgetCheck?.positionResolved ? budgetCheck.available : budgetInfo.available_balance
   const selectedCode = expenseCodes.find(c => c.id === formData.expense_code_registry_id)
   const selectedQuotation = quotations.find(q => q.is_selected)
   const quotationCount = quotations.filter(q => q.supplier_name && q.quotation_amount > 0).length
@@ -316,19 +337,16 @@ export default function NewFF3Page() {
           amount: totalEstimate,
         })
         latestBudget = { ...checkedBudget }
-        if (!checkedBudget.hasAllocation) {
-          setError(checkedBudget.mappingStatus === "BUDGET_MAPPING_REQUIRED_AMBIGUOUS"
-            ? "More than one budget allocation matches this FF3. Select a more specific department, section, cost centre, funding source, project and finance code."
-            : "No exact approved budget allocation was found for this FF3.")
+        if (checkedBudget.budgetControlStatus === 'MAPPING_REQUIRED') {
+          const message = checkedBudget.mappingStatus === "BUDGET_MAPPING_REQUIRED_AMBIGUOUS" || checkedBudget.mappingStatus === "LEDGER_MAPPING_AMBIGUOUS"
+            ? "The budget key is ambiguous. Select a more specific Division, Section and approved ledger/expense code before submitting."
+            : "The active budget key could not be resolved for this FF3. Select a valid Division, Section and approved ledger/expense code before submitting."
+          setError(message)
           setSubmitting(false)
           return
         }
         if (!checkedBudget.withinBudget) {
           await checkBudgetAndNotify(totalEstimate, undefined, formData.financial_year)
-          const shortfall = totalEstimate - checkedBudget.available
-          setError(`Insufficient Available Budget. Available: K${checkedBudget.available.toLocaleString()}. Requested: K${totalEstimate.toLocaleString()}. Shortfall: K${shortfall.toLocaleString()}.`)
-          setSubmitting(false)
-          return
         }
       }
 
@@ -352,11 +370,18 @@ export default function NewFF3Page() {
           section_id: formData.section_id || null,
           cost_centre_id: formData.cost_centre_id || null,
           expense_code_registry_id: formData.expense_code_registry_id || null,
+          expense_ledger_id: latestBudget?.expenseLedgerId || null,
           project_id: formData.project_id || null,
           province_id: formData.province_id || null,
           funding_source_id: formData.funding_source_id || null,
           budget_allocation_id: latestBudget?.budgetAllocationId || null,
-          budget_mapping_status: latestBudget?.mappingStatus || null,
+          budget_mapping_status: latestBudget?.commitmentMappingStatus || latestBudget?.mappingStatus || null,
+          budget_control_status: latestBudget?.budgetControlStatus || "UNASSESSED",
+          budget_control_source: latestBudget?.budgetControlSource || null,
+          budget_available_snapshot: latestBudget?.available ?? null,
+          budget_current_approved_snapshot: latestBudget?.currentApproved ?? null,
+          budget_shortfall_amount: latestBudget?.shortfall ?? 0,
+          budget_checked_at: latestBudget ? new Date().toISOString() : null,
           purpose: formData.purpose,
           justification: formData.justification,
           required_by_date: formData.required_by_date || null,
@@ -372,7 +397,7 @@ export default function NewFF3Page() {
           supplier_not_required_expenditure_type: formData.supplier_not_required ? formData.supplier_not_required_expenditure_type : null,
           supplier_not_required_comments: formData.supplier_not_required ? formData.supplier_not_required_comments || null : null,
           total_estimated_amount: totalEstimate,
-          is_within_budget: totalEstimate <= (latestBudget?.available ?? budgetInfo.available_balance),
+          is_within_budget: latestBudget?.withinBudget ?? (totalEstimate <= budgetInfo.available_balance),
           submitted_date: status === "SUBMITTED" ? new Date().toISOString() : null
         })
         .select()
@@ -420,7 +445,10 @@ export default function NewFF3Page() {
         await notifyFF3Submitted(header.ff3_number, header.id, totalEstimate)
       }
 
-      setSuccess(`FF3 ${header.ff3_number} ${status === "DRAFT" ? "saved as draft" : "submitted for approval"}!`)
+      const blocked = status === "SUBMITTED" && latestBudget?.budgetControlStatus === "INSUFFICIENT_BUDGET_BLOCKED"
+      setSuccess(blocked
+        ? `FF3 ${header.ff3_number} submitted for managerial review — INSUFFICIENT BUDGET, COMMITMENT BLOCKED until funding is available.`
+        : `FF3 ${header.ff3_number} ${status === "DRAFT" ? "saved as draft" : "submitted for approval"}!`)
       setTimeout(() => router.push("/dashboard/ff3"), 1500)
     } catch (err: unknown) {
       console.error("Error saving FF3:", err)
@@ -436,6 +464,8 @@ export default function NewFF3Page() {
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-png-red" /></div>
   }
+
+  const currentShortfall = Math.max(totalEstimate - effectiveAvailable, 0)
 
   return (
     <div className="space-y-6 pb-24">
@@ -703,8 +733,16 @@ export default function NewFF3Page() {
 
       <div className="bg-white rounded-lg border border-slate-200 p-6">
         <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold text-slate-900">Section F: Budget Validation</h2>{selectedCode && <span className="font-mono text-xs px-2 py-1 rounded-lg bg-png-red/5 text-png-red border border-png-gold/40">{formatExpenseCodeLabel(selectedCode)}</span>}</div>
-        {budgetCheck?.hasAllocation ? <div className="space-y-2"><p className="text-xs text-slate-500 mb-1">{selectedCode ? "Position for the selected expense code" : "Position for the selected section"}</p><BudgetLine label="Approved Budget (Revised)" amount={budgetCheck.revised} /><BudgetLine label="Released (cash available)" amount={budgetCheck.released} /><BudgetLine label="Pending Requests" amount={budgetCheck.pending} /><BudgetLine label="Committed" amount={budgetCheck.committed} /><BudgetLine label="Actual Expenditure" amount={budgetCheck.spent} /><BudgetLine label="Available Balance" amount={budgetCheck.available} isTotal /><div className="border-t border-slate-200 pt-2 mt-2"><BudgetLine label="This Request" amount={totalEstimate} highlight /><BudgetLine label="Available After This Request" amount={budgetCheck.available - totalEstimate} /><BudgetLine label="Projected Available After Pending" amount={budgetCheck.projectedAvailableAfterPending - totalEstimate} /></div></div> : <div className="space-y-2">{(formData.expense_code_registry_id || formData.section_id) && <div className="mb-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-2"><AlertCircle className="h-4 w-4" /> Exact budget allocation is required. {budgetCheck?.mappingStatus === "BUDGET_MAPPING_REQUIRED_AMBIGUOUS" ? "Multiple allocations match this request." : "No confirmed budget allocation found yet."}</div>}<BudgetLine label="Quarterly Released" amount={budgetInfo.quarterly_released} /><BudgetLine label="Available Balance" amount={budgetInfo.available_balance} isTotal /><div className="border-t border-slate-200 pt-2 mt-2"><BudgetLine label="This Request" amount={totalEstimate} highlight /></div></div>}
-        {totalEstimate > 0 && <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-sm ${totalEstimate <= effectiveAvailable ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{totalEstimate <= effectiveAvailable ? <><CheckCircle2 className="h-4 w-4" /><span className="font-medium">Within Budget — sufficient funds available (K {effectiveAvailable.toLocaleString()} remaining)</span></> : <><AlertCircle className="h-4 w-4" /><span className="font-medium">Insufficient Funds — exceeds available balance of K {effectiveAvailable.toLocaleString()}</span></>}</div>}
+        {budgetCheck?.positionResolved ? <div className="space-y-2">
+          <div className="mb-2 flex items-center justify-between text-xs text-slate-500"><span>{selectedCode ? "Position for the selected expense code" : "Position for the selected section"}</span><span className="rounded bg-slate-100 px-2 py-1 font-medium">{budgetCheck.budgetControlSource === "SIMPLIFIED" ? "Active Annual Budget" : "Legacy Budget Control"}</span></div>
+          <BudgetLine label="Current Approved Budget" amount={budgetCheck.currentApproved} />
+          {budgetCheck.budgetControlSource === "LEGACY" && <BudgetLine label="Released / Cash Control" amount={budgetCheck.released} />}
+          <BudgetLine label="Outstanding Commitments" amount={budgetCheck.committed} />
+          <BudgetLine label="Actual Expenditure" amount={budgetCheck.spent} />
+          <BudgetLine label="Available Budget" amount={budgetCheck.available} isTotal />
+          <div className="border-t border-slate-200 pt-2 mt-2"><BudgetLine label="This FF3 Request" amount={totalEstimate} highlight /><BudgetLine label="SHORTFALL" amount={currentShortfall} isNegative={currentShortfall > 0} /><BudgetLine label="Available After This Request" amount={budgetCheck.available - totalEstimate} /></div>
+        </div> : <div className="space-y-2">{(formData.expense_code_registry_id || formData.section_id) && <div className="mb-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-2"><AlertCircle className="h-4 w-4" /> Budget key resolution is required before submission. {budgetCheck?.mappingStatus === "BUDGET_MAPPING_REQUIRED_AMBIGUOUS" || budgetCheck?.mappingStatus === "LEDGER_MAPPING_AMBIGUOUS" ? "Multiple mappings match this request." : "No active approved budget position has been confirmed yet."}</div>}<BudgetLine label="Quarterly Released" amount={budgetInfo.quarterly_released} /><BudgetLine label="Available Balance" amount={budgetInfo.available_balance} isTotal /><div className="border-t border-slate-200 pt-2 mt-2"><BudgetLine label="This FF3 Request" amount={totalEstimate} highlight /></div></div>}
+        {totalEstimate > 0 && <div className={`mt-4 p-3 rounded-lg flex items-start gap-2 text-sm ${totalEstimate <= effectiveAvailable ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{totalEstimate <= effectiveAvailable ? <><CheckCircle2 className="h-4 w-4 mt-0.5" /><span className="font-medium">Within Budget — sufficient funds available (K {effectiveAvailable.toLocaleString()} remaining)</span></> : <><AlertCircle className="h-4 w-4 mt-0.5" /><div><p className="font-bold">INSUFFICIENT BUDGET – COMMITMENT BLOCKED</p><p className="mt-1">Available K {effectiveAvailable.toLocaleString()}; request K {totalEstimate.toLocaleString()}; shortfall K {currentShortfall.toLocaleString()}. The FF3 may still be submitted for managerial review, but no financial commitment can be created until sufficient budget is available.</p></div></>}</div>}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-10">
