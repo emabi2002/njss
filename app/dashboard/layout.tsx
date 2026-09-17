@@ -61,7 +61,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const pathname = usePathname()
   const router = useRouter()
-  const { user, profile, role, loading, signOut, menus, modules, mustChangePassword } = useAuth()
+  const { user, profile, role, loading, signOut, menus, modules, mustChangePassword, can } = useAuth()
+  const hasFullSystemAccess = can("all")
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login")
@@ -114,9 +115,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const visibleNavigation: NavItem[] = useMemo(
     () =>
       menus
-        .filter((item) => !item.parent_code && !HIDDEN_SUPPORT_MENU_CODES.has(item.code))
+        .filter((item) => !item.parent_code && (hasFullSystemAccess || !HIDDEN_SUPPORT_MENU_CODES.has(item.code)))
         .sort((a, b) => a.sort_order - b.sort_order),
-    [menus],
+    [menus, hasFullSystemAccess],
   )
 
   const groupedNavigation: NavGroup[] = useMemo(() => {
