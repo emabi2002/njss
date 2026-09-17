@@ -79,6 +79,8 @@ jobs:
         run: node scripts/simplified-budget-event-dimensions.test.mjs
       - name: Simplified budget adjustments navigation
         run: node scripts/simplified-budget-adjustments-navigation.test.mjs
+      - name: FF3 budget-blocked workflow contract
+        run: node scripts/ff3-budget-blocked-workflow.test.mjs
       - name: Head Office budget adjustments client contract
         run: node scripts/head-office-budget-adjustments-client.test.mjs
       - name: Simplified budget adjustments UI contract
