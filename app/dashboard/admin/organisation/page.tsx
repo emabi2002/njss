@@ -1,7 +1,7 @@
 "use client"
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
-import { Building2, Loader2, Pencil, Plus, Power, Save, X } from "lucide-react"
+import { Building2, Loader2, Pencil, Plus, Power, Save, Trash2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/contexts/AuthContext"
 
@@ -30,6 +30,19 @@ type Section = {
   department?: { name: string } | null
 }
 
+type DeleteUsage = {
+  table: string
+  column: string
+  count: number
+}
+
+type SafeDeleteResponse = {
+  deleted: boolean
+  blocked: boolean
+  message?: string
+  usage?: DeleteUsage[]
+}
+
 type Mode = "divisions" | "sections"
 
 type EditorState = {
@@ -47,9 +60,50 @@ const EMPTY_EDITOR: EditorState = {
   department_id: "",
 }
 
+const USAGE_LABELS: Record<string, string> = {
+  users: "users",
+  sections: "Sections / Units",
+  ff3_headers: "FF3 requisitions",
+  ff4_headers: "FF4 expenses",
+  annual_plan_headers: "annual plans",
+  projects: "projects",
+  cost_centres: "cost centres",
+  expense_code_registry: "expense-code records",
+  finance_posting_mappings: "finance posting mappings",
+  funding_allocations: "funding allocations",
+  funding_authorities: "funding authorities",
+  division_budgets: "annual Division budgets",
+  division_budget_lines: "budget lines",
+  budget_allocations: "budget allocations",
+  budget_activation_batches: "budget activation records",
+  budget_activation_lines: "budget activation lines",
+  budget_activity_templates: "budget activity templates",
+  budget_consolidations: "budget consolidations",
+  budget_cycles: "budget cycles",
+  budget_divisions: "budget Division records",
+  budget_reallocations: "budget reallocations",
+  budget_supplementary_adjustments: "supplementary budget adjustments",
+  divisional_budget_submissions: "Divisional budget submissions",
+}
+
+function summariseUsage(usage: DeleteUsage[] | undefined) {
+  if (!usage?.length) return ""
+
+  const totals = new Map<string, number>()
+  for (const item of usage) {
+    const label = USAGE_LABELS[item.table] || item.table.replaceAll("_", " ")
+    totals.set(label, (totals.get(label) || 0) + Number(item.count || 0))
+  }
+
+  return Array.from(totals.entries())
+    .map(([label, count]) => `${count} ${label}`)
+    .join(", ")
+}
+
 export default function OrganisationSetupPage() {
   const { can, accessReady } = useAuth()
   const canManage = can("all") || can("masterdata.manage") || can("users.manage")
+  const canDelete = can("all")
   const [mode, setMode] = useState<Mode>("divisions")
   const [locations, setLocations] = useState<Location[]>([])
   const [divisions, setDivisions] = useState<Division[]>([])
@@ -58,6 +112,7 @@ export default function OrganisationSetupPage() {
   const [selectedDivisionId, setSelectedDivisionId] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState("")
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
@@ -264,6 +319,59 @@ export default function OrganisationSetupPage() {
       .eq("id", row.id)
     if (updateError) setError(updateError.message)
     else await loadData()
+  }
+
+  const deleteOrganisationRecord = async (
+    recordType: "DIVISION" | "SECTION",
+    row: Division | Section
+  ) => {
+    if (!canDelete) {
+      setError("Permanent deletion is restricted to the System Administrator.")
+      return
+    }
+
+    const label = recordType === "DIVISION" ? "Division" : "Section / Unit"
+    const confirmed = window.confirm(
+      `Permanently delete ${label} "${row.code} — ${row.name}"?\n\n` +
+      "NJSS will delete it only if it has no users, financial records, workflow history, budget activity or other references. This action cannot be undone."
+    )
+    if (!confirmed) return
+
+    setDeletingId(row.id)
+    setError("")
+    setSuccess("")
+
+    const { data, error: deleteError } = await supabase.rpc("njss_delete_organisation_record", {
+      p_record_type: recordType,
+      p_record_id: row.id,
+    })
+
+    if (deleteError) {
+      setError(deleteError.message)
+      setDeletingId("")
+      return
+    }
+
+    const outcome = data as SafeDeleteResponse | null
+    if (!outcome?.deleted) {
+      const detail = summariseUsage(outcome?.usage)
+      setError(
+        `${outcome?.message || `Cannot delete this ${label}.`}` +
+        (detail ? ` Current use: ${detail}.` : "") +
+        " Deactivate it instead."
+      )
+      setDeletingId("")
+      return
+    }
+
+    if (recordType === "DIVISION" && selectedDivisionId === row.id) {
+      setSelectedDivisionId("")
+    }
+
+    setEditor(null)
+    setSuccess(`${label} "${row.code} — ${row.name}" was permanently deleted and recorded in the audit log.`)
+    await loadData()
+    setDeletingId("")
   }
 
   if (!accessReady || loading) {
@@ -473,6 +581,16 @@ export default function OrganisationSetupPage() {
                     <div className="flex justify-end gap-1">
                       <button onClick={() => startEditDivision(row)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" title="Edit Division"><Pencil className="h-4 w-4" /></button>
                       <button onClick={() => toggleDivision(row)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" title={row.is_active ? "Deactivate Division" : "Activate Division"}><Power className="h-4 w-4" /></button>
+                      {canDelete && (
+                        <button
+                          onClick={() => deleteOrganisationRecord("DIVISION", row)}
+                          disabled={deletingId === row.id}
+                          className="rounded-md p-2 text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-50"
+                          title="Permanently delete unused Division"
+                        >
+                          {deletingId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -486,6 +604,16 @@ export default function OrganisationSetupPage() {
                     <div className="flex justify-end gap-1">
                       <button onClick={() => startEditSection(row)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" title="Edit Section / Unit"><Pencil className="h-4 w-4" /></button>
                       <button onClick={() => toggleSection(row)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" title={row.is_active ? "Deactivate Section / Unit" : "Activate Section / Unit"}><Power className="h-4 w-4" /></button>
+                      {canDelete && (
+                        <button
+                          onClick={() => deleteOrganisationRecord("SECTION", row)}
+                          disabled={deletingId === row.id}
+                          className="rounded-md p-2 text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-50"
+                          title="Permanently delete unused Section / Unit"
+                        >
+                          {deletingId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
