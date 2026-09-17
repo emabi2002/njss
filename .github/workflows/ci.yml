@@ -83,6 +83,14 @@ jobs:
         run: node scripts/head-office-budget-adjustments-client.test.mjs
       - name: Simplified budget adjustments UI contract
         run: node scripts/simplified-budget-adjustments-ui.test.mjs
+      - name: FF3 simplified-budget schema contract
+        run: node scripts/ff3-simplified-budget-schema.test.mjs
+      - name: FF3 simplified-budget transition contract
+        run: node scripts/ff3-simplified-budget-transition.test.mjs
+      - name: FF3 simplified-budget client contract
+        run: node scripts/ff3-simplified-budget-client.test.mjs
+      - name: FF3 simplified-budget UI contract
+        run: node scripts/ff3-simplified-budget-ui.test.mjs
       - name: Head Office budget client contract
         run: node scripts/head-office-budget-client.test.mjs
       - name: Budget document private-storage contract
