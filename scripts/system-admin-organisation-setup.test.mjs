@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 const config = fs.readFileSync('lib/rbac/config.ts', 'utf8')
 const accessRoute = fs.readFileSync('app/api/account/access/route.ts', 'utf8')
 const serverRbac = fs.readFileSync('lib/rbac/server.ts', 'utf8')
+const layout = fs.readFileSync('app/dashboard/layout.tsx', 'utf8')
 const migration = fs.readFileSync('supabase/migrations/20260917213000_system_admin_organisation_setup.sql', 'utf8')
 const page = fs.readFileSync('app/dashboard/master/organisation/page.tsx', 'utf8')
 
@@ -21,6 +22,12 @@ assert.equal(
   config.includes("/^\\/dashboard\\/master($|\\/)/") && config.includes("'masterdata.manage', 'registry.manage'"),
   true,
   'Organisation Setup must inherit the protected master-data route family',
+)
+assert.equal(
+  layout.includes('const hasFullSystemAccess = can("all")') &&
+    layout.includes('hasFullSystemAccess || !HIDDEN_SUPPORT_MENU_CODES.has(item.code)'),
+  true,
+  'System Administrator must see active support/system menu items that are hidden from ordinary users',
 )
 
 assert.equal(page.includes('Organisation Setup'), true, 'Organisation Setup page must have a clear title')
