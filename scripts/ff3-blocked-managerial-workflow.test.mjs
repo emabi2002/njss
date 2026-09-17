@@ -35,7 +35,7 @@ assert.ok(
   'final approval must explicitly stop commitment while the refreshed FF3 remains budget-blocked',
 )
 assert.ok(
-  sql.includes("RAISE EXCEPTION 'FF3 commitment blocked by insufficient budget."),
+  sql.includes("RAISE EXCEPTION 'FF3 commitment blocked by insufficient budget.'"),
   'final approval must return a clear commitment-blocked error',
 )
 assert.ok(
@@ -43,11 +43,11 @@ assert.ok(
   'commitment creation must require a freshly sufficient budget state',
 )
 assert.ok(
-  sql.includes("SELECT id INTO v_serialization_id") && sql.includes('FROM public.division_budgets'),
+  sql.includes('SELECT id INTO v_serialization_id') && sql.includes('FROM public.division_budgets'),
   'simplified final approval must serialize on the matching Division budget before commitment',
 )
 assert.ok(
-  sql.includes('SELECT * INTO v_budget FROM public.budget_allocations') && sql.includes('FOR UPDATE'),
+  /SELECT\s+\*\s+INTO\s+v_budget\s+FROM\s+public\.budget_allocations[\s\S]*?FOR UPDATE;/.test(sql),
   'legacy commitment routing must remain locked during final approval',
 )
 
