@@ -53,8 +53,6 @@ export default function OrganisationSetupPage() {
   const [search, setSearch] = useState("")
 
   const loadData = useCallback(async () => {
-    setLoading(true)
-    setError("")
     const [divisionResult, sectionResult] = await Promise.all([
       supabase
         .from("departments")
