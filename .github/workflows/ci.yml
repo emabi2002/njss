@@ -93,6 +93,8 @@ jobs:
         run: node scripts/ff3-simplified-budget-ui.test.mjs
       - name: FF3 review budget visibility contract
         run: node scripts/ff3-budget-review-visibility.test.mjs
+      - name: FF3 budget scope hardening contract
+        run: node scripts/ff3-budget-scope-hardening.test.mjs
       - name: Head Office budget client contract
         run: node scripts/head-office-budget-client.test.mjs
       - name: Budget document private-storage contract
