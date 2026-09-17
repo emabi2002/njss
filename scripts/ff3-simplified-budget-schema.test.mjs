@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const migrationPath = 'supabase/migrations/20260917030000_ff3_simplified_budget_integration.sql'
+const migrationPath = 'supabase/migrations/20260917210000_ff3_simplified_budget_integration.sql'
 assert.ok(fs.existsSync(migrationPath), 'Phase 3 FF3 simplified-budget integration migration must exist')
 
 const sql = fs.readFileSync(migrationPath, 'utf8')
@@ -35,8 +35,6 @@ for (const needle of [
   assert.ok(sql.includes(needle), `Phase 3 migration must contain ${needle}`)
 }
 
-// The public FF3 check is exact-key and permission-checked; the unrestricted internal
-// calculator is not executable directly by authenticated clients.
 assert.ok(sql.includes("fn_current_user_has_permission('ff3.submit')"), 'FF3 budget checker must enforce an FF3 permission')
 assert.ok(sql.includes('REVOKE EXECUTE ON FUNCTION public.njss_calculate_ff3_budget'), 'internal calculator must be private')
 
