@@ -23,7 +23,7 @@ for (const needle of [
   'CREATE OR REPLACE FUNCTION public.njss_refresh_ff3_budget_state',
   'get_current_budget_position',
   "c.status = 'ACTIVE'",
-  'v_authoritative_budget_position',
+  'public.njss_budget_position_for_allocation',
   'released_amount',
   'current_approved_budget',
   'available_budget',
@@ -42,6 +42,10 @@ assert.ok(
 assert.ok(
   sql.includes("'LEGACY'::text") || sql.includes("'LEGACY'"),
   'legacy budget source must remain available before simplified activation',
+)
+assert.ok(
+  sql.includes('v_legacy_position := public.njss_budget_position_for_allocation(v_budget_allocation_id)'),
+  'legacy fallback must reuse the existing production budget-position helper until simplified activation',
 )
 
 for (const destructive of [
