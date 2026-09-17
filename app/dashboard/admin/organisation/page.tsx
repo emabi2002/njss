@@ -5,12 +5,20 @@ import { Building2, Loader2, Pencil, Plus, Power, Save, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/contexts/AuthContext"
 
+type Location = {
+  id: string
+  code: string
+  name: string
+  is_active: boolean
+}
+
 type Division = {
   id: string
   code: string
   name: string
   description: string | null
   is_active: boolean
+  court_location_id: string | null
 }
 
 type Section = {
@@ -43,8 +51,11 @@ export default function OrganisationSetupPage() {
   const { can, accessReady } = useAuth()
   const canManage = can("all") || can("masterdata.manage") || can("users.manage")
   const [mode, setMode] = useState<Mode>("divisions")
+  const [locations, setLocations] = useState<Location[]>([])
   const [divisions, setDivisions] = useState<Division[]>([])
   const [sections, setSections] = useState<Section[]>([])
+  const [selectedLocationId, setSelectedLocationId] = useState("")
+  const [selectedDivisionId, setSelectedDivisionId] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [editor, setEditor] = useState<EditorState | null>(null)
@@ -53,10 +64,14 @@ export default function OrganisationSetupPage() {
   const [search, setSearch] = useState("")
 
   const loadData = useCallback(async () => {
-    const [divisionResult, sectionResult] = await Promise.all([
+    const [locationResult, divisionResult, sectionResult] = await Promise.all([
+      supabase
+        .from("court_locations")
+        .select("id, code, name, is_active")
+        .order("name"),
       supabase
         .from("departments")
-        .select("id, code, name, description, is_active")
+        .select("id, code, name, description, is_active, court_location_id")
         .order("name"),
       supabase
         .from("sections")
@@ -64,9 +79,15 @@ export default function OrganisationSetupPage() {
         .order("name"),
     ])
 
-    if (divisionResult.error || sectionResult.error) {
-      setError(divisionResult.error?.message || sectionResult.error?.message || "Unable to load organisation structure.")
+    if (locationResult.error || divisionResult.error || sectionResult.error) {
+      setError(
+        locationResult.error?.message ||
+        divisionResult.error?.message ||
+        sectionResult.error?.message ||
+        "Unable to load organisation structure."
+      )
     } else {
+      setLocations((locationResult.data || []) as Location[])
       setDivisions((divisionResult.data || []) as Division[])
       setSections((sectionResult.data || []) as unknown as Section[])
     }
@@ -83,22 +104,75 @@ export default function OrganisationSetupPage() {
     return () => window.clearTimeout(timer)
   }, [accessReady, loadData])
 
+  const locationDivisions = useMemo(() => {
+    if (!selectedLocationId) return []
+    return divisions.filter((row) => row.court_location_id === selectedLocationId)
+  }, [divisions, selectedLocationId])
+
   const filteredDivisions = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    if (!needle) return divisions
-    return divisions.filter((row) => `${row.code} ${row.name}`.toLowerCase().includes(needle))
-  }, [divisions, search])
+    const scopedRows = selectedLocationId
+      ? divisions.filter((row) => row.court_location_id === selectedLocationId)
+      : []
+    if (!needle) return scopedRows
+    return scopedRows.filter((row) => `${row.code} ${row.name}`.toLowerCase().includes(needle))
+  }, [divisions, search, selectedLocationId])
 
   const filteredSections = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    if (!needle) return sections
-    return sections.filter((row) => `${row.code} ${row.name} ${row.department?.name || ""}`.toLowerCase().includes(needle))
-  }, [sections, search])
+    const scopedRows = selectedDivisionId
+      ? sections.filter((row) => row.department_id === selectedDivisionId)
+      : []
+    if (!needle) return scopedRows
+    return scopedRows.filter((row) => `${row.code} ${row.name}`.toLowerCase().includes(needle))
+  }, [sections, search, selectedDivisionId])
+
+  const availableParentDivisions = useMemo(() => {
+    if (!selectedLocationId) return []
+    return divisions.filter(
+      (row) => row.court_location_id === selectedLocationId && (row.is_active || row.id === editor?.department_id)
+    )
+  }, [divisions, editor?.department_id, selectedLocationId])
+
+  const selectedLocation = locations.find((row) => row.id === selectedLocationId)
+  const selectedDivision = divisions.find((row) => row.id === selectedDivisionId)
+  const canAdd = Boolean(selectedLocationId) && (mode === "divisions" || Boolean(selectedDivisionId))
+
+  const changeLocation = (locationId: string) => {
+    setSelectedLocationId(locationId)
+    setSelectedDivisionId("")
+    setEditor(null)
+    setSearch("")
+    setError("")
+    setSuccess("")
+  }
+
+  const changeMode = (nextMode: Mode) => {
+    setMode(nextMode)
+    setSelectedDivisionId("")
+    setEditor(null)
+    setSearch("")
+    setError("")
+    setSuccess("")
+  }
 
   const startAdd = () => {
     setError("")
     setSuccess("")
-    setEditor({ ...EMPTY_EDITOR })
+
+    if (!selectedLocationId) {
+      setError("Select a Location / Registry before adding organisation records.")
+      return
+    }
+    if (mode === "sections" && !selectedDivisionId) {
+      setError("Select a Division before adding a Section / Unit.")
+      return
+    }
+
+    setEditor({
+      ...EMPTY_EDITOR,
+      department_id: mode === "sections" ? selectedDivisionId : "",
+    })
   }
 
   const startEditDivision = (row: Division) => {
@@ -124,6 +198,10 @@ export default function OrganisationSetupPage() {
   const save = async (event: FormEvent) => {
     event.preventDefault()
     if (!editor || !canManage) return
+    if (!selectedLocationId) {
+      setError("Select a Location / Registry first.")
+      return
+    }
     if (!editor.code.trim() || !editor.name.trim()) {
       setError("Code and name are required.")
       return
@@ -142,6 +220,7 @@ export default function OrganisationSetupPage() {
           code: editor.code.trim(),
           name: editor.name.trim(),
           description: editor.description.trim() || null,
+          court_location_id: selectedLocationId,
           is_active: true,
         }
       : {
@@ -160,6 +239,7 @@ export default function OrganisationSetupPage() {
       setError(result.error.message)
     } else {
       setSuccess(editor.id ? "Organisation record updated." : "Organisation record created.")
+      if (mode === "sections") setSelectedDivisionId(editor.department_id)
       setEditor(null)
       await loadData()
     }
@@ -211,13 +291,15 @@ export default function OrganisationSetupPage() {
             <h1 className="text-2xl font-bold text-slate-900">Organisation Setup</h1>
           </div>
           <p className="mt-1 text-sm text-slate-600">
-            Maintain NJSS Divisions and the Sections / Units that belong to each Division. Budget, FF3 and reporting screens use this structure dynamically.
+            Build each Registry organisation as Location / Registry → Division → Section / Unit. Only records within the selected Registry are shown.
           </p>
         </div>
         <button
           type="button"
           onClick={startAdd}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#132A44] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1b3a5d]"
+          disabled={!canAdd}
+          title={!selectedLocationId ? "Select a Location / Registry first" : mode === "sections" && !selectedDivisionId ? "Select a Division first" : undefined}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#132A44] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1b3a5d] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Plus className="h-4 w-4" />
           Add {mode === "divisions" ? "Division" : "Section / Unit"}
@@ -225,30 +307,76 @@ export default function OrganisationSetupPage() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="grid gap-4 lg:grid-cols-[minmax(260px,1fr)_auto_minmax(240px,320px)] lg:items-end">
+          <label className="text-sm font-medium text-slate-700">
+            Location / Registry
+            <select
+              value={selectedLocationId}
+              onChange={(event) => changeLocation(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+            >
+              <option value="">Select Location / Registry</option>
+              {locations.filter((location) => location.is_active || location.id === selectedLocationId).map((location) => (
+                <option key={location.id} value={location.id}>{location.code} — {location.name}</option>
+              ))}
+            </select>
+          </label>
+
           <div className="inline-flex rounded-lg bg-slate-100 p-1">
             <button
               type="button"
-              onClick={() => { setMode("divisions"); setEditor(null) }}
+              onClick={() => changeMode("divisions")}
               className={`rounded-md px-4 py-2 text-sm font-medium ${mode === "divisions" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
             >
               Divisions
             </button>
             <button
               type="button"
-              onClick={() => { setMode("sections"); setEditor(null) }}
+              onClick={() => changeMode("sections")}
               className={`rounded-md px-4 py-2 text-sm font-medium ${mode === "sections" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
             >
               Sections / Units
             </button>
           </div>
+
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search code or name..."
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm md:w-80"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            disabled={!selectedLocationId || (mode === "sections" && !selectedDivisionId)}
           />
         </div>
+
+        {mode === "sections" && selectedLocationId && (
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <label className="block text-sm font-medium text-slate-700">
+              Division
+              <select
+                value={selectedDivisionId}
+                onChange={(event) => {
+                  setSelectedDivisionId(event.target.value)
+                  setEditor(null)
+                  setSearch("")
+                  setError("")
+                  setSuccess("")
+                }}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+              >
+                <option value="">Select Division</option>
+                {locationDivisions.filter((division) => division.is_active || division.id === selectedDivisionId).map((division) => (
+                  <option key={division.id} value={division.id}>{division.code} — {division.name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+
+        {selectedLocation && (
+          <p className="mt-3 text-xs text-slate-500">
+            Showing {mode === "divisions" ? "Divisions" : selectedDivision ? `Sections / Units for ${selectedDivision.name}` : "Sections / Units"} within {selectedLocation.name} only.
+          </p>
+        )}
       </div>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -257,9 +385,12 @@ export default function OrganisationSetupPage() {
       {editor && (
         <form onSubmit={save} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-900">
-              {editor.id ? "Edit" : "Add"} {mode === "divisions" ? "Division" : "Section / Unit"}
-            </h2>
+            <div>
+              <h2 className="font-semibold text-slate-900">
+                {editor.id ? "Edit" : "Add"} {mode === "divisions" ? "Division" : "Section / Unit"}
+              </h2>
+              {selectedLocation && <p className="mt-1 text-xs text-slate-500">Location / Registry: {selectedLocation.code} — {selectedLocation.name}</p>}
+            </div>
             <button type="button" onClick={() => setEditor(null)} className="rounded-md p-1 text-slate-500 hover:bg-slate-100">
               <X className="h-4 w-4" />
             </button>
@@ -275,7 +406,7 @@ export default function OrganisationSetupPage() {
                   required
                 >
                   <option value="">Select Division</option>
-                  {divisions.filter((division) => division.is_active || division.id === editor.department_id).map((division) => (
+                  {availableParentDivisions.map((division) => (
                     <option key={division.id} value={division.id}>{division.code} — {division.name}</option>
                   ))}
                 </select>
@@ -359,8 +490,21 @@ export default function OrganisationSetupPage() {
                   </td>
                 </tr>
               ))}
-              {((mode === "divisions" && filteredDivisions.length === 0) || (mode === "sections" && filteredSections.length === 0)) && (
-                <tr><td colSpan={mode === "sections" ? 5 : 4} className="px-4 py-8 text-center text-slate-500">No organisation records found.</td></tr>
+
+              {mode === "divisions" && !selectedLocationId && (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Select a Location / Registry to view its Divisions.</td></tr>
+              )}
+              {mode === "divisions" && selectedLocationId && filteredDivisions.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">No Divisions have been created for this Location / Registry.</td></tr>
+              )}
+              {mode === "sections" && !selectedLocationId && (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Select a Location / Registry to view its Sections / Units.</td></tr>
+              )}
+              {mode === "sections" && selectedLocationId && !selectedDivisionId && (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Select a Division to view its Sections / Units.</td></tr>
+              )}
+              {mode === "sections" && selectedDivisionId && filteredSections.length === 0 && (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">No Sections / Units have been created for this Division.</td></tr>
               )}
             </tbody>
           </table>
