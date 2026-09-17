@@ -74,7 +74,13 @@ export default function OrganisationSetupPage() {
   }, [])
 
   useEffect(() => {
-    if (accessReady) loadData()
+    if (!accessReady) return
+
+    const timer = window.setTimeout(() => {
+      void loadData()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
   }, [accessReady, loadData])
 
   const filteredDivisions = useMemo(() => {
