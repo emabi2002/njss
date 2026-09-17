@@ -95,6 +95,8 @@ jobs:
         run: node scripts/simplified-budget-activation.test.mjs
       - name: FF3 authoritative budget state contract
         run: node scripts/ff3-authoritative-budget-state.test.mjs
+      - name: FF3 blocked managerial workflow contract
+        run: node scripts/ff3-blocked-managerial-workflow.test.mjs
       - name: Legacy financial-control backend preservation
         run: node scripts/legacy-budget-backend-preservation.test.mjs
       - name: Budget division selector regression checks
