@@ -4,10 +4,34 @@ import type { RbacMenuItem, RbacModule } from '@/lib/rbac/types'
 
 export const dynamic = 'force-dynamic'
 
+const ADMIN_VISIBLE_SUPPORT_MENU_CODES = new Set([
+  'administration.uat',
+  'systems_administration.health',
+  'systems_administration.transactions',
+  'systems_administration.storage_database',
+  'systems_administration.costs',
+  'systems_administration.alerts',
+  'systems_administration.uat',
+  'systems_administration.info',
+])
+
 function menuAllowed(permissions: string[], required: string[] | null | undefined) {
   if (permissions.includes('all')) return true
   if (!required?.length) return true
   return required.some((permission) => permissions.includes(permission))
+}
+
+function exposeSystemAdminSupportMenus(menus: RbacMenuItem[], permissions: string[]) {
+  if (!permissions.includes('all')) return menus
+
+  return menus.map((menu) => {
+    if (!ADMIN_VISIBLE_SUPPORT_MENU_CODES.has(menu.code)) return menu
+    return {
+      ...menu,
+      code: `system-admin-visible.${menu.code}`,
+      parent_code: null,
+    }
+  })
 }
 
 export async function GET(request: NextRequest) {
@@ -35,9 +59,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unable to load account navigation' }, { status: 500 })
   }
 
-  const menus = ((menuResult.data || []) as RbacMenuItem[]).filter((menu) =>
+  const permittedMenus = ((menuResult.data || []) as RbacMenuItem[]).filter((menu) =>
     menuAllowed(context.permissions, menu.required_permissions),
   )
+  const menus = exposeSystemAdminSupportMenus(permittedMenus, context.permissions)
   const modules = (moduleResult.data || []) as RbacModule[]
 
   return NextResponse.json({
