@@ -97,6 +97,12 @@ jobs:
         run: node scripts/ff3-authoritative-budget-state.test.mjs
       - name: FF3 blocked managerial workflow contract
         run: node scripts/ff3-blocked-managerial-workflow.test.mjs
+      - name: FF3 budget state auto-refresh contract
+        run: node scripts/ff3-budget-auto-refresh.test.mjs
+      - name: FF3 authoritative budget client contract
+        run: node scripts/ff3-authoritative-budget-client.test.mjs
+      - name: FF3 insufficient budget UI contract
+        run: node scripts/ff3-insufficient-budget-ui.test.mjs
       - name: Legacy financial-control backend preservation
         run: node scripts/legacy-budget-backend-preservation.test.mjs
       - name: Budget division selector regression checks
