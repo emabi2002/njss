@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 const pagePath = 'app/dashboard/admin/organisation/page.tsx'
 const migrationPath = 'supabase/migrations/20260918070000_organisation_setup_admin_menu.sql'
 const accessRoute = fs.readFileSync('app/api/account/access/route.ts', 'utf8')
+const dashboardLayout = fs.readFileSync('app/dashboard/layout.tsx', 'utf8')
 
 assert.ok(fs.existsSync(pagePath), 'Organisation Setup page must exist')
 assert.ok(fs.existsSync(migrationPath), 'Organisation Setup menu migration must exist')
@@ -24,7 +25,15 @@ assert.match(migration, /\/dashboard\/admin\/organisation/)
 assert.match(migration, /system\.organisation_setup/)
 assert.match(migration, /masterdata\.manage/)
 assert.match(migration, /users\.manage/)
+assert.match(migration, /System Administrator/)
+assert.match(migration, /SYSTEM_WIDE/)
+assert.match(migration, /'all'/)
 
 assert.match(accessRoute, /permissions\.includes\('all'\)/, 'System-wide all permission must continue to bypass menu permission filters')
+assert.match(
+  dashboardLayout,
+  /permissions\.includes\("all"\)[\s\S]*HIDDEN_SUPPORT_MENU_CODES/,
+  'System Administrator must be able to see support/system menu entries hidden from ordinary users',
+)
 
 console.log('Organisation Setup administrator contract passed')
