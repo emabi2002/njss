@@ -93,6 +93,8 @@ jobs:
         run: node scripts/budget-lock-document-control.test.mjs
       - name: Simplified annual budget activation regression
         run: node scripts/simplified-budget-activation.test.mjs
+      - name: FF3 authoritative budget state contract
+        run: node scripts/ff3-authoritative-budget-state.test.mjs
       - name: Legacy financial-control backend preservation
         run: node scripts/legacy-budget-backend-preservation.test.mjs
       - name: Budget division selector regression checks
