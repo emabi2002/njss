@@ -2,32 +2,27 @@ import fs from 'node:fs'
 import assert from 'node:assert/strict'
 
 const config = fs.readFileSync('lib/rbac/config.ts', 'utf8')
-const layout = fs.readFileSync('app/dashboard/layout.tsx', 'utf8')
+const accessRoute = fs.readFileSync('app/api/account/access/route.ts', 'utf8')
+const serverRbac = fs.readFileSync('lib/rbac/server.ts', 'utf8')
 const migration = fs.readFileSync('supabase/migrations/20260917213000_system_admin_organisation_setup.sql', 'utf8')
-const page = fs.readFileSync('app/dashboard/admin/organisation/page.tsx', 'utf8')
+const page = fs.readFileSync('app/dashboard/master/organisation/page.tsx', 'utf8')
 
 assert.equal(
-  config.includes("code: 'systems_administration.organisation_setup'") &&
-    config.includes("href: '/dashboard/admin/organisation'") &&
-    config.includes("label: 'Organisation Setup'"),
+  accessRoute.includes("permissions.includes('all')"),
   true,
-  'RBAC config must expose Organisation Setup in the system administration menu',
+  'Database-driven navigation must expose all permitted menu items to a full-system administrator',
 )
 assert.equal(
-  config.includes("/^\\/dashboard\\/admin\\/organisation($|\\/)/") && config.includes("permissions: ['all']"),
+  serverRbac.includes("context.permissions.includes('all')"),
   true,
-  'Organisation Setup route must be explicitly restricted to full-system administrators',
+  'Server authorization must treat the all permission as full-system access',
 )
 assert.equal(
-  layout.includes("permissions.includes('all')") || layout.includes('permissions.includes("all")'),
+  config.includes("/^\\/dashboard\\/master($|\\/)/") && config.includes("'masterdata.manage', 'registry.manage'"),
   true,
-  'Dashboard navigation must recognise the full-system administrator permission',
+  'Organisation Setup must inherit the protected master-data route family',
 )
-assert.equal(
-  layout.includes('HIDDEN_SUPPORT_MENU_CODES') && layout.includes('hasFullSystemAccess'),
-  true,
-  'System Administrator must not lose active support menus to the ordinary-user hidden-menu filter',
-)
+
 assert.equal(page.includes('Organisation Setup'), true, 'Organisation Setup page must have a clear title')
 assert.equal(page.includes('Divisions'), true, 'Organisation Setup must expose Division maintenance')
 assert.equal(page.includes('Sections / Units'), true, 'Organisation Setup must expose Section / Unit maintenance')
@@ -43,9 +38,14 @@ assert.equal(
   'Migration must explicitly preserve System Administrator full-system permission and data scope',
 )
 assert.equal(
-  migration.includes('systems_administration.organisation_setup') && migration.includes('/dashboard/admin/organisation'),
+  migration.includes('systems_administration.organisation_setup') && migration.includes('/dashboard/master/organisation'),
   true,
-  'Migration must add the Organisation Setup navigation item',
+  'Migration must add the Organisation Setup navigation item under System Operations',
+)
+assert.equal(
+  migration.includes("ARRAY['all']::text[]"),
+  true,
+  'Organisation Setup menu must be explicitly visible to the full-system administrator permission',
 )
 
 console.log('System Administrator organisation setup contract checks passed')
