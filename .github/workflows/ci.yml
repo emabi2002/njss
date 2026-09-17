@@ -103,6 +103,8 @@ jobs:
         run: node scripts/ff3-authoritative-budget-client.test.mjs
       - name: FF3 insufficient budget UI contract
         run: node scripts/ff3-insufficient-budget-ui.test.mjs
+      - name: FF3 budget state visibility contract
+        run: node scripts/ff3-budget-state-visibility.test.mjs
       - name: Legacy financial-control backend preservation
         run: node scripts/legacy-budget-backend-preservation.test.mjs
       - name: Budget division selector regression checks
