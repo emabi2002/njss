@@ -303,6 +303,9 @@ export default function AccessControlPage() {
   }
 
   const openEdit = (user: AdminUser) => {
+    const departmentId = departments.some((department) => department.id === user.department_id)
+      ? user.department_id || ""
+      : ""
     setEditing(user)
     setForm({
       email: user.email,
@@ -310,8 +313,10 @@ export default function AccessControlPage() {
       employee_id: user.employee_id || "",
       position: user.position || "",
       phone: user.phone || "",
-      department_id: user.department_id || "",
-      section_id: user.section_id || "",
+      department_id: departmentId,
+      section_id: sections.some((section) => section.id === user.section_id && section.department_id === departmentId)
+        ? user.section_id || ""
+        : "",
       role_id: roleOf(user)?.id || "",
       is_active: user.is_active,
     })
@@ -1056,7 +1061,7 @@ function UserFormModal({
 
   const update = (patch: Partial<UserForm>) => setForm((current) => ({ ...current, ...patch }))
   const availableSections = sections.filter(
-    (section) => !form.department_id || section.department_id === form.department_id,
+    (section) => Boolean(form.department_id) && section.department_id === form.department_id,
   )
 
   const ready =
@@ -1137,7 +1142,7 @@ function UserFormModal({
               className={inputClass}
             />
           </Field>
-          <Field label="Department">
+          <Field label="Department (Head Office)">
             <div className="relative">
               <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <select
@@ -1158,6 +1163,7 @@ function UserFormModal({
             <select
               value={form.section_id}
               onChange={(event) => update({ section_id: event.target.value })}
+              disabled={!form.department_id}
               className={inputClass}
             >
               <option value="">Not assigned</option>
