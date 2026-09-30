@@ -8,7 +8,8 @@ for (const id of [
   'division-budget-selector',
   'section-budget-grid',
   'budget-document-panel',
-  'lock-division-budget',
+  'submit-division-budget',
+  'registrar-review-panel',
 ]) {
   assert.equal(source.includes(`data-testid="${id}"`), true, `${id} missing`)
 }
@@ -29,12 +30,14 @@ assert.equal(source.includes('Division Total'), true)
 assert.equal(source.includes('Head Office Total'), true)
 assert.equal(source.includes('Save Draft'), true)
 assert.equal(source.includes('Print Draft'), true)
-assert.equal(source.includes('Lock Division'), true)
+assert.equal(source.includes('Submit to Registrar'), true)
 assert.equal(source.includes("can('budget.capture')"), true)
-assert.equal(source.includes("can('budget.lock')"), true)
+assert.equal(source.includes("can('budget.registrar.approve')"), true)
 assert.equal(source.includes("can('budget.documents.manage')"), true)
 assert.equal(source.includes(".from('sections')"), true)
 assert.equal(source.includes(".from('expense_ledger')"), true)
 assert.equal(source.includes('saveDivisionBudgetLine'), true)
+assert.equal(source.includes('Division-wide'), true)
+assert.equal(source.includes('groupLedgers'), true)
 
 console.log('Simplified annual-budget UI contract passed')

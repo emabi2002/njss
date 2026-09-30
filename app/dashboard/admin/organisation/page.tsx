@@ -270,25 +270,35 @@ export default function OrganisationSetupPage() {
     setError("")
     setSuccess("")
 
-    const payload = mode === "divisions"
-      ? {
+    const result = mode === "divisions"
+      ? (editor.id
+        ? await supabase.from("departments").update({
           code: editor.code.trim(),
           name: editor.name.trim(),
           description: editor.description.trim() || null,
           court_location_id: selectedLocationId,
           is_active: true,
-        }
-      : {
+        }).eq("id", editor.id)
+        : await supabase.from("departments").insert({
+          code: editor.code.trim(),
+          name: editor.name.trim(),
+          description: editor.description.trim() || null,
+          court_location_id: selectedLocationId,
+          is_active: true,
+        }))
+      : (editor.id
+        ? await supabase.from("sections").update({
           code: editor.code.trim(),
           name: editor.name.trim(),
           department_id: editor.department_id,
           is_active: true,
-        }
-
-    const table = mode === "divisions" ? "departments" : "sections"
-    const result = editor.id
-      ? await supabase.from(table).update(payload).eq("id", editor.id)
-      : await supabase.from(table).insert(payload)
+        }).eq("id", editor.id)
+        : await supabase.from("sections").insert({
+          code: editor.code.trim(),
+          name: editor.name.trim(),
+          department_id: editor.department_id,
+          is_active: true,
+        }))
 
     if (result.error) {
       setError(result.error.message)
