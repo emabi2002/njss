@@ -39,5 +39,7 @@ assert.equal(source.includes(".from('expense_ledger')"), true)
 assert.equal(source.includes('saveDivisionBudgetLine'), true)
 assert.equal(source.includes('Division-wide'), true)
 assert.equal(source.includes('groupLedgers'), true)
+assert.match(source, /createOrGetDivisionBudget\(financialYear, value\.slice\(4\)\)/, 'A fresh year must let the officer start the selected division budget')
+assert.match(source, /divisionBudgetId/, 'Registrar task links must reopen the correct submitted division')
 
 console.log('Simplified annual-budget UI contract passed')

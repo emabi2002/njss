@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import {
   createOrGetHeadOfficeBudgetCycle,
+  createOrGetDivisionBudget,
   getDivisionBudget,
   getHeadOfficeBudgetDashboard,
   submitDivisionBudget,
@@ -34,6 +35,7 @@ export default function AnnualBudgetPage() {
   const canManageDocuments = can('budget.documents.manage')
   const [financialYear, setFinancialYear] = useState(new Date().getFullYear() + 1)
   const [dashboard, setDashboard] = useState<HeadOfficeBudgetDashboard | null>(null)
+  const [availableDivisions, setAvailableDivisions] = useState<Array<{ id: string; name: string }>>([])
   const [selectedBudgetId, setSelectedBudgetId] = useState("")
   const [detail, setDetail] = useState<DivisionBudgetDetail | null>(null)
   const [sections, setSections] = useState<SectionReference[]>([])
@@ -55,14 +57,25 @@ export default function AnnualBudgetPage() {
     setMessage(null)
     try {
       if (canCapture) await createOrGetHeadOfficeBudgetCycle(financialYear)
-      const next = await getHeadOfficeBudgetDashboard(financialYear)
+      const [next, locationResult] = await Promise.all([
+        getHeadOfficeBudgetDashboard(financialYear),
+        supabase.from('court_locations').select('id').eq('code', 'NCD-WGN').single(),
+      ])
+      if (locationResult.error) throw locationResult.error
+      const divisionResult = await supabase.from('departments').select('id, name')
+        .eq('court_location_id', locationResult.data.id).eq('is_active', true).order('name')
+      if (divisionResult.error) throw divisionResult.error
+      setAvailableDivisions(divisionResult.data || [])
       setDashboard(next)
       setSelectedBudgetId((current) => {
         if (current && next.divisions.some((division) => division.id === current)) return current
+        const requested = new URLSearchParams(window.location.search).get('divisionBudgetId')
+        if (requested && next.divisions.some((division) => division.id === requested)) return requested
         return next.divisions[0]?.id || ""
       })
     } catch (error) {
       setDashboard(null)
+      setAvailableDivisions([])
       setSelectedBudgetId("")
       setDetail(null)
       setMessage({ type: "err", text: error instanceof Error ? error.message : "Could not load the annual budget." })
@@ -70,6 +83,25 @@ export default function AnnualBudgetPage() {
       setLoading(false)
     }
   }, [canCapture, financialYear])
+
+  const selectDivision = async (value: string) => {
+    if (!value.startsWith('new:')) {
+      setSelectedBudgetId(value)
+      return
+    }
+    if (!canCapture) return
+    setSaving(true)
+    setMessage(null)
+    try {
+      const id = await createOrGetDivisionBudget(financialYear, value.slice(4))
+      await loadDashboard()
+      setSelectedBudgetId(id)
+    } catch (error) {
+      setMessage({ type: 'err', text: error instanceof Error ? error.message : 'Could not start this Division budget.' })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     void loadDashboard()
@@ -330,10 +362,13 @@ export default function AnnualBudgetPage() {
 
           <label className="block" data-testid="division-budget-selector">
             <span className="mb-1 block text-sm font-medium text-slate-700">Division</span>
-            <select value={selectedBudgetId} onChange={(event) => setSelectedBudgetId(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <select value={selectedBudgetId} onChange={(event) => void selectDivision(event.target.value)} disabled={saving} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100">
               <option value="">Select Division</option>
               {(dashboard?.divisions || []).map((division) => (
                 <option key={division.id} value={division.id}>{division.division?.name || division.division_id} — {division.status}</option>
+              ))}
+              {canCapture && availableDivisions.filter((division) => !dashboard?.divisions.some((budget) => budget.division_id === division.id)).map((division) => (
+                <option key={division.id} value={`new:${division.id}`}>{division.name} — Start budget</option>
               ))}
             </select>
           </label>

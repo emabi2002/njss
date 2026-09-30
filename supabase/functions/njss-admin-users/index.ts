@@ -5,10 +5,12 @@ const ASSIGNABLE_ROLES = new Set([
   "Requisition Officer",
   "Line Supervisor",
   "Registrar",
+  "Budget Officer",
   "Payment/Reconciliation Officer",
   "System Administrator",
 ]);
 const SECTION_ROLES = new Set(["Requisition Officer", "Line Supervisor"]);
+const HEAD_OFFICE_LOCATION_CODE = "NCD-WGN";
 const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_MAX_LENGTH = 128;
 const USER_FIELDS =
@@ -187,8 +189,25 @@ async function roleById(admin: SupabaseClient, roleId: string) {
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Selected role does not exist.");
   if (!data.is_active) throw new Error("Selected role is no longer active.");
-  if (!ASSIGNABLE_ROLES.has(data.name)) throw new Error("Only the four operational groups or System Administrator can be assigned.");
+  if (!ASSIGNABLE_ROLES.has(data.name)) throw new Error("Select an active NJSS workflow role or System Administrator.");
   return data;
+}
+
+async function assertHeadOfficeAssignment(admin: SupabaseClient, departmentId?: string | null, sectionId?: string | null) {
+  if (!departmentId && !sectionId) return;
+  const { data: location, error: locationError } = await admin.from("court_locations").select("id")
+    .eq("code", HEAD_OFFICE_LOCATION_CODE).single();
+  if (locationError || !location) throw new Error("Waigani Head Office location is unavailable.");
+  const { data: department, error: departmentError } = await admin.from("departments")
+    .select("id").eq("id", departmentId || "").eq("court_location_id", location.id).eq("is_active", true).maybeSingle();
+  if (departmentError) throw new Error(departmentError.message);
+  if (!department) throw new Error("Select an active Head Office division.");
+  if (sectionId) {
+    const { data: section, error: sectionError } = await admin.from("sections").select("id")
+      .eq("id", sectionId).eq("department_id", department.id).eq("is_active", true).maybeSingle();
+    if (sectionError) throw new Error(sectionError.message);
+    if (!section) throw new Error("Select an active section in the chosen Head Office division.");
+  }
 }
 
 function roleIdOf(user: Record<string, unknown>) {
@@ -247,6 +266,7 @@ async function createUser(admin: SupabaseClient, context: AppContext, body: Acti
 
   const role = await roleById(admin, input.role_id);
   if (SECTION_ROLES.has(role.name) && !input.section_id) return fail(`${role.name} requires an assigned section.`);
+  await assertHeadOfficeAssignment(admin, input.department_id, input.section_id);
 
   const password = body.generatePassword ? generateTemporaryPassword() : body.password || "";
   const passwordErrors = body.generatePassword ? [] : validatePassword(password, body.confirmPassword);
@@ -316,6 +336,13 @@ async function updateUser(admin: SupabaseClient, context: AppContext, body: Acti
   if (input.role_id) targetRole = await roleById(admin, input.role_id);
   const effectiveSectionId = input.section_id !== undefined ? input.section_id : (before.section_id as string | null);
   if (targetRole && SECTION_ROLES.has(targetRole.name) && !effectiveSectionId) return fail(`${targetRole.name} requires an assigned section.`);
+  if (input.department_id !== undefined || input.section_id !== undefined) {
+    await assertHeadOfficeAssignment(
+      admin,
+      input.department_id !== undefined ? input.department_id : (before.department_id as string | null),
+      effectiveSectionId,
+    );
+  }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.full_name !== undefined) patch.full_name = input.full_name.trim();

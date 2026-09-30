@@ -14,14 +14,14 @@ const uatRows: UatRow[] = [
   {
     testNo: "UAT-001",
     function: "Migration readiness",
-    scenario: "Confirm migrations 000 through the latest additive hardening migration are applied in order in the target Supabase project.",
-    expectedResult: "Database schema contains all authoritative Phase 1-5 transaction and reporting objects without modifying earlier migrations.",
+    scenario: "Confirm the current Head Office budget, ledger hierarchy, and Registrar review migrations are applied in the UAT Supabase project.",
+    expectedResult: "The new year starts without inherited budget figures; active posting ledgers have master categories and each Waigani division has a Division-wide allocation.",
   },
   {
     testNo: "UAT-002",
     function: "Budget to reporting reconciliation",
-    scenario: "Create one realistic K500,000 approved budget, K400,000 funded allocation, and K300,000 release for a real department/section/expense code.",
-    expectedResult: "Dashboard and budget-position reports show Approved K500,000, Funded K400,000, Released K300,000 before commitments and payments.",
+    scenario: "Start a new Head Office division budget, attach its signed or stamped manual approval, enter K500,000 across Division-wide and named sections under posting ledgers, submit, return/correct, and obtain separate Registrar electronic approval. Then fund K400,000 and release K300,000.",
+    expectedResult: "Master-ledger and section subtotals reconcile to K500,000; only approved figures feed activation and budget-position reports, which show Approved K500,000, Funded K400,000, Released K300,000.",
   },
   {
     testNo: "UAT-003",
@@ -50,8 +50,8 @@ const uatRows: UatRow[] = [
   {
     testNo: "UAT-007",
     function: "RBAC and segregation of duties",
-    scenario: "Use Requesting Officer, Budget/Finance Officer, Approver, System Administrator, Auditor, and Management users to attempt allowed and prohibited actions.",
-    expectedResult: "Menus and actions match assigned permissions; creators cannot perform prohibited final approval on their own transaction.",
+    scenario: "Use separate Budget Officer and Registrar accounts, plus Requisition Officer, Line Supervisor, Payment/Reconciliation Officer, and System Administrator accounts to attempt allowed and prohibited actions.",
+    expectedResult: "Budget Officer can capture and submit each Head Office division's budget but cannot approve it; Registrar can review the exact submitted document and version but cannot approve their own capture. Menus and transaction actions match assigned permissions.",
   },
   {
     testNo: "UAT-008",
