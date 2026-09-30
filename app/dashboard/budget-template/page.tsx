@@ -371,7 +371,7 @@ export default function AnnualBudgetPage() {
           <section className="rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="section-budget-grid">
             <div className="border-b border-slate-200 px-5 py-4">
               <h2 className="text-lg font-semibold text-slate-900">{divisionName}</h2>
-              <p className="mt-1 text-sm text-slate-500">Enter each amount under an explicit Division-wide or named Section/unit allocation from this Division's signed submission. Master ledger headings calculate subtotals.</p>
+              <p className="mt-1 text-sm text-slate-500">Enter each amount under an explicit Division-wide or named Section/unit allocation from this Division&apos;s signed submission. Master ledger headings calculate subtotals.</p>
             </div>
 
             <div className="overflow-x-auto">
@@ -419,7 +419,7 @@ export default function AnnualBudgetPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div>
                 <div className="flex items-center gap-2"><FileText className="h-5 w-5 text-[#132A44]" /><h2 className="text-lg font-semibold text-slate-900">Official Budget Record</h2></div>
-                <p className="mt-1 max-w-3xl text-sm text-slate-600">Attach this Division's signed or stamped approved submission before sending the keyed amounts for Registrar review.</p>
+                <p className="mt-1 max-w-3xl text-sm text-slate-600">Attach this Division&apos;s signed or stamped approved submission before sending the keyed amounts for Registrar review.</p>
               </div>
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${officialDocuments.length > 0 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{officialDocuments.length > 0 ? "Official document recorded" : "Official document required"}</span>
             </div>

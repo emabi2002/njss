@@ -44,7 +44,7 @@ export default function RegistrarReviewPanel({ detail, sections, groups, onOpenD
     <h2 className="text-lg font-semibold text-slate-900">Registrar electronic review</h2>
     <p className="mt-1 text-sm text-slate-600">Version {detail.budget.review_version} · Submitted {detail.budget.submitted_at?.slice(0,10) || "—"} · Division total {money(total)}</p>
     <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm">
-      {document ? <button type="button" onClick={() => void onOpenDocument(document)} className="font-semibold text-blue-800 underline">Open this Division's signed or stamped submission: {document.original_filename}</button> : <span className="text-red-700">Submitted document unavailable; approval is blocked.</span>}
+      {document ? <button type="button" onClick={() => void onOpenDocument(document)} className="font-semibold text-blue-800 underline">Open this Division&apos;s signed or stamped submission: {document.original_filename}</button> : <span className="text-red-700">Submitted document unavailable; approval is blocked.</span>}
     </div>
     <div className="mt-4 overflow-x-auto">
       <table className="w-full min-w-[600px] text-sm">
