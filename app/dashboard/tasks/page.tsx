@@ -8,7 +8,7 @@ import { authFetch } from "@/lib/auth-fetch"
 type Task = {
   id: string
   sourceId: string
-  sourceType: "FF3" | "FF4"
+  sourceType: "FF3" | "FF4" | "BUDGET"
   referenceNumber: string
   status: string
   financialYear: number
@@ -33,7 +33,7 @@ type Task = {
 type Lookup = { id: string; name: string }
 type DepartmentLookup = Lookup & { province_id: string | null }
 type SectionLookup = Lookup & { department_id: string | null }
-type Summary = { label: string; count: number; sourceType: "FF3" | "FF4" }
+type Summary = { label: string; count: number; sourceType: "FF3" | "FF4" | "BUDGET" }
 
 type InboxResponse = {
   isAdministrator: boolean
@@ -208,7 +208,7 @@ export default function WorkflowTasksPage() {
           </label>
           <label className="text-xs font-medium text-slate-600">Workflow
             <select value={workflowType} onChange={(e) => setWorkflowType(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-              <option value="">All Workflows</option><option value="FF3">FF3</option><option value="FF4">FF4 / Payment</option>
+              <option value="">All Workflows</option><option value="BUDGET">Division Budget</option><option value="FF3">FF3</option><option value="FF4">FF4 / Payment</option>
             </select>
           </label>
           <label className="text-xs font-medium text-slate-600">Stage
@@ -222,7 +222,7 @@ export default function WorkflowTasksPage() {
             </select>
           </label>
           <label className="text-xs font-medium text-slate-600 md:col-span-2">Search
-            <div className="relative mt-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="FF3/FF4 number, location, status or action" className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm" /></div>
+            <div className="relative mt-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Budget, FF3/FF4 number, location, status or action" className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm" /></div>
           </label>
         </div>
       </div>

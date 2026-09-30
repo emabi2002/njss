@@ -99,9 +99,17 @@ const FF4_RULES: Record<string, TaskRule> = {
   },
 }
 
+const DIVISION_BUDGET_REVIEW: TaskRule = {
+  requiredPermission: 'budget.registrar.approve',
+  action: 'REVIEW_DIVISION_BUDGET',
+  actionLabel: 'Review division budget',
+  summaryLabel: 'Division budgets awaiting Registrar review',
+  responsibleRole: 'Registrar',
+}
+
 type RawTask = {
   id: string
-  sourceType: 'FF3' | 'FF4'
+  sourceType: 'FF3' | 'FF4' | 'BUDGET'
   referenceNumber: string
   status: string
   financialYear: number
@@ -142,7 +150,7 @@ function canAct(task: RawTask, userId: string, permissions: string[], isAdminist
 }
 
 function makeSummary(tasks: Array<ReturnType<typeof presentTask>>) {
-  const counts = new Map<string, { label: string; count: number; sourceType: 'FF3' | 'FF4' }>()
+  const counts = new Map<string, { label: string; count: number; sourceType: 'FF3' | 'FF4' | 'BUDGET' }>()
   for (const task of tasks) {
     const key = task.summaryLabel
     const current = counts.get(key) || { label: key, count: 0, sourceType: task.sourceType }
@@ -172,7 +180,7 @@ function presentTask(
     departmentId: task.department_id,
     departmentName: department?.name || 'Unassigned Department',
     sectionId: task.section_id,
-    sectionName: section?.name || 'Unassigned Section',
+    sectionName: task.sourceType === 'BUDGET' ? 'Division budget' : section?.name || 'Unassigned Section',
     provinceId: province?.id || null,
     provinceName: province?.name || 'Unassigned Province',
     action: task.rule.action,
@@ -223,9 +231,14 @@ export async function GET(request: NextRequest) {
       ff4Query = ff4Query.eq('department_id', scope.departmentId).eq('section_id', scope.sectionId)
     }
 
-    const [ff3Result, ff4Result, provinceResult, locationResult, departmentResult, sectionResult] = await Promise.all([
+    const [ff3Result, ff4Result, budgetResult, provinceResult, locationResult, departmentResult, sectionResult] = await Promise.all([
       ff3Query,
       ff4Query,
+      hasPermission(context.permissions, 'budget.registrar.approve')
+        ? supabase.from('division_budgets')
+          .select('id, financial_year, division_id, reference_number, status, updated_at, lines:division_budget_lines(original_amount)')
+          .eq('status', 'PENDING_REGISTRAR_APPROVAL').order('updated_at', { ascending: true })
+        : Promise.resolve({ data: [], error: null }),
       supabase.from('provinces').select('id, name').eq('is_active', true).order('name'),
       supabase.from('court_locations').select('id, province_id').eq('is_active', true),
       supabase.from('departments').select('id, name, court_location_id').eq('is_active', true).order('name'),
@@ -234,6 +247,7 @@ export async function GET(request: NextRequest) {
 
     if (ff3Result.error) throw ff3Result.error
     if (ff4Result.error) throw ff4Result.error
+    if (budgetResult.error) throw budgetResult.error
     if (provinceResult.error) throw provinceResult.error
     if (locationResult.error) throw locationResult.error
     if (departmentResult.error) throw departmentResult.error
@@ -281,6 +295,20 @@ export async function GET(request: NextRequest) {
         href: `/dashboard/ff4/${row.id}`,
         rule: FF4_RULES[row.status],
       })),
+      ...(budgetResult.data || []).map((row) => ({
+        id: row.id,
+        sourceType: 'BUDGET' as const,
+        referenceNumber: row.reference_number || `Division budget FY${row.financial_year}`,
+        status: row.status,
+        financialYear: row.financial_year,
+        department_id: row.division_id,
+        section_id: null,
+        created_by: null,
+        amount: (row.lines || []).reduce((sum, line) => sum + Number(line.original_amount || 0), 0),
+        updatedAt: row.updated_at,
+        href: `/dashboard/budget-template?divisionBudgetId=${row.id}`,
+        rule: DIVISION_BUDGET_REVIEW,
+      })),
     ]
 
     let presented = rawTasks.map((task) => presentTask(task, departments, sections, provinces))
@@ -309,7 +337,8 @@ export async function GET(request: NextRequest) {
     const rawByKey = new Map(rawTasks.map((task) => [`${task.sourceType}-${task.id}`, task]))
     const actionRequired = presented.filter((task) => {
       const raw = rawByKey.get(task.id)
-      return raw ? canAct(raw, context.userId, context.permissions, isAdministrator) : false
+      return raw ? (raw.sourceType !== 'BUDGET' || context.roleNames.includes('Registrar'))
+        && canAct(raw, context.userId, context.permissions, isAdministrator) : false
     })
     const systemWide = isAdministrator ? presented : []
 

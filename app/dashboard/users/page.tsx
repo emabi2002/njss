@@ -238,14 +238,14 @@ export default function AccessControlPage() {
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        notify(json.error || "The action could not be completed.", true)
+        setError(json.error || "The action could not be completed.")
         return null
       }
       await loadAll()
       notify(successMessage)
       return json as Record<string, unknown>
     } catch {
-      notify("Unable to reach the server. Please try again.", true)
+      setError("Unable to reach the server. Please try again.")
       return null
     } finally {
       setBusy(false)
@@ -297,12 +297,14 @@ export default function AccessControlPage() {
   )
 
   const openCreate = () => {
+    setError("")
     setEditing(null)
     setForm({ ...BLANK_FORM, role_id: roleChoices[0]?.id || "" })
     setFormMode("create")
   }
 
   const openEdit = (user: AdminUser) => {
+    setError("")
     const departmentId = departments.some((department) => department.id === user.department_id)
       ? user.department_id || ""
       : ""
@@ -692,9 +694,11 @@ export default function AccessControlPage() {
           roles={roleChoices}
           departments={departments}
           sections={sections}
+          error={error}
           busy={busy}
           onClose={() => setFormMode(null)}
           onSubmit={async (password) => {
+            setError("")
             const payload =
               formMode === "create"
                 ? {
@@ -1038,6 +1042,7 @@ function UserFormModal({
   roles,
   departments,
   sections,
+  error,
   busy,
   onClose,
   onSubmit,
@@ -1048,6 +1053,7 @@ function UserFormModal({
   roles: AdminRole[]
   departments: Department[]
   sections: Section[]
+  error: string
   busy: boolean
   onClose: () => void
   onSubmit: (password: PasswordChoice) => Promise<void>
@@ -1099,6 +1105,12 @@ function UserFormModal({
       }
     >
       <div className="space-y-5">
+        {error && (
+          <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Email address" required>
             <div className="relative">
