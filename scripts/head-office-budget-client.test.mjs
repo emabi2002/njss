@@ -14,7 +14,9 @@ for (const fn of [
   'updateDivisionBudgetDraftHeader',
   'saveDivisionBudgetLine',
   'registerBudgetDocument',
-  'lockDivisionBudget',
+  'submitDivisionBudget',
+  'returnDivisionBudget',
+  'approveDivisionBudget',
   'activateAnnualBudget',
 ]) {
   assert.ok(
@@ -27,7 +29,9 @@ assert.equal(source.includes("supabase.rpc('create_or_get_head_office_budget_cyc
 assert.equal(source.includes("supabase.rpc('create_or_get_division_budget'"), true)
 assert.equal(source.includes("supabase.rpc('upsert_division_budget_line'"), true)
 assert.equal(source.includes("supabase.rpc('register_budget_document'"), true)
-assert.equal(source.includes("supabase.rpc('lock_division_budget'"), true)
+assert.equal(source.includes("supabase.rpc('submit_division_budget'"), true)
+assert.equal(source.includes("supabase.rpc('return_division_budget'"), true)
+assert.equal(source.includes("supabase.rpc('approve_division_budget'"), true)
 assert.equal(source.includes("supabase.rpc('activate_annual_budget'"), true)
 assert.equal(source.includes(".from('annual_budget_cycles')"), true)
 assert.equal(source.includes(".from('division_budgets')"), true)

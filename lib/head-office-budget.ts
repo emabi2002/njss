@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 
 export type AnnualBudgetCycleStatus = 'PREPARATION' | 'READY_FOR_ACTIVATION' | 'ACTIVE' | 'CLOSED'
-export type DivisionBudgetStatus = 'DRAFT' | 'LOCKED'
+export type DivisionBudgetStatus = 'DRAFT' | 'RETURNED' | 'PENDING_REGISTRAR_APPROVAL' | 'LOCKED'
 
 export type AnnualBudgetCycle = {
   id: string
@@ -26,6 +26,7 @@ export type SectionReference = {
   code: string
   name: string
   department_id: string | null
+  budget_scope?: 'SECTION' | 'DIVISION_WIDE'
 }
 
 export type LedgerReference = {
@@ -37,6 +38,8 @@ export type LedgerReference = {
   expense_category: string
   is_posting: boolean
   is_active: boolean
+  parent_ledger_id: string | null
+  sort_order: number | null
 }
 
 export type DivisionBudgetLine = {
@@ -82,6 +85,16 @@ export type DivisionBudget = {
   entered_by: string | null
   locked_by: string | null
   locked_at: string | null
+  review_version: number
+  submitted_by: string | null
+  submitted_at: string | null
+  submitted_document_id: string | null
+  submitted_fingerprint: string | null
+  returned_by: string | null
+  returned_at: string | null
+  return_reason: string | null
+  approved_document_id: string | null
+  approved_fingerprint: string | null
   created_at: string
   updated_at: string
   division?: DivisionReference | null
@@ -353,9 +366,30 @@ export async function registerBudgetDocument(input: {
   return data as string
 }
 
-export async function lockDivisionBudget(divisionBudgetId: string) {
-  const { error } = await supabase.rpc('lock_division_budget', {
+export async function submitDivisionBudget(divisionBudgetId: string): Promise<void> {
+  const { error } = await supabase.rpc('submit_division_budget', {
     p_division_budget_id: divisionBudgetId,
+  })
+  if (error) throw error
+}
+
+export async function returnDivisionBudget(
+  divisionBudgetId: string, expectedVersion: number, reason: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('return_division_budget', {
+    p_division_budget_id: divisionBudgetId,
+    p_expected_version: expectedVersion,
+    p_reason: reason,
+  })
+  if (error) throw error
+}
+
+export async function approveDivisionBudget(
+  divisionBudgetId: string, expectedVersion: number,
+): Promise<void> {
+  const { error } = await supabase.rpc('approve_division_budget', {
+    p_division_budget_id: divisionBudgetId,
+    p_expected_version: expectedVersion,
   })
   if (error) throw error
 }

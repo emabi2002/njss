@@ -15,5 +15,8 @@ assert.equal(source.includes('Submission reference'), false)
 assert.equal(source.includes('Create Draft'), false)
 assert.equal(source.includes('Existing budget sheet'), false)
 assert.equal(source.includes('overflow-x-auto'), true, 'The ledger grid must remain horizontally usable')
+assert.equal(source.includes('data-testid="registrar-review-panel"'), true, 'Registrar review is separate from officer entry')
+assert.equal(source.includes('Division-wide'), true, 'Division-wide entries are explicit')
+assert.equal(source.includes('groupLedgers'), true, 'Master ledger categories are visible')
 
 console.log('Simplified annual-budget layout regression checks passed')

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import { AlertCircle, CheckCircle2, ExternalLink, FileText, Loader2, LockKeyhole, Printer, Save, Upload } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
@@ -8,7 +8,7 @@ import {
   createOrGetHeadOfficeBudgetCycle,
   getDivisionBudget,
   getHeadOfficeBudgetDashboard,
-  lockDivisionBudget,
+  submitDivisionBudget,
   registerBudgetDocument,
   saveDivisionBudgetLine,
   updateDivisionBudgetDraftHeader,
@@ -18,6 +18,8 @@ import {
   type LedgerReference,
   type SectionReference,
 } from "@/lib/head-office-budget"
+import { groupLedgers, sumCategoryAmounts } from "@/lib/division-budget-ledger-groups"
+import RegistrarReviewPanel from "./RegistrarReviewPanel"
 import { ALLOWED_DOCUMENT_TYPES, BUCKETS, getSignedUrl, uploadPrivateFile, validateFile } from "@/lib/storage"
 
 const money = (value: number) =>
@@ -28,7 +30,7 @@ const amountKey = (sectionId: string, ledgerId: string) => `${sectionId}:${ledge
 export default function AnnualBudgetPage() {
   const { can } = useAuth()
   const canCapture = can('budget.capture')
-  const canLock = can('budget.lock')
+  const canRegistrarApprove = can('budget.registrar.approve')
   const canManageDocuments = can('budget.documents.manage')
   const [financialYear, setFinancialYear] = useState(new Date().getFullYear() + 1)
   const [dashboard, setDashboard] = useState<HeadOfficeBudgetDashboard | null>(null)
@@ -89,8 +91,8 @@ export default function AnnualBudgetPage() {
       const nextDetail = await getDivisionBudget(budgetId)
       const divisionId = nextDetail.budget.division_id
       const [sectionResult, ledgerResult] = await Promise.all([
-        supabase.from('sections').select('id, code, name, department_id').eq('department_id', divisionId).eq('is_active', true).order('name'),
-        supabase.from('expense_ledger').select('id, ledger_number, finance_code, standard_description, budget_class, expense_category, is_posting, is_active').eq('is_active', true).eq('is_posting', true).order('finance_code'),
+        supabase.from('sections').select('id, code, name, department_id, budget_scope').eq('department_id', divisionId).eq('is_active', true).order('name'),
+        supabase.from('expense_ledger').select('id, ledger_number, finance_code, standard_description, budget_class, expense_category, is_posting, is_active, parent_ledger_id, sort_order').order('sort_order'),
       ])
       if (sectionResult.error) throw sectionResult.error
       if (ledgerResult.error) throw ledgerResult.error
@@ -128,14 +130,16 @@ export default function AnnualBudgetPage() {
     (sectionId: string, ledgerId: string) => Number(amounts[amountKey(sectionId, ledgerId)] || 0),
     [amounts],
   )
+  const ledgerGroups = useMemo(() => groupLedgers(ledgers), [ledgers])
+  const postingLedgers = useMemo(() => ledgerGroups.flatMap(group => group.children), [ledgerGroups])
 
   const sectionTotals = useMemo(() => {
     const totals = new Map<string, number>()
     for (const section of filteredSections) {
-      totals.set(section.id, ledgers.reduce((sum, ledger) => sum + numericAmount(section.id, ledger.id), 0))
+      totals.set(section.id, postingLedgers.reduce((sum, ledger) => sum + numericAmount(section.id, ledger.id), 0))
     }
     return totals
-  }, [filteredSections, ledgers, numericAmount])
+  }, [filteredSections, postingLedgers, numericAmount])
 
   const divisionTotal = useMemo(
     () => Array.from(sectionTotals.values()).reduce((sum, value) => sum + value, 0),
@@ -159,16 +163,17 @@ export default function AnnualBudgetPage() {
 
   const latestOfficialDocument = officialDocuments[0] || null
   const isLocked = detail?.budget.status === "LOCKED"
+  const isEditable = detail?.budget.status === "DRAFT" || detail?.budget.status === "RETURNED"
 
   const updateAmount = (sectionId: string, ledgerId: string, value: string) => {
-    if (isLocked || !canCapture) return
+    if (!isEditable || !canCapture) return
     const key = amountKey(sectionId, ledgerId)
     setAmounts((current) => ({ ...current, [key]: value }))
     setDirtyKeys((current) => new Set(current).add(key))
   }
 
   const handleSaveDraft = async () => {
-    if (!detail || isLocked || !canCapture) return
+    if (!detail || !isEditable || !canCapture) return
     setSaving(true)
     setMessage(null)
     try {
@@ -262,27 +267,27 @@ export default function AnnualBudgetPage() {
     }
   }
 
-  const handleLock = async () => {
-    if (!detail || isLocked || !canLock) return
+  const handleSubmit = async () => {
+    if (!detail || !isEditable || !canCapture) return
     if (dirtyKeys.size > 0) {
-      setMessage({ type: "err", text: "Save all draft changes before locking the Division budget." })
+      setMessage({ type: "err", text: "Save all draft changes before submitting the Division budget." })
       return
     }
     if (officialDocuments.length === 0) {
-      setMessage({ type: "err", text: "Upload the official Registrar-approved budget document before locking this Division." })
+      setMessage({ type: "err", text: "Upload this Division's signed or stamped budget before submitting." })
       return
     }
-    if (!window.confirm("Lock this Division budget? The original approved amounts will become immutable.")) return
+    if (!window.confirm("Submit this Division budget for electronic Registrar review?")) return
 
     setSaving(true)
     setMessage(null)
     try {
-      await lockDivisionBudget(detail.budget.id)
+      await submitDivisionBudget(detail.budget.id)
       await loadDivision(detail.budget.id)
       await loadDashboard()
-      setMessage({ type: "ok", text: "Division budget locked successfully." })
+      setMessage({ type: "ok", text: "Division budget submitted to the Registrar." })
     } catch (error) {
-      setMessage({ type: "err", text: error instanceof Error ? error.message : "Could not lock the Division budget." })
+      setMessage({ type: "err", text: error instanceof Error ? error.message : "Could not submit the Division budget." })
     } finally {
       setSaving(false)
     }
@@ -301,7 +306,7 @@ export default function AnnualBudgetPage() {
           <button type="button" onClick={() => window.print()} disabled={!detail} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             <Printer className="h-4 w-4" /> Print Draft
           </button>
-          <button type="button" onClick={handleSaveDraft} disabled={!detail || isLocked || !canCapture || saving} className="inline-flex items-center gap-2 rounded-lg bg-[#132A44] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1C3B5A] disabled:opacity-50">
+          <button type="button" onClick={handleSaveDraft} disabled={!detail || !isEditable || !canCapture || saving} className="inline-flex items-center gap-2 rounded-lg bg-[#132A44] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1C3B5A] disabled:opacity-50">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save Draft
           </button>
         </div>
@@ -354,11 +359,11 @@ export default function AnnualBudgetPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-end">
               <label className="block flex-1">
                 <span className="mb-1 block text-sm font-medium text-slate-700">Optional Reference Number</span>
-                <input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value)} disabled={isLocked || !canCapture} placeholder="Registrar / meeting / document reference" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100" />
+                <input value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value)} disabled={!isEditable || !canCapture} placeholder="Registrar / meeting / document reference" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100" />
               </label>
               <label className="block md:w-56">
                 <span className="mb-1 block text-sm font-medium text-slate-700">Approval Date</span>
-                <input type="date" value={approvalDate} onChange={(event) => setApprovalDate(event.target.value)} disabled={isLocked || !canCapture} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100" />
+                <input type="date" value={approvalDate} onChange={(event) => setApprovalDate(event.target.value)} disabled={!isEditable || !canCapture} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100" />
               </label>
             </div>
           </section>
@@ -366,7 +371,7 @@ export default function AnnualBudgetPage() {
           <section className="rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="section-budget-grid">
             <div className="border-b border-slate-200 px-5 py-4">
               <h2 className="text-lg font-semibold text-slate-900">{divisionName}</h2>
-              <p className="mt-1 text-sm text-slate-500">The same standard ledger master is available to every Section. Enter amounts only where the Section has an approved budget.</p>
+              <p className="mt-1 text-sm text-slate-500">Enter each amount under an explicit Division-wide or named Section/unit allocation from this Division's signed submission. Master ledger headings calculate subtotals.</p>
             </div>
 
             <div className="overflow-x-auto">
@@ -377,7 +382,7 @@ export default function AnnualBudgetPage() {
                   <div key={section.id} className="border-b border-slate-200 last:border-b-0">
                     <div className="bg-slate-50 px-5 py-3">
                       <div className="flex items-center justify-between gap-4">
-                        <div><h3 className="font-semibold text-slate-900">{section.name}</h3><p className="text-xs text-slate-500">{section.code}</p></div>
+                        <div><h3 className="font-semibold text-slate-900">{section.budget_scope === 'DIVISION_WIDE' ? 'Division-wide' : section.name}</h3><p className="text-xs text-slate-500">{section.code} · {section.budget_scope === 'DIVISION_WIDE' ? 'Division allocation' : 'Section/unit allocation'}</p></div>
                         <div className="text-right"><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Section Total</p><p className="font-bold text-slate-900">{money(sectionTotals.get(section.id) || 0)}</p></div>
                       </div>
                     </div>
@@ -385,18 +390,21 @@ export default function AnnualBudgetPage() {
                     <table className="min-w-[760px] w-full">
                       <thead><tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><th className="px-5 py-3 w-40">Ledger Code</th><th className="px-5 py-3">Description</th><th className="px-5 py-3 w-56 text-right">Approved Amount</th></tr></thead>
                       <tbody className="divide-y divide-slate-100">
-                        {ledgers.map((ledger) => {
+                        {ledgerGroups.map((group) => <Fragment key={group.category.id}>
+                          <tr className="bg-amber-100"><th colSpan={2} className="px-5 py-3 text-left text-sm font-semibold text-slate-900">{group.category.standard_description}</th><th className="px-5 py-3 text-right text-sm font-semibold text-slate-900">{money(sumCategoryAmounts(group, [section.id], amounts))}</th></tr>
+                          {group.children.map((ledger) => {
                           const key = amountKey(section.id, ledger.id)
                           return (
                             <tr key={ledger.id} className="hover:bg-slate-50/60">
                               <td className="px-5 py-2.5 text-sm font-medium text-slate-800">{ledger.finance_code || ledger.ledger_number}</td>
                               <td className="px-5 py-2.5 text-sm text-slate-700">{ledger.standard_description}</td>
                               <td className="px-5 py-2.5">
-                                <div className="flex items-center justify-end gap-2"><span className="text-sm text-slate-500">K</span><input type="number" min={0} step="0.01" value={amounts[key] ?? ""} onChange={(event) => updateAmount(section.id, ledger.id, event.target.value)} disabled={isLocked || !canCapture} aria-label={`${section.name} ${ledger.finance_code} approved amount`} className={`w-40 rounded-md border px-3 py-1.5 text-right text-sm disabled:bg-slate-100 ${dirtyKeys.has(key) ? "border-amber-400 bg-amber-50" : "border-slate-300"}`} placeholder="0.00" /></div>
+                                <div className="flex items-center justify-end gap-2"><span className="text-sm text-slate-500">K</span><input type="number" min={0} step="0.01" value={amounts[key] ?? ""} onChange={(event) => updateAmount(section.id, ledger.id, event.target.value)} disabled={!isEditable || !canCapture || !ledger.is_active || group.category.id === 'unmapped'} aria-label={`${section.name} ${ledger.finance_code} approved amount`} className={`w-40 rounded-md border px-3 py-1.5 text-right text-sm disabled:bg-slate-100 ${dirtyKeys.has(key) ? "border-amber-400 bg-amber-50" : "border-slate-300"}`} placeholder="0.00" /></div>
                               </td>
                             </tr>
                           )
-                        })}
+                          })}
+                        </Fragment>)}
                       </tbody>
                       <tfoot><tr className="bg-slate-50 font-semibold text-slate-900"><td className="px-5 py-3" colSpan={2}>Section Total</td><td className="px-5 py-3 text-right">{money(sectionTotals.get(section.id) || 0)}</td></tr></tfoot>
                     </table>
@@ -411,12 +419,12 @@ export default function AnnualBudgetPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div>
                 <div className="flex items-center gap-2"><FileText className="h-5 w-5 text-[#132A44]" /><h2 className="text-lg font-semibold text-slate-900">Official Budget Record</h2></div>
-                <p className="mt-1 max-w-3xl text-sm text-slate-600">The Registrar-signed and stamped approved document is the authoritative original budget record and is required before Division lock.</p>
+                <p className="mt-1 max-w-3xl text-sm text-slate-600">Attach this Division's signed or stamped approved submission before sending the keyed amounts for Registrar review.</p>
               </div>
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${officialDocuments.length > 0 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{officialDocuments.length > 0 ? "Official document recorded" : "Official document required"}</span>
             </div>
 
-            {canManageDocuments && (
+            {canManageDocuments && isEditable && (
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 print:hidden">
                 <div className="grid gap-3 md:grid-cols-3">
                   <label className="block"><span className="mb-1 block text-xs font-medium text-slate-600">Document reference</span><input value={documentReference} onChange={(event) => setDocumentReference(event.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" /></label>
@@ -446,10 +454,15 @@ export default function AnnualBudgetPage() {
             </div>
 
             <div className="mt-5 flex flex-col gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-600">{isLocked ? "This Division budget is locked. Original amounts cannot be changed; later official documents are retained as new controlled versions." : "Save and verify all figures against the official Registrar-signed document before locking."}</div>
-              <button type="button" data-testid="lock-division-budget" onClick={handleLock} disabled={isLocked || !canLock || saving || dirtyKeys.size > 0 || officialDocuments.length === 0} className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#8A1420] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6F1019] disabled:opacity-50"><LockKeyhole className="h-4 w-4" /> {isLocked ? "Division Locked" : "Lock Division"}</button>
+              <div className="text-sm text-slate-600">{isLocked ? "Electronically approved. Original amounts are locked." : detail.budget.status === 'PENDING_REGISTRAR_APPROVAL' ? "Awaiting the Registrar's electronic review." : "Save and check this Division's figures against its signed document before submission."}</div>
+              <button type="button" data-testid="submit-division-budget" onClick={handleSubmit} disabled={!isEditable || !canCapture || saving || dirtyKeys.size > 0 || officialDocuments.length === 0} className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#8A1420] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6F1019] disabled:opacity-50"><LockKeyhole className="h-4 w-4" /> Submit to Registrar</button>
             </div>
           </section>
+          {canRegistrarApprove && detail.budget.status === 'PENDING_REGISTRAR_APPROVAL' && (
+            <div data-testid="registrar-review-panel">
+              <RegistrarReviewPanel detail={detail} sections={filteredSections} groups={ledgerGroups} onOpenDocument={handleOpenDocument} onComplete={async () => { await loadDivision(detail.budget.id); await loadDashboard() }} />
+            </div>
+          )}
         </>
       )}
     </div>
