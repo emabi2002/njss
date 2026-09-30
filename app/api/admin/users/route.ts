@@ -14,6 +14,46 @@ import type { UserAccessContext } from '@/lib/rbac/types'
 export const dynamic = 'force-dynamic'
 
 const SYSTEM_ADMINISTRATOR = 'System Administrator'
+const HEAD_OFFICE_LOCATION_CODE = 'NCD-WGN'
+
+async function headOfficeOrganisation(admin: SupabaseClient) {
+  const { data: location, error: locationError } = await admin
+    .from('court_locations')
+    .select('id')
+    .eq('code', HEAD_OFFICE_LOCATION_CODE)
+    .single()
+  if (locationError || !location) throw new Error('Waigani Head Office location is unavailable.')
+
+  const { data: departments, error: departmentError } = await admin
+    .from('departments')
+    .select('id, name')
+    .eq('court_location_id', location.id)
+    .eq('is_active', true)
+    .order('name')
+  if (departmentError) throw new Error(departmentError.message)
+
+  const departmentIds = (departments || []).map((department) => department.id)
+  if (!departmentIds.length) return { departments: [], sections: [] }
+  const { data: sections, error: sectionError } = await admin
+    .from('sections')
+    .select('id, name, department_id')
+    .eq('is_active', true)
+    .in('department_id', departmentIds)
+    .order('name')
+  if (sectionError) throw new Error(sectionError.message)
+  return { departments: departments || [], sections: sections || [] }
+}
+
+async function assertHeadOfficeAssignment(admin: SupabaseClient, departmentId?: string | null, sectionId?: string | null) {
+  if (!departmentId && !sectionId) return
+  const { departments, sections } = await headOfficeOrganisation(admin)
+  if (!departmentId || !departments.some((department) => department.id === departmentId)) {
+    throw new Error('Select an active Head Office division.')
+  }
+  if (sectionId && !sections.some((section) => section.id === sectionId && section.department_id === departmentId)) {
+    throw new Error('Select an active section in the chosen Head Office division.')
+  }
+}
 
 /**
  * Shape returned by USER_PUBLIC_FIELDS / USER_LEGACY_FIELDS.
@@ -193,7 +233,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const [usersRes, rolesRes, deptRes, sectionRes] = await Promise.all([
+    const [usersRes, rolesRes, organisation] = await Promise.all([
       auth.admin
         .from('users')
         .select(
@@ -209,18 +249,17 @@ export async function GET(request: NextRequest) {
             : 'id, name, description, data_scope_type, is_active',
         )
         .order('name'),
-      auth.admin.from('departments').select('id, name').eq('is_active', true).order('name'),
-      auth.admin.from('sections').select('id, name, department_id').eq('is_active', true).order('name'),
+      headOfficeOrganisation(auth.admin),
     ])
 
-    const firstError = [usersRes, rolesRes, deptRes, sectionRes].find((r) => r.error)?.error
+    const firstError = [usersRes, rolesRes].find((r) => r.error)?.error
     if (firstError) return fail(firstError.message, 500)
 
     return NextResponse.json({
       users: usersRes.data || [],
       roles: rolesRes.data || [],
-      departments: deptRes.data || [],
-      sections: sectionRes.data || [],
+      departments: organisation.departments,
+      sections: organisation.sections,
       migrationApplied: schema.userAdministration,
     })
   } catch (error) {
@@ -293,6 +332,7 @@ async function handleCreate(
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('A valid email address is required.')
   if (!fullName) return fail('Full name is required.')
   if (!input.role_id) return fail('Exactly one workflow role must be selected.')
+  await assertHeadOfficeAssignment(admin, input.department_id, input.section_id)
 
   const password = body.generatePassword ? generateTemporaryPassword() : body.password || ''
   const passwordErrors = body.generatePassword ? [] : validatePassword(password, body.confirmPassword)
@@ -399,6 +439,14 @@ async function handleUpdate(
 
   const before = await loadUser(admin, userId)
   if (!before) return fail('User not found', 404)
+
+  if (input.department_id !== undefined || input.section_id !== undefined) {
+    await assertHeadOfficeAssignment(
+      admin,
+      input.department_id !== undefined ? input.department_id : before.department_id,
+      input.section_id !== undefined ? input.section_id : before.section_id,
+    )
+  }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (input.full_name !== undefined) patch.full_name = input.full_name.trim()
