@@ -10,7 +10,7 @@ RETURNS TABLE(annual_budget_cycle_id uuid, financial_year integer, division_budg
  current_approved_budget numeric, outstanding_commitments numeric,
  actual_expenditure numeric, available_budget numeric)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp
-AS $function$;
+AS $function$
 BEGIN
  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
  IF NOT EXISTS (SELECT 1 FROM public.users u WHERE u.auth_user_id=auth.uid()
@@ -149,7 +149,10 @@ AS $scope$
      AND l.location_type='HEADQUARTERS'
      AND (p_section_id IS NULL OR EXISTS(SELECT 1 FROM public.sections s
        WHERE s.id=p_section_id AND s.department_id=d.id AND s.is_active=true))))
- AND public.fn_current_user_data_scope_allows(p_division_id,p_section_id,NULL,NULL,NULL);
+ AND (public.fn_current_user_data_scope_allows(p_division_id,p_section_id,NULL,NULL,NULL)
+   OR (p_division_id IS NOT NULL AND p_section_id IS NULL AND EXISTS(
+     SELECT 1 FROM public.sections s WHERE s.department_id=p_division_id AND s.is_active=true
+       AND public.fn_current_user_data_scope_allows(p_division_id,s.id,NULL,NULL,NULL))));
 $scope$;
 REVOKE ALL ON FUNCTION public.njss_head_office_budget_read_scope(uuid,uuid) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.njss_head_office_budget_read_scope(uuid,uuid) TO authenticated;
@@ -182,7 +185,7 @@ CREATE OR REPLACE FUNCTION public.njss_adjust_commitment(p_commitment_id uuid, p
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
-AS $function$;
+AS $function$
 DECLARE
   v_commitment ff3_commitments;
   v_old ff3_commitments;
@@ -247,6 +250,17 @@ BEGIN
     IF COALESCE((v_position_before->>'position_exists')::boolean,false)=false THEN
       RAISE EXCEPTION 'An active annual Head Office budget is required for commitment increases';
     END IF;
+    IF COALESCE((v_position_before->>'posting_mapping_count')::integer,0)<>1
+      OR v_budget.financial_year IS DISTINCT FROM v_ff3.financial_year
+      OR v_budget.department_id IS DISTINCT FROM v_ff3.department_id
+      OR v_budget.section_id IS DISTINCT FROM v_ff3.section_id
+      OR NOT EXISTS(SELECT 1 FROM public.finance_posting_mappings m
+        WHERE m.expense_code_registry_id=v_budget.expense_code_registry_id
+          AND m.expense_ledger_id=v_ff3.expense_ledger_id
+          AND m.department_id=v_ff3.department_id AND m.section_id=v_ff3.section_id
+          AND m.is_active=true AND (m.financial_year=v_ff3.financial_year OR m.financial_year IS NULL)) THEN
+      RAISE EXCEPTION 'Valid annual financial posting linkage is required for commitment increases';
+    END IF;
     v_type := 'INCREASE';
     v_amount := COALESCE(p_amount, 0);
     IF v_amount <= 0 THEN RAISE EXCEPTION 'Commitment increase amount must be greater than zero.'; END IF;
@@ -303,7 +317,7 @@ CREATE OR REPLACE FUNCTION public.njss_transition_ff3(p_ff3_id uuid, p_action te
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
-AS $function$;
+AS $function$
 DECLARE
   v_ff3 public.ff3_headers%ROWTYPE;
   v_old public.ff3_headers%ROWTYPE;

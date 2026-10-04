@@ -37,7 +37,7 @@ try {
       SELECT coalesce(current_setting('test.allowed',true),'')='true' $$;
     CREATE FUNCTION public.fn_current_user_data_scope_allows(uuid,uuid,uuid,uuid,uuid)
     RETURNS boolean LANGUAGE sql STABLE AS $$
-      SELECT current_setting('test.scope',true)='all' OR $1::text=current_setting('test.scope',true) $$;
+      SELECT current_setting('test.scope',true)='all' OR $1::text=current_setting('test.scope',true) OR $2::text=current_setting('test.scope',true) $$;
     CREATE TABLE users(id uuid,auth_user_id uuid,is_active boolean,must_change_password boolean);
     CREATE TABLE court_locations(id uuid,location_type text,is_active boolean);
     CREATE TABLE departments(id uuid,court_location_id uuid,is_active boolean);
@@ -133,6 +133,11 @@ try {
   await client.query('select njss_adjust_commitment($1,$2,$3,$4)',[id(90),'DECREASE',100,'restore test balance'])
   assert.equal(Number((await client.query('select available_budget from get_current_budget_position(2027,$1,$2,$3)',[id(10),id(20),id(30)])).rows[0].available_budget),750)
   await client.query('RESET ROLE')
+  await client.query('UPDATE finance_posting_mappings SET is_active=false')
+  await client.query('SET LOCAL ROLE authenticated')
+  await denial('select njss_adjust_commitment($1,$2,$3,$4)',[id(90),'INCREASE',1,'inactive mapping'],/Valid annual financial posting linkage/)
+  await client.query('RESET ROLE')
+  await client.query('UPDATE finance_posting_mappings SET is_active=true')
   await client.query('UPDATE ff3_headers SET expense_ledger_id=null WHERE id=$1',[id(110)])
   await client.query('SET LOCAL ROLE authenticated')
   await denial('select njss_adjust_commitment($1,$2,$3,$4)',[id(90),'INCREASE',1,'legacy'],/active annual Head Office budget/)
@@ -151,6 +156,9 @@ try {
   assert.equal((await client.query('select * from division_budget_lines')).rows.length,1, 'draft lines are scoped at RLS')
   assert.equal((await client.query('select * from get_current_budget_position(2027)')).rows.length,1)
   assert.equal((await client.query('select * from get_current_budget_position(2027,$1)',[id(10)])).rows.length,0,'explicit filters cannot bypass scope')
+  await client.query("select set_config('test.scope',$1,true)",[id(20)])
+  assert.equal((await client.query('select * from division_budgets')).rows.length,1,'Section users can read their Division header')
+  assert.equal((await client.query('select * from division_budget_lines')).rows.length,1,'Section users can read only their Section lines')
   await client.query('RESET ROLE')
   await client.query("UPDATE annual_budget_cycles SET status='PREPARATION'")
   await client.query('SET LOCAL ROLE authenticated')
