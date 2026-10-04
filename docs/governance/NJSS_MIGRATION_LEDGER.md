@@ -220,3 +220,11 @@ HARD-10A corrects the fixture design without weakening the four-group role model
 Post-apply validation records one active `DEPARTMENT_WIDE` delegation with exactly eight department IDs and one matching `uat_seed_entities` provenance row. All eight `NJSS-NATIONAL-UAT-2026-V1` revision scenarios remain present and match Alex under the canonical helper. The certified UAT run remains `COMPLETED` with 15/15 positive and 27/27 negative validations. The complete `supabase/tests/hard10_policy_trigger_preflight.sql` executes without exception after HARD-10A.
 
 This migration is **not** the broader HARD-10 RLS deployment. A fresh catalog check after HARD-10A still reports all 30 HARD-10 target tables with RLS disabled. The pending HARD-10 RLS migrations remain behind their separate production application gate.
+
+## Head Office UAT checkpoint — 5 October 2026 (PNG)
+
+The complete read-only live ledger checkpoint is `NJSS_LIVE_MIGRATIONS_2026-10-05.json` (132 managed versions, latest `20261004215730`). The reconciliation and actual schema/access probes are in `NJSS_UAT_RECONCILIATION_2026-10-05.md`.
+
+The source versions `20261004215333_head_office_uat_operational_scope.sql` and `20261004215730_uat_view_invoker_hardening.sql` match the exact managed versions. Their executable SQL was rehearsed with rollback before application and verified afterward. The recovered September 30 archive sources already exist in the live ledger. Do not rerun those resets against the current 2027 PREPARATION cycle and 15 populated Head Office budgets.
+
+Historical national seed entries and Court Interpreter creation/removal entries remain immutable history. Presence in this checkpoint does not mean a retired schema or national operational scope still exists. Existing older filename drift remains governed by the mapping/replay rules above; this checkpoint is not certification that an unmodified native `db push` can rebuild the database.

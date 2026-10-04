@@ -139,6 +139,7 @@ jobs:
         run: |
           bun scripts/dashboard-access-runtime.test.mjs
           bun scripts/auth-session-events-runtime.test.mjs
+          bun scripts/dashboard-navigation-runtime.test.mjs
           bun scripts/operations-access-runtime.test.mjs
           bun scripts/server-password-access-runtime.test.mjs
           node scripts/admin-edge-password-runtime.test.mjs

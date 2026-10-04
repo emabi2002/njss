@@ -20,6 +20,7 @@ import { NJSSLogo } from "../components/NJSSLogo"
 import { useAuth } from "@/contexts/AuthContext"
 import { NotificationsDropdown } from "@/components/NotificationsDropdown"
 import { ICONS } from "@/lib/rbac/config"
+import { visibleDashboardNavigation } from "@/lib/rbac/dashboard-navigation"
 import type { RbacMenuItem, RbacModule } from "@/lib/rbac/types"
 import { loadOrganization, DEFAULT_ORG, type OrganizationProfile } from "@/lib/org"
 
@@ -113,9 +114,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const visibleNavigation: NavItem[] = useMemo(
     () =>
-      menus
-        .filter((item) => !item.parent_code && !HIDDEN_SUPPORT_MENU_CODES.has(item.code))
-        .sort((a, b) => a.sort_order - b.sort_order),
+      visibleDashboardNavigation(menus, HIDDEN_SUPPORT_MENU_CODES),
     [menus],
   )
 
