@@ -496,37 +496,3 @@ export async function getNotificationCount(userId?: string): Promise<number> {
 
   return count || 0
 }
-
-export async function checkBudgetAndNotify(requestedAmount: number, userId?: string, financialYear = new Date().getFullYear()): Promise<boolean> {
-  try {
-    const { data: releases } = await supabase
-      .from('quarterly_releases')
-      .select('released_amount')
-      .eq('financial_year', financialYear)
-
-    const { data: commitments } = await supabase
-      .from('ff3_commitments')
-      .select('committed_amount, paid_amount')
-      .eq('financial_year', financialYear)
-
-    const quarterlyReleased = releases?.reduce((sum, r) => sum + (r.released_amount || 0), 0) || 0
-    const committedAmount = commitments?.reduce((sum, c) => sum + ((c.committed_amount || 0) - (c.paid_amount || 0)), 0) || 0
-    const actualExpenditure = commitments?.reduce((sum, c) => sum + (c.paid_amount || 0), 0) || 0
-    const availableBalance = quarterlyReleased - committedAmount - actualExpenditure
-
-    if (requestedAmount > availableBalance) {
-      await notifyBudgetExceeded(requestedAmount, availableBalance, userId)
-      return false
-    }
-
-    const percentageRemaining = (availableBalance / quarterlyReleased) * 100
-    if (percentageRemaining < 20) {
-      await notifyBudgetLow(Math.round(percentageRemaining), availableBalance, userId)
-    }
-
-    return true
-  } catch (error) {
-    console.error('Error checking budget:', error)
-    return true
-  }
-}

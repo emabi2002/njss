@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { BarChart3, FileDown, FileSpreadsheet, Loader2, Play, Printer, TableProperties } from 'lucide-react'
 import { authFetch } from '@/lib/auth-fetch'
@@ -12,13 +12,11 @@ import ManagementReportPreview, {
 } from '@/components/reports/ManagementReportPreview'
 
 const REPORTS = [
-  { id: 'management-financial-summary', name: 'Management Financial Summary', description: 'Approved budget, funding, releases, commitments, actual expenditure and available balance.' },
-  { id: 'department-financial-position', name: 'Department Financial Position', description: 'Authoritative financial position grouped by Department.' },
-  { id: 'section-financial-position', name: 'Section Financial Position', description: 'Authoritative financial position grouped by Section.' },
-  { id: 'cost-centre-financial-position', name: 'Cost Centre Financial Position', description: 'Budget and expenditure position grouped by Cost Centre.' },
-  { id: 'expense-code-financial-position', name: 'Expense Code Financial Position', description: 'Budget and expenditure position by full Expense / Finance Code.' },
-  { id: 'funding-source-financial-position', name: 'Funding Source Financial Position', description: 'Approved, funded, released and spent position by Funding Source.' },
-  { id: 'ff3-ff4-transaction-trace', name: 'FF3 to FF4 Transaction Trace', description: 'Trace requisition, commitment, FF4, supplier/payee, payment and reconciliation.' },
+  { id: 'management-financial-summary', name: 'Head Office Annual Budget Position', description: 'Active annual budget, supplementary adjustments, reallocations, commitments, expenditure and available budget.' },
+  { id: 'division-financial-position', name: 'Division Financial Position', description: 'Active annual budget grouped by Division.' },
+  { id: 'section-financial-position', name: 'Section Financial Position', description: 'Active annual budget grouped by Section.' },
+  { id: 'ledger-financial-position', name: 'Ledger Financial Position', description: 'Active annual budget by Section and posting Ledger.' },
+  { id: 'ff3-ff4-transaction-trace', name: 'FF3 to FF4 Transaction Trace', description: 'Trace requisition, commitment, payment and reconciliation.' },
 ] as const
 
 type ExportFormat = 'pdf' | 'excel' | 'csv' | 'print'
@@ -52,12 +50,11 @@ export default function ManagementReportsPage() {
   const currentYear = new Date().getFullYear()
   const [selectedReport, setSelectedReport] = useState<string>('management-financial-summary')
   const [financialYear, setFinancialYear] = useState(currentYear)
-  const [startDate, setStartDate] = useState(`${currentYear}-01-01`)
-  const [endDate, setEndDate] = useState(`${currentYear}-12-31`)
-  const [status, setStatus] = useState('')
-  const [provinceId, setProvinceId] = useState('')
-  const [departmentId, setDepartmentId] = useState('')
+  const financialYearEdited = useRef(false)
+  const [budgetNotice, setBudgetNotice] = useState<string | null>(null)
+  const [departmentId, setDivisionId] = useState('')
   const [sectionId, setSectionId] = useState('')
+  const [expenseLedgerId, setExpenseLedgerId] = useState('')
   const [lookups, setLookups] = useState<ManagementReportResponse['lookups']>(EMPTY_LOOKUPS)
   const [lookupScope, setLookupScope] = useState<ManagementReportScope | null>(null)
   const [lookupLoading, setLookupLoading] = useState(true)
@@ -79,11 +76,12 @@ export default function ManagementReportsPage() {
       })
       .then((payload) => {
         if (cancelled) return
+        if (!financialYearEdited.current) setFinancialYear(payload.financialYear)
+        setBudgetNotice(payload.budgetNotice || null)
         setLookups(payload.lookups)
         setLookupScope(payload.scope)
         if (payload.scope.mode === 'SECTION') {
-          setProvinceId(payload.scope.province?.id || '')
-          setDepartmentId(payload.scope.departmentId || '')
+          setDivisionId(payload.scope.departmentId || '')
           setSectionId(payload.scope.sectionId || '')
         }
       })
@@ -101,22 +99,8 @@ export default function ManagementReportsPage() {
     }
   }, [])
 
-  const departments = useMemo(() => {
-    return provinceId
-      ? lookups.departments.filter((department) => department.province_id === provinceId)
-      : lookups.departments
-  }, [lookups.departments, provinceId])
-
-  const sections = useMemo(() => {
-    if (departmentId) {
-      return lookups.sections.filter((section) => section.department_id === departmentId)
-    }
-    if (provinceId) {
-      const departmentIds = new Set(departments.map((department) => department.id))
-      return lookups.sections.filter((section) => section.department_id && departmentIds.has(section.department_id))
-    }
-    return lookups.sections
-  }, [departmentId, departments, lookups.sections, provinceId])
+  const departments = lookups.departments
+  const sections = useMemo(() => departmentId ? lookups.sections.filter(section => section.department_id === departmentId) : lookups.sections, [departmentId, lookups.sections])
 
   const loadReport = async (
     reportId: string,
@@ -129,22 +113,16 @@ export default function ManagementReportsPage() {
       const params = new URLSearchParams()
       params.set('report', reportId)
       params.set('financialYear', String(financialYear))
-      if (startDate) params.set('startDate', startDate)
-      if (endDate) params.set('endDate', endDate)
-      if (status) params.set('status', status)
 
       const baseFilters = options.useCurrentResponseFilters && response
         ? response.appliedFilters
         : {
-            provinceId: provinceId || null,
             departmentId: departmentId || null,
             sectionId: sectionId || null,
-            costCentreId: null,
-            expenseCodeRegistryId: null,
-            fundingSourceId: null,
+            expenseLedgerId: expenseLedgerId || null,
           }
 
-      for (const key of ['provinceId', 'departmentId', 'sectionId', 'costCentreId', 'expenseCodeRegistryId', 'fundingSourceId'] as const) {
+      for (const key of ['departmentId', 'sectionId', 'expenseLedgerId'] as const) {
         const value = extraParams[key] ?? baseFilters[key]
         if (value) params.set(key, value)
       }
@@ -158,12 +136,12 @@ export default function ManagementReportsPage() {
       }
 
       setResponse(payload)
+      setBudgetNotice(payload.budgetNotice || null)
       setLookups(payload.lookups)
       setLookupScope(payload.scope)
       setSelectedReport(reportId)
       if (payload.scope.mode === 'SECTION') {
-        setProvinceId(payload.scope.province?.id || '')
-        setDepartmentId(payload.scope.departmentId || '')
+        setDivisionId(payload.scope.departmentId || '')
         setSectionId(payload.scope.sectionId || '')
       }
       setDirty(false)
@@ -242,7 +220,7 @@ export default function ManagementReportsPage() {
             <BarChart3 className="h-6 w-6 text-png-red" />
             <h1 className="text-2xl font-bold text-slate-900">Management Reports & Drill-Down</h1>
           </div>
-          <p className="mt-1 text-slate-600">Authoritative financial reporting from Budget through FF3, Commitment, FF4, Payment and Reconciliation.</p>
+          <p className="mt-1 text-slate-600">Head Office active annual budget reporting by Division, Section and Ledger.</p>
         </div>
         <Link href="/dashboard/reports" className="text-sm font-medium text-png-red hover:text-png-maroon">
           All Reports →
@@ -272,82 +250,25 @@ export default function ManagementReportsPage() {
               value={financialYear}
               onChange={(event) => {
                 const year = Number(event.target.value)
+                financialYearEdited.current = true
+                setBudgetNotice(null)
                 setFinancialYear(year)
-                setStartDate(`${year}-01-01`)
-                setEndDate(`${year}-12-31`)
                 markChanged()
               }}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-png-red"
             />
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
-            <select
-              value={status}
-              onChange={(event) => { setStatus(event.target.value); markChanged() }}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-png-red"
-            >
-              <option value="">All Statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="SUBMITTED">Submitted</option>
-              <option value="APPROVED">Approved</option>
-              <option value="COMMITTED">Committed</option>
-              <option value="VERIFIED">Verified</option>
-              <option value="PROCESSED">Processed</option>
-              <option value="PAID">Paid</option>
-              <option value="RECONCILED">Reconciled</option>
-              <option value="REJECTED">Rejected</option>
-            </select>
-          </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(event) => { setStartDate(event.target.value); markChanged() }}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-png-red"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(event) => { setEndDate(event.target.value); markChanged() }}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-png-red"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Province</label>
-            <select
-              value={provinceId}
-              disabled={hierarchyDisabled}
-              onChange={(event) => {
-                setProvinceId(event.target.value)
-                setDepartmentId('')
-                setSectionId('')
-                markChanged()
-              }}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 focus:outline-none focus:ring-2 focus:ring-png-red"
-            >
-              <option value="">{lookupLoading ? 'Loading Provinces…' : 'All Provinces'}</option>
-              {lookups.provinces.map((province) => <option key={province.id} value={province.id}>{province.name}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Department</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Division</label>
             <select
               value={departmentId}
               disabled={hierarchyDisabled}
-              onChange={(event) => { setDepartmentId(event.target.value); setSectionId(''); markChanged() }}
+              onChange={(event) => { setDivisionId(event.target.value); setSectionId(''); markChanged() }}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500 focus:outline-none focus:ring-2 focus:ring-png-red"
             >
-              <option value="">{lookupLoading ? 'Loading Departments…' : 'All Departments'}</option>
+              <option value="">{lookupLoading ? 'Loading Divisions…' : 'All Divisions'}</option>
               {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
             </select>
           </div>
@@ -362,6 +283,13 @@ export default function ManagementReportsPage() {
             >
               <option value="">{lookupLoading ? 'Loading Sections…' : 'All Sections'}</option>
               {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Ledger</label>
+            <select value={expenseLedgerId} disabled={lookupLoading} onChange={event => { setExpenseLedgerId(event.target.value); markChanged() }} className="w-full rounded-lg border border-slate-200 px-3 py-2">
+              <option value="">All Ledgers</option>
+              {(lookups.ledgers || []).map(ledger => <option key={ledger.id} value={ledger.id}>{ledger.ledger_number} — {ledger.standard_description}</option>)}
             </select>
           </div>
         </div>
@@ -401,6 +329,8 @@ export default function ManagementReportsPage() {
           Choose the report and filters above, then click <span className="font-semibold text-slate-700">Run Report</span> to load the authorised result.
         </div>
       )}
+
+      {!response && budgetNotice && <p className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{budgetNotice}</p>}
 
       <ManagementReportPreview
         response={response}

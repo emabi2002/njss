@@ -21,7 +21,7 @@ for (const needle of [
 }
 
 const api = fs.readFileSync('lib/api.ts', 'utf8')
-assert.ok(api.includes('export async function checkBudgetAvailability'), 'legacy budget availability API must remain available')
+assert.equal(api.includes('export async function checkBudgetAvailability'), false, 'release-based legacy budget checks must be retired')
 assert.ok(api.includes('export async function approveFF3'), 'existing controlled FF3 workflow API must remain available')
 
 console.log('FF3 simplified-budget client contract: ok')

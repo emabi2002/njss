@@ -1,4 +1,5 @@
 import type { ReportCategory } from "./types"
+import { ReportAgentError } from "./types"
 
 export interface ReportDomainConfig {
   label: string
@@ -10,17 +11,17 @@ export const REPORT_DOMAINS: Record<ReportCategory, ReportDomainConfig> = {
   management: {
     label: "Management",
     permissions: ["budget.report.view", "reports.view", "all"],
-    description: "Cross-domain management reporting across budget, funding, commitments and expenditure.",
+    description: "Operational commitment and payment activity reporting. Approved budget and funding positions require the standard annual reports.",
   },
   budget: {
     label: "Budget",
     permissions: ["budget.report.view", "budget.revision.report", "all"],
-    description: "Budget preparation, ceilings, allocations, monthly phasing, revisions and supplementary budget reporting.",
+    description: "Unavailable in AI reporting. Use the standard annual reports for approved annual budget positions.",
   },
   funding: {
     label: "Funding",
     permissions: ["funding.view", "all"],
-    description: "Funding authorities, receipts, allocations and quarterly releases.",
+    description: "Unavailable in AI reporting. Use the standard annual reports for funding positions.",
   },
   commitment: {
     label: "FF3 / Commitments",
@@ -65,11 +66,24 @@ NJSS reporting conventions:
 - Currency is Papua New Guinea Kina (PGK). Monetary sums should be rounded to 2 decimal places.
 - FF3 represents commitment / purchase requisition activity.
 - FF4 represents payment / expenditure activity and normally follows an FF3 commitment.
-- Budget flow: budget_cycles -> divisional_budget_submissions -> divisional_budget_lines -> budget_allocations.
-- Funding flow: funding_authorities -> funding_receipts -> funding_allocations -> quarterly_releases.
 - FF3 flow: ff3_headers/items/quotations/approvals -> ff3_commitments -> commitment_transactions.
 - FF4 flow: ff4_headers/approvals -> payment_transactions.
-- Organization hierarchy commonly uses departments -> sections -> cost_centres, with budget_divisions used for budget preparation.
+- Organization hierarchy commonly uses departments -> sections -> cost_centres.
 - Use the requested financial year when stated. Otherwise prefer the currently open financial_years record when the query needs a year.
+- Operational FF3 and FF4 activity is not an approved budget or funding position. Never calculate available budget, approved budget, funding balances, or budget variance from these records.
 - Never infer a column or relation that is not present in the supplied schema.
 `.trim()
+
+
+// Check the whole request before category detection: mixed FF3/budget requests must
+// never route through an operational category and fabricate an approved position.
+export function assertSupportedReportQuestion(question: string) {
+  const positionRequest = /\b(budget|budgets|allocation|allocations|ceiling|ceilings|supplementary|revision|reforecast|variance|annual plan|funding|funds|funded|warrant|warrants|funding authority|receipt|receipts|quarterly|release|releases|balance|balances|remaining budget|financial position|budget position|funding position|appropriation)\b/i
+  if (positionRequest.test(question)) {
+    throw new ReportAgentError(
+      "ANNUAL_REPORT_REQUIRED",
+      "AI budget, funding and approved position reports are unavailable. Use the standard annual Head Office reports at /dashboard/reports. AI reporting supports FF3, FF4, supplier and audit activity.",
+      410,
+    )
+  }
+}

@@ -8,7 +8,8 @@ import {
   ThumbsUp, ThumbsDown, MessageSquare, Download
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { approveFF3, getFF3Approvals, type AuthoritativeBudgetPosition } from "@/lib/api"
+import { approveFF3, getFF3Approvals } from "@/lib/api"
+import { checkHeadOfficeFF3Budget, type HeadOfficeFF3BudgetCheck } from "@/lib/ff3-simplified-budget"
 import { generateFF3PDF, downloadPDF, type FF3PDFData } from "@/lib/pdf"
 import { useAuth } from "@/contexts/AuthContext"
 
@@ -27,6 +28,9 @@ type FF3Header = {
   status: FF3Status
   total_estimated_amount: number | null
   is_within_budget: boolean | null
+  department_id: string
+  section_id: string
+  expense_ledger_id: string | null
   budget_allocation_id: string | null
   budget_mapping_status: string | null
   cost_centre_id: string | null
@@ -87,7 +91,7 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
   const [items, setItems] = useState<FF3Item[]>([])
   const [quotations, setQuotations] = useState<FF3Quotation[]>([])
   const [approvals, setApprovals] = useState<FF3Approval[]>([])
-  const [financialPosition, setFinancialPosition] = useState<AuthoritativeBudgetPosition | null>(null)
+  const [financialPosition, setFinancialPosition] = useState<HeadOfficeFF3BudgetCheck | null>(null)
   const [commitment, setCommitment] = useState<CommitmentSummary | null>(null)
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectComments, setRejectComments] = useState("")
@@ -136,13 +140,16 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
       const approvalsData = await getFF3Approvals(headerData.id)
       setApprovals(approvalsData || [])
 
-      if (headerData.budget_allocation_id) {
-        const { data: positionData } = await supabase
-          .from('v_authoritative_budget_position')
-          .select('*')
-          .eq('budget_allocation_id', headerData.budget_allocation_id)
-          .maybeSingle()
-        setFinancialPosition(positionData as AuthoritativeBudgetPosition | null)
+      if (headerData.expense_ledger_id && Number(headerData.total_estimated_amount) > 0) {
+        const position = await checkHeadOfficeFF3Budget({
+          financialYear: headerData.financial_year,
+          departmentId: headerData.department_id,
+          sectionId: headerData.section_id,
+          expenseLedgerId: headerData.expense_ledger_id,
+          costCentreId: headerData.cost_centre_id,
+          amount: Number(headerData.total_estimated_amount),
+        })
+        setFinancialPosition(position.positionExists ? position : null)
       } else {
         setFinancialPosition(null)
       }
@@ -352,26 +359,19 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
         </div>
         {financialPosition ? (
           <div className="grid md:grid-cols-3 lg:grid-cols-5 gap-3">
-            <FinancialTile label="Approved Budget" amount={financialPosition.approved_budget} />
-            <FinancialTile label="Funded" amount={financialPosition.funded_amount} />
-            <FinancialTile label="Released" amount={financialPosition.released_amount} />
-            <FinancialTile label="Pending" amount={financialPosition.pending_amount} />
-            <FinancialTile label="Committed" amount={financialPosition.outstanding_commitment} />
-            <FinancialTile label="Actual" amount={financialPosition.actual_expenditure} />
-            <FinancialTile label="Available" amount={financialPosition.available_amount} strong />
+            <FinancialTile label="Current Approved Budget" amount={financialPosition.currentApprovedBudget} />
+            <FinancialTile label="Committed" amount={financialPosition.outstandingCommitments} />
+            <FinancialTile label="Actual" amount={financialPosition.actualExpenditure} />
+            <FinancialTile label="Available" amount={financialPosition.availableBudget} strong />
             <FinancialTile label="This FF3" amount={header.total_estimated_amount || 0} />
-            <FinancialTile label="Available After Approval" amount={financialPosition.available_amount - (header.total_estimated_amount || 0)} warning={financialPosition.available_amount < (header.total_estimated_amount || 0)} />
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-medium uppercase text-slate-500">Budget Allocation</p>
-              <p className="mt-2 text-xs font-mono text-slate-700 break-all">{header.budget_allocation_id}</p>
-            </div>
+            {canApprove && <FinancialTile label="Available After Approval" amount={financialPosition.availableBudget - (header.total_estimated_amount || 0)} warning={financialPosition.availableBudget < (header.total_estimated_amount || 0)} />}
           </div>
         ) : (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            Exact budget allocation is not resolved for this FF3. Status: {header.budget_mapping_status || 'BUDGET_MAPPING_REQUIRED'}.
+            No active annual Head Office budget position is available for this FF3 Division, Section and Ledger.
           </div>
         )}
-        {financialPosition && financialPosition.available_amount < (header.total_estimated_amount || 0) && canApprove && (
+        {financialPosition && financialPosition.availableBudget < (header.total_estimated_amount || 0) && canApprove && (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
             Approval Blocked — Insufficient Budget. The database will recheck this atomically at final approval.
           </div>

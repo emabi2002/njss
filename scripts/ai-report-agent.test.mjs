@@ -82,3 +82,62 @@ test("live smoke harness exercises the deployed authenticated AI report endpoint
     assert.match(smoke, new RegExp(`\\b${field}\\b`))
   }
 })
+
+// Execute the reporting policy without a model or database connection.
+const { createRequire } = await import("node:module")
+const { runInNewContext } = await import("node:vm")
+const require = createRequire(import.meta.url)
+const ts = require("typescript")
+const policyModules = new Map()
+function loadPolicy(name) {
+  if (policyModules.has(name)) return policyModules.get(name)
+  const module = { exports: {} }
+  policyModules.set(name, module.exports)
+  const source = ts.transpileModule(read(`reporting-agent/${name}.ts`), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  runInNewContext(source, {
+    module, exports: module.exports,
+    require: (path) => loadPolicy(path.replace(/^\.\//, "")),
+  })
+  return module.exports
+}
+
+test("AI refuses retired budget and funding requests even when mixed with operational categories", () => {
+  const { assertSupportedReportQuestion } = loadPolicy("domain")
+  for (const question of [
+    "Show annual budget", "FF3 commitments against approved budget",
+    "Show payments and available balance", "Funding receipt totals",
+    "Supplier allocations", "Quarterly releases", "Management financial position", "Show remaining balances",
+  ]) {
+    assert.throws(() => assertSupportedReportQuestion(question), (error) =>
+      error.status === 410 && error.message.includes("/dashboard/reports"))
+  }
+  for (const question of ["List FF3 commitments", "Show FF4 payments", "Supplier compliance", "Audit activity"]) {
+    assert.doesNotThrow(() => assertSupportedReportQuestion(question))
+  }
+  const agent = read("reporting-agent/agent.ts")
+  assert.ok(agent.indexOf("assertSupportedReportQuestion(question)") < agent.indexOf("await generateReportSql"))
+})
+
+test("SQL guard excludes retired financial relations and retains operational traces", () => {
+  const { guardReportSql } = loadPolicy("guard")
+  const { getSchemaForCategory } = loadPolicy("schema.generated")
+  for (const table of [
+    "budget_cycles", "divisional_budget_submissions", "divisional_budget_lines",
+    "budget_allocations", "budget_monthly_allocations", "budget_revisions",
+    "budget_revision_lines", "budget_periods", "budget_division_ceilings",
+    "budget_release_funding_lines", "funding_authorities", "funding_receipts",
+    "funding_allocations", "quarterly_releases", "budget_divisions",
+  ]) {
+    assert.throws(() => guardReportSql(`SELECT id FROM ${table}`), /outside the reporting allow-list/)
+  }
+  for (const category of ["management", "commitment", "expenditure", "supplier", "audit"]) {
+    const schema = getSchemaForCategory(category)
+    assert.doesNotMatch(schema, /(?:budget_allocations|funding_authorities|funding_receipts|quarterly_releases)\(/)
+  }
+  assert.throws(() => getSchemaForCategory("budget"), (error) => error.status === 410)
+  assert.throws(() => getSchemaForCategory("funding"), (error) => error.status === 410)
+  assert.doesNotThrow(() => guardReportSql("SELECT ff3_number FROM ff3_headers"))
+  assert.doesNotThrow(() => guardReportSql("SELECT transaction_date, amount FROM payment_transactions"))
+})
