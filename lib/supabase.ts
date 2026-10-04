@@ -15,7 +15,7 @@ const supabaseAnonKey = requireValue(
 )
 
 if (typeof window === 'undefined' && process.env.NJSS_STRICT_ENV === 'true') {
-  requireValue('SUPABASE_SERVICE_ROLE_KEY', process.env.SUPABASE_SERVICE_ROLE_KEY)
+  readServerServiceRoleKey()
 }
 
 export const isSupabaseNetworkEnabled = process.env.NEXT_PUBLIC_SUPABASE_NETWORK_ENABLED !== 'false'
@@ -48,12 +48,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 })
 
+// The legacy Netlify variable is accepted only on the server while its name is corrected.
+// This lookup must never be added to NextConfig.env or a NEXT_PUBLIC variable.
+export function readServerServiceRoleKey() {
+  if (typeof window !== 'undefined') throw new Error('Service-role credentials are server-only.')
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPBASE_SERVICE_ROLE_KEY?.trim()
+  if (!key) throw new Error('Missing required environment variable: SUPABASE_SERVICE_ROLE_KEY')
+  return key
+}
+
 // Server-side Supabase client (with service role for admin operations)
 export function createServerSupabaseClient() {
-  const serviceRoleKey = requireValue(
-    'SUPABASE_SERVICE_ROLE_KEY',
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  )
+  const serviceRoleKey = readServerServiceRoleKey()
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {

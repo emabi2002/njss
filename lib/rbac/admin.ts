@@ -5,6 +5,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createRequestSupabaseClient, getServerAccessContext, hasAnyServerPermission } from './server'
 import type { PermissionCode, UserAccessContext } from './types'
 import { redactSensitive } from '@/lib/password'
+import { readServerServiceRoleKey } from '@/lib/supabase'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 
@@ -14,10 +15,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
  * their own session token by `authorizeAdmin` below.
  */
 export function createAdminClient(): SupabaseClient {
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
-  if (!serviceRoleKey) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured on the server.')
-  }
+  // SUPABASE_SERVICE_ROLE_KEY is resolved server-side, including the verified legacy name.
+  const serviceRoleKey = readServerServiceRoleKey()
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   })

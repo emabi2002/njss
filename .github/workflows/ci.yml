@@ -143,6 +143,7 @@ jobs:
           bun scripts/operations-access-runtime.test.mjs
           bun scripts/server-password-access-runtime.test.mjs
           node scripts/admin-edge-password-runtime.test.mjs
+          node scripts/server-runtime-config.test.mjs
       - name: Division budget ledger and Registrar review checks
         run: |
           node scripts/division-budget-ledger-hierarchy.test.mjs
