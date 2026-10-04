@@ -10,7 +10,7 @@ RETURNS TABLE(annual_budget_cycle_id uuid, financial_year integer, division_budg
  current_approved_budget numeric, outstanding_commitments numeric,
  actual_expenditure numeric, available_budget numeric)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp
-AS $function$
+AS $function$;
 BEGIN
  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
  IF NOT EXISTS (SELECT 1 FROM public.users u WHERE u.auth_user_id=auth.uid()
@@ -182,7 +182,7 @@ CREATE OR REPLACE FUNCTION public.njss_adjust_commitment(p_commitment_id uuid, p
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
-AS $function$
+AS $function$;
 DECLARE
   v_commitment ff3_commitments;
   v_old ff3_commitments;
@@ -297,13 +297,13 @@ BEGIN
   PERFORM log_audit_event(v_actor, p_user_email, COALESCE(p_user_email, 'System'), 'COMMITMENT_' || p_action, 'COMMITMENT', v_commitment.id, v_commitment.commitment_number, to_jsonb(v_old), to_jsonb(v_commitment), jsonb_build_object('transaction_type', v_type, 'amount', v_amount, 'old_amount', v_previous, 'new_amount', v_new, 'reason', p_reason, 'reference', p_reference, 'financial_position_before', v_position_before, 'financial_position_after', v_position_after), NULL);
   RETURN jsonb_build_object('commitment', to_jsonb(v_commitment), 'financial_position_before', v_position_before, 'financial_position_after', v_position_after);
 END;
-$function$
+$function$;
 CREATE OR REPLACE FUNCTION public.njss_transition_ff3(p_ff3_id uuid, p_action text, p_comments text DEFAULT NULL::text, p_user_email text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
-AS $function$
+AS $function$;
 DECLARE
   v_ff3 public.ff3_headers%ROWTYPE;
   v_old public.ff3_headers%ROWTYPE;
@@ -539,7 +539,7 @@ BEGIN
     'financial_position_after', v_budget_result
   );
 END;
-$function$
+$function$;
 
 REVOKE ALL ON FUNCTION public.njss_adjust_commitment(uuid,text,numeric,text,text,text) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.njss_adjust_commitment(uuid,text,numeric,text,text,text) TO authenticated;
