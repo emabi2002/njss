@@ -8,6 +8,11 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
+  // Public release metadata only. Credentials must never be put in this object.
+  env: {
+    NEXT_PUBLIC_COMMIT_SHA: process.env.COMMIT_REF?.trim() || process.env.VERCEL_GIT_COMMIT_SHA?.trim() || process.env.NEXT_PUBLIC_COMMIT_SHA?.trim() || process.env.COMMIT_SHA?.trim() || 'Not Available',
+    NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),
+  },
   images: {
     remotePatterns: [
       {
