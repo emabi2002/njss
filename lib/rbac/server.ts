@@ -53,7 +53,7 @@ export async function getServerAccessContext(request: NextRequest, response: Nex
 
   const { data: profile } = await supabase
     .from('users')
-    .select('id, auth_user_id, email, full_name, department_id, section_id, is_active, user_roles(role:roles(id, name, description, data_scope_type))')
+    .select('id, auth_user_id, email, full_name, department_id, section_id, is_active, must_change_password, user_roles(role:roles(id, name, description, data_scope_type))')
     .or(`auth_user_id.eq.${user.id},email.eq.${user.email || ''}`)
     .eq('is_active', true)
     .limit(1)
@@ -95,6 +95,7 @@ export async function getServerAccessContext(request: NextRequest, response: Nex
   }
 
   return {
+    mustChangePassword: typeof profile.must_change_password === 'boolean' ? profile.must_change_password : null,
     userId: profile.id,
     authUserId: profile.auth_user_id,
     email: profile.email || user.email || '',
@@ -109,12 +110,12 @@ export async function getServerAccessContext(request: NextRequest, response: Nex
 }
 
 export function hasServerPermission(context: UserAccessContext | null, permission: PermissionCode) {
-  if (!context) return false
+  if (!context || context.mustChangePassword !== false) return false
   return context.permissions.includes('all') || context.permissions.includes(permission)
 }
 
 export function hasAnyServerPermission(context: UserAccessContext | null, permissions: PermissionCode[]) {
-  if (!context) return false
+  if (!context || context.mustChangePassword !== false) return false
   if (!permissions.length) return false
   return context.permissions.includes('all') || permissions.some((permission) => context.permissions.includes(permission))
 }
@@ -161,6 +162,10 @@ export async function guardDashboardRoute(request: NextRequest) {
     loginUrl.searchParams.set('redirect', request.nextUrl.pathname)
     return NextResponse.redirect(loginUrl)
   }
+
+  if (context.mustChangePassword === true) return NextResponse.redirect(new URL('/set-password', request.url))
+  if (context.mustChangePassword !== false) return NextResponse.json({ error: 'Password status unavailable' }, { status: 503 })
+  if (request.nextUrl.pathname === '/dashboard/no-access') return response
 
   const isAiReportingRoute = /^\/dashboard\/reports\/ai($|\/)/.test(request.nextUrl.pathname)
   const required = isAiReportingRoute ? [AI_REPORT_PERMISSION] : getRoutePermissions(request.nextUrl.pathname)

@@ -23,7 +23,10 @@ export async function GET(request: NextRequest) {
     .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ mustChangePassword: Boolean(data?.must_change_password) })
+  if (!data || typeof data.must_change_password !== 'boolean') {
+    return NextResponse.json({ error: 'Password status unavailable' }, { status: 503 })
+  }
+  return NextResponse.json({ mustChangePassword: data.must_change_password })
 }
 
 /**
