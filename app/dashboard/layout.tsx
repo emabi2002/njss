@@ -61,7 +61,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const pathname = usePathname()
   const router = useRouter()
-  const { user, profile, role, loading, signOut, menus, modules, mustChangePassword } = useAuth()
+  const { user, profile, role, loading, signOut, menus, modules, accessReady, mustChangePassword, refreshPasswordState } = useAuth()
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login")
@@ -196,12 +196,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setExpandedGroups((current) => ({ ...current, [code]: !current[code] }))
   }
 
-  if (loading || !user || mustChangePassword === true) {
+  if (loading || !user || !accessReady || mustChangePassword !== false) {
     return (
       <div className="min-h-screen bg-[#F6F8FB] flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin text-[#132A44] mx-auto" />
-          <p className="mt-2 text-sm text-slate-600">Loading...</p>
+          <p className="mt-2 text-sm text-slate-600">Checking account access...</p>
+          {!loading && user && mustChangePassword === null && (
+            <div className="mt-4 space-x-4">
+              <button onClick={() => void refreshPasswordState()} className="text-sm underline">Retry access check</button>
+              <button onClick={() => void signOut()} className="text-sm underline">Sign out</button>
+            </div>
+          )}
         </div>
       </div>
     )

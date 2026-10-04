@@ -135,6 +135,16 @@ jobs:
         env:
           NJSS_TEST_DATABASE_URL: postgresql://postgres:njss-ci-only@127.0.0.1:5432/njss_rpc_test
         run: node scripts/client-table-privileges-runtime.test.mjs
+      - name: Dashboard and operations access runtime checks
+        run: |
+          bun scripts/dashboard-access-runtime.test.mjs
+          bun scripts/operations-access-runtime.test.mjs
+          bun scripts/server-password-access-runtime.test.mjs
+      - name: Division budget ledger and Registrar review checks
+        run: |
+          node scripts/division-budget-ledger-hierarchy.test.mjs
+          node scripts/division-budget-ledger-groups.test.mjs
+          node scripts/division-budget-registrar-review.test.mjs
       - name: Lint
         run: bun run lint
       - name: Typecheck

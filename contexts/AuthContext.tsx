@@ -1,10 +1,11 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type { AuthUser } from '@/lib/auth'
 import { authFetch } from '@/lib/auth-fetch'
+import { readPasswordState } from '@/lib/rbac/dashboard-access'
 import type { Permission } from '@/lib/permissions'
 import type { RbacDataScope, RbacMenuItem, RbacModule } from '@/lib/rbac/types'
 import {
@@ -127,44 +128,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [accessReady, setAccessReady] = useState(false)
   const [mustChangePassword, setMustChangePassword] = useState<boolean | null>(null)
+  const passwordRequest = useRef(0)
+  const accessRequest = useRef(0)
 
   const loadPasswordState = async () => {
-    try {
-      const res = await authFetch('/api/account/password')
-      if (!res.ok) {
-        setMustChangePassword(false)
-        return
-      }
-      const json = await res.json()
-      setMustChangePassword(Boolean(json.mustChangePassword))
-    } catch {
-      // Never block the session on this check.
-      setMustChangePassword(false)
-    }
+    const requestId = ++passwordRequest.current
+    setMustChangePassword(null)
+    const state = await readPasswordState(() => authFetch('/api/account/password'))
+    if (requestId === passwordRequest.current) setMustChangePassword(state)
   }
 
   useEffect(() => {
     let mounted = true
 
     const loadAccessContext = async (authUser: User, fallbackEmail: string) => {
+      const requestId = ++accessRequest.current
       setAccessReady(false)
       try {
         const access = await fetchServerAccess(authUser, fallbackEmail)
-        if (!mounted) return
+        if (!mounted || requestId !== accessRequest.current) return
         setProfile(access.profile)
         setPermissions(access.permissions)
         setScopes(access.scopes)
         setMenus(access.menus || [])
         setModules(access.modules || [])
       } catch (error) {
-        if (!mounted) return
+        if (!mounted || requestId !== accessRequest.current) return
         console.warn('Server RBAC access load failed:', error)
         setPermissions([])
         setScopes([])
         setMenus([])
         setModules([])
       } finally {
-        if (mounted) setAccessReady(true)
+        if (mounted && requestId === accessRequest.current) setAccessReady(true)
       }
     }
 
@@ -176,6 +172,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (session?.user) {
         setAccessReady(false)
+        setMustChangePassword(null)
         setUser(session.user)
         setMenus([])
         setModules([])
@@ -193,6 +190,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         )
         loadPasswordState().catch((error) => console.warn('Password state load failed:', error))
       } else {
+        ++passwordRequest.current
+        ++accessRequest.current
         setUser(null)
         setProfile(null)
         setPermissions([])
@@ -212,6 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (session?.user) {
         setAccessReady(false)
+        setMustChangePassword(null)
         setUser(session.user)
         setMenus([])
         setModules([])
@@ -229,6 +229,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         )
         loadPasswordState().catch((error) => console.warn('Password state load failed:', error))
       } else {
+        ++passwordRequest.current
+        ++accessRequest.current
         setUser(null)
         setProfile(null)
         setPermissions([])
@@ -268,6 +270,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     )
 
   const handleSignOut = async () => {
+    ++passwordRequest.current
+    ++accessRequest.current
     try {
       if (profile) {
         await logAccessEvent({
@@ -295,9 +299,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshProfile = async () => {
     if (!user) return
 
+    const requestId = ++accessRequest.current
     setAccessReady(false)
     try {
       const access = await fetchServerAccess(user, user.email || '')
+      if (requestId !== accessRequest.current) return
       setProfile(access.profile)
       setPermissions(access.permissions)
       setScopes(access.scopes)
@@ -305,12 +311,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setModules(access.modules || [])
     } catch (error) {
       console.warn('Server RBAC refresh failed:', error)
+      if (requestId !== accessRequest.current) return
       setPermissions([])
       setScopes([])
       setMenus([])
       setModules([])
     } finally {
-      setAccessReady(true)
+      if (requestId === accessRequest.current) setAccessReady(true)
     }
   }
 

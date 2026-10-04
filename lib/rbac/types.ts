@@ -75,6 +75,7 @@ export type RbacRole = {
 }
 
 export type UserAccessContext = {
+  mustChangePassword?: boolean | null
   userId: string
   authUserId?: string | null
   email: string

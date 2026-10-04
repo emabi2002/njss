@@ -4,7 +4,7 @@ import { createRequestSupabaseClient, requirePermission } from '@/lib/rbac/serve
 import { createServerSupabaseClient } from '@/lib/supabase'
 import { loadLiveProviderCosts, type LiveCostProviderResult } from '@/lib/operations/live-costs'
 
-const ADMIN_PERMISSIONS = ['dashboard.view', 'operations.view', 'operations.manage', 'settings.manage', 'users.manage', 'audit.view', 'all']
+const ADMIN_PERMISSIONS = [ 'operations.view', 'operations.manage', 'settings.manage', 'users.manage', 'audit.view', 'all']
 const PENDING_FF3 = ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD', 'RETURNED']
 const PENDING_FF4 = ['SUBMITTED', 'VERIFIED', 'APPROVED', 'PROCESSED']
 
