@@ -114,12 +114,13 @@ async function authorize(req: Request, admin: SupabaseClient): Promise<AppContex
   const authUser = authData.user;
   const { data: profile, error: profileError } = await admin
     .from("users")
-    .select("id,auth_user_id,email,full_name,is_active")
+    .select("id,auth_user_id,email,full_name,is_active,must_change_password")
     .or(`auth_user_id.eq.${authUser.id},email.eq.${authUser.email || ""}`)
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
   if (profileError || !profile) return fail("NJSS profile not found", 403);
+  if (profile.must_change_password !== false) return fail("Password change required", 403);
 
   const { data: roleRows, error: roleError } = await admin
     .from("user_roles")

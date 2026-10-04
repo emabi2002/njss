@@ -5,7 +5,7 @@ import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type { AuthUser } from '@/lib/auth'
 import { authFetch } from '@/lib/auth-fetch'
-import { readPasswordState } from '@/lib/rbac/dashboard-access'
+import { readPasswordState, shouldReloadAuthSession } from '@/lib/rbac/dashboard-access'
 import type { Permission } from '@/lib/permissions'
 import type { RbacDataScope, RbacMenuItem, RbacModule } from '@/lib/rbac/types'
 import {
@@ -140,6 +140,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true
+    let identity: string | null = null
+    let authEventVersion = 0
 
     const loadAccessContext = async (authUser: User, fallbackEmail: string) => {
       const requestId = ++accessRequest.current
@@ -165,10 +167,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     async function loadSession() {
+      const startedAtVersion = authEventVersion
       const {
         data: { session },
       } = await supabase.auth.getSession()
-      if (!mounted) return
+      if (!mounted || startedAtVersion !== authEventVersion) return
+      if (!shouldReloadAuthSession(identity, session?.user.id ?? null, 'INITIAL_SESSION')) return
+      identity = session?.user.id ?? null
 
       if (session?.user) {
         setAccessReady(false)
@@ -206,8 +211,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     loadSession()
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
+      ++authEventVersion
+      const nextIdentity = session?.user.id ?? null
+      if (!shouldReloadAuthSession(identity, nextIdentity, event)) {
+        setUser(session?.user ?? null)
+        return
+      }
+      identity = nextIdentity
 
       if (session?.user) {
         setAccessReady(false)

@@ -26,3 +26,9 @@ export async function readPasswordState(fetchState: () => Promise<Response>): Pr
     return null
   }
 }
+
+/** Routine events for an established identity must not remount unsaved forms. */
+export function shouldReloadAuthSession(previousId: string | null, nextId: string | null, event: string) {
+  if (nextId === null || previousId !== nextId) return true
+  return !['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED'].includes(event)
+}

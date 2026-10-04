@@ -13,22 +13,22 @@ This record supersedes the uploaded management review's repository-state finding
 
 ## Fixes in this consolidation
 
-1. Dashboard children now wait for resolved access and confirmed password status, with per-navigation route checks and an explicit no-access route. Failed/malformed password checks stay unknown and allow retry/sign-out; they never become successful checks. Server permission helpers also refuse first-login or unknown password state. Stale asynchronous access/password responses cannot overwrite newer session checks.
+1. Dashboard children now wait for resolved access and confirmed password status, with per-navigation route checks and an explicit no-access route. Failed/malformed password checks stay unknown and allow retry/sign-out; they never become successful checks. Server permission helpers and all three privileged administration/backup Edge authorizers also refuse first-login or unknown password state. Stale asynchronous access/password responses cannot overwrite newer session checks. Routine same-identity INITIAL_SESSION/SIGNED_IN/TOKEN_REFRESHED events preserve established authorization so unsaved forms remain mounted; identity changes and account updates restart checks.
 2. Technical operations routes and summary no longer accept ordinary `dashboard.view`. Route permissions include the actual Head Office capture/review permissions and explicit Organisation Setup, notifications and AI reporting rules.
 3. Netlify had `SUPBASE_SERVICE_ROLE_KEY` instead of `SUPABASE_SERVICE_ROLE_KEY`. The correctly named secret was installed in server function/runtime scopes; no key was added to source or public configuration.
 4. Provincial operational choices were retired reversibly: 189 active divisions, 387 sections, 27 locations and one provincial UAT account deactivated. Private archive holds 604 before-state flags. Post-check: zero active provincial divisions/sections/users, one active registry, all 15 current Head Office budgets preserved. Financial records, FK links, authentication identities and geographic reference rows were retained.
-5. Ten client-readable legacy views bypassed caller RLS. A no-identity authenticated-role probe returned five budget submission rows before the fix. They now use `security_invoker=true`; the same probe and all ten view probes return zero rows. Administrator probes continue to read permitted records. Fresh security advisors show zero ERROR findings.
+5. Ten client-readable legacy views bypassed caller RLS. A no-identity authenticated-role probe returned five budget submission rows before the fix. They now use `security_invoker=true`; the same probe and all ten view probes return zero rows. Administrator and all five business-role probes continue to read permitted records. Fresh security advisors show zero ERROR findings.
 6. Four previously applied reset/archive SQL sources were recovered from #54 without merging its outdated application files. The September 30 reset checkpoint remains historical: the current database has since been populated with a 2027 PREPARATION cycle and 15 Head Office division budgets.
-7. Obsolete national/duplicate PRs #22, #23, #39, #41, #42, #43, #44, #45 and #48 were closed, retaining branches/history.
+7. Obsolete national/duplicate PRs #22, #23, #39, #41, #42, #43, #44, #45, #48 and #54 were closed, retaining branches/history.
 
 ## Applied migration reconciliation
 
 | Source file | Live version/name | Evidence |
 | --- | --- | --- |
-| `20261004215106_head_office_uat_operational_scope.sql` | `20261004215333 head_office_uat_operational_scope` | Rollback-only rehearsal returned zero provincial choices; separate post-rollback query confirmed no persisted change. Apply succeeded; invariants and private archive verified. |
-| `20261004215537_uat_view_invoker_hardening.sql` | Query live ledger for final managed version | Definitions/grants preserved; no-identity denial and administrator read probes passed. No RLS-disabled public tables. |
+| `20261004215333_head_office_uat_operational_scope.sql` | `20261004215333 head_office_uat_operational_scope` | Rollback-only rehearsal returned zero provincial choices; separate post-rollback query confirmed no persisted change. Apply succeeded; invariants and private archive verified. |
+| `20261004215730_uat_view_invoker_hardening.sql` | `20261004215730 uat_view_invoker_hardening` | Definitions/grants preserved; no-identity denial and administrator read probes passed. No RLS-disabled public tables. |
 
-Source timestamp versus managed application timestamp is recorded deliberately; do not infer execution from filenames alone or rewrite already-applied history. Recovered September 30 archive versions already exist in the live ledger and must not be rerun against the current budgets.
+The new source filenames now match the exact versions assigned by the managed migration API and confirmed in the live ledger; source SQL bodies are unchanged. Use the managed migration API for deployment; do not replay already-applied versions. Recovered September 30 archive versions already exist in the live ledger and must not be rerun against the current budgets.
 
 ## Verification and limits
 

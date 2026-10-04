@@ -76,11 +76,11 @@ async function resolveActor(admin: SupabaseClient, token: string): Promise<Actor
 
   const { data: profile, error: profileError } = await admin
     .from("users")
-    .select("id,email,full_name,is_active")
+    .select("id,email,full_name,is_active,must_change_password")
     .eq("auth_user_id", authData.user.id)
     .eq("is_active", true)
     .maybeSingle();
-  if (profileError || !profile) return null;
+  if (profileError || !profile || profile.must_change_password !== false) return null;
 
   const { data: userRoles, error: roleError } = await admin
     .from("user_roles")
