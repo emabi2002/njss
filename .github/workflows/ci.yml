@@ -138,6 +138,8 @@ jobs:
       - name: Dashboard and operations access runtime checks
         run: |
           bun scripts/dashboard-access-runtime.test.mjs
+          bun scripts/dashboard-landing-runtime.test.mjs
+          bun scripts/dashboard-landing-guard-runtime.test.mjs
           bun scripts/auth-session-events-runtime.test.mjs
           bun scripts/dashboard-navigation-runtime.test.mjs
           bun scripts/operations-access-runtime.test.mjs
