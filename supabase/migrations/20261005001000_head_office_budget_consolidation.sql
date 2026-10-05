@@ -1,5 +1,289 @@
 -- Retire legacy operational budgets without deleting financial identities or audit history.
 -- Only the annual Head Office model provides approved spending limits.
+CREATE OR REPLACE FUNCTION public.njss_calculate_ff3_budget(p_financial_year integer, p_department_id uuid, p_section_id uuid, p_expense_ledger_id uuid, p_cost_centre_id uuid, p_amount numeric)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_cycle_id uuid;
+  v_division_budget_id uuid;
+  v_position_exists boolean := false;
+  v_original numeric := 0;
+  v_supplementary numeric := 0;
+  v_realloc_in numeric := 0;
+  v_realloc_out numeric := 0;
+  v_current numeric := 0;
+  v_commitments numeric := 0;
+  v_actuals numeric := 0;
+  v_available numeric := 0;
+  v_shortfall numeric := 0;
+  v_mapping_count integer := 0;
+  v_specific_count integer := 0;
+  v_status text := 'NOT_CHECKED';
+BEGIN
+  IF p_financial_year IS NULL OR p_department_id IS NULL OR p_section_id IS NULL OR p_expense_ledger_id IS NULL THEN
+    RAISE EXCEPTION 'Financial Year, Division, Section and Ledger are required for FF3 budget evaluation';
+  END IF;
+  IF COALESCE(p_amount, 0) <= 0 THEN
+    RAISE EXCEPTION 'FF3 amount must be greater than zero';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.sections s
+    WHERE s.id = p_section_id
+      AND s.department_id = p_department_id
+      AND COALESCE(s.is_active, true) = true
+  ) THEN
+    RAISE EXCEPTION 'Selected Section does not belong to the FF3 Division';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.expense_ledger el
+    WHERE el.id = p_expense_ledger_id
+      AND el.is_active = true
+      AND el.is_posting = true
+  ) THEN
+    RAISE EXCEPTION 'Selected Ledger is not an active posting ledger';
+  END IF;
+
+  SELECT c.id, db.id
+    INTO v_cycle_id, v_division_budget_id
+  FROM public.annual_budget_cycles c
+  JOIN public.division_budgets db ON db.annual_budget_cycle_id = c.id
+  WHERE c.financial_year = p_financial_year
+    AND c.status = 'ACTIVE'
+    AND db.financial_year = p_financial_year
+    AND db.division_id = p_department_id
+    AND db.status = 'LOCKED'
+  LIMIT 1;
+
+  IF v_cycle_id IS NULL OR v_division_budget_id IS NULL THEN
+    RETURN jsonb_build_object(
+      'status', 'NO_ACTIVE_BUDGET',
+      'position_exists', false,
+      'financial_year', p_financial_year,
+      'department_id', p_department_id,
+      'section_id', p_section_id,
+      'expense_ledger_id', p_expense_ledger_id,
+      'requested', p_amount,
+      'original_budget', 0,
+      'supplementary_adjustments', 0,
+      'reallocations_in', 0,
+      'reallocations_out', 0,
+      'current_approved_budget', 0,
+      'outstanding_commitments', 0,
+      'actual_expenditure', 0,
+      'available_budget', 0,
+      'shortfall', p_amount,
+      'posting_mapping_count', 0
+    );
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.division_budget_lines l
+    WHERE l.division_budget_id = v_division_budget_id
+      AND l.section_id = p_section_id
+      AND l.expense_ledger_id = p_expense_ledger_id
+    UNION ALL
+    SELECT 1
+    FROM public.budget_supplementary_adjustments sa
+    WHERE sa.annual_budget_cycle_id = v_cycle_id
+      AND sa.division_budget_id = v_division_budget_id
+      AND sa.section_id = p_section_id
+      AND sa.expense_ledger_id = p_expense_ledger_id
+      AND sa.status = 'POSTED'
+    UNION ALL
+    SELECT 1
+    FROM public.budget_reallocations br
+    WHERE br.annual_budget_cycle_id = v_cycle_id
+      AND br.status = 'EXECUTED'
+      AND (
+        (br.source_division_budget_id = v_division_budget_id
+         AND br.source_section_id = p_section_id
+         AND br.source_expense_ledger_id = p_expense_ledger_id)
+        OR
+        (br.destination_division_budget_id = v_division_budget_id
+         AND br.destination_section_id = p_section_id
+         AND br.destination_expense_ledger_id = p_expense_ledger_id)
+      )
+    LIMIT 1
+  ) INTO v_position_exists;
+
+  IF NOT v_position_exists THEN
+    RETURN jsonb_build_object(
+      'status', 'NO_ACTIVE_BUDGET',
+      'position_exists', false,
+      'annual_budget_cycle_id', v_cycle_id,
+      'division_budget_id', v_division_budget_id,
+      'financial_year', p_financial_year,
+      'department_id', p_department_id,
+      'section_id', p_section_id,
+      'expense_ledger_id', p_expense_ledger_id,
+      'requested', p_amount,
+      'original_budget', 0,
+      'supplementary_adjustments', 0,
+      'reallocations_in', 0,
+      'reallocations_out', 0,
+      'current_approved_budget', 0,
+      'outstanding_commitments', 0,
+      'actual_expenditure', 0,
+      'available_budget', 0,
+      'shortfall', p_amount,
+      'posting_mapping_count', 0
+    );
+  END IF;
+
+  SELECT COALESCE(SUM(l.original_amount), 0)
+    INTO v_original
+  FROM public.division_budget_lines l
+  WHERE l.division_budget_id = v_division_budget_id
+    AND l.section_id = p_section_id
+    AND l.expense_ledger_id = p_expense_ledger_id;
+
+  SELECT COALESCE(SUM(sa.adjustment_amount), 0)
+    INTO v_supplementary
+  FROM public.budget_supplementary_adjustments sa
+  WHERE sa.annual_budget_cycle_id = v_cycle_id
+    AND sa.division_budget_id = v_division_budget_id
+    AND sa.section_id = p_section_id
+    AND sa.expense_ledger_id = p_expense_ledger_id
+    AND sa.status = 'POSTED';
+
+  SELECT COALESCE(SUM(br.transfer_amount), 0)
+    INTO v_realloc_in
+  FROM public.budget_reallocations br
+  WHERE br.annual_budget_cycle_id = v_cycle_id
+    AND br.destination_division_budget_id = v_division_budget_id
+    AND br.destination_section_id = p_section_id
+    AND br.destination_expense_ledger_id = p_expense_ledger_id
+    AND br.status = 'EXECUTED';
+
+  SELECT COALESCE(SUM(br.transfer_amount), 0)
+    INTO v_realloc_out
+  FROM public.budget_reallocations br
+  WHERE br.annual_budget_cycle_id = v_cycle_id
+    AND br.source_division_budget_id = v_division_budget_id
+    AND br.source_section_id = p_section_id
+    AND br.source_expense_ledger_id = p_expense_ledger_id
+    AND br.status = 'EXECUTED';
+
+  v_current := v_original + v_supplementary + v_realloc_in - v_realloc_out;
+
+  SELECT COALESCE(SUM(COALESCE(fc.outstanding_amount, fc.remaining_balance, 0)), 0)
+    INTO v_commitments
+  FROM public.ff3_commitments fc
+  JOIN public.budget_allocations ba ON ba.id = fc.budget_allocation_id
+  LEFT JOIN public.ff3_headers posted_ff3 ON posted_ff3.id=fc.ff3_header_id
+  WHERE fc.financial_year = p_financial_year
+    AND COALESCE(fc.status, '') NOT IN ('CANCELLED', 'CLOSED', 'REVERSED')
+    AND ba.financial_year = p_financial_year
+    AND ba.department_id = p_department_id
+    AND ba.section_id = p_section_id
+    AND (
+      -- Recorded annual Ledger identity survives technical mapping changes.
+      (posted_ff3.expense_ledger_id=p_expense_ledger_id
+        AND posted_ff3.financial_year=p_financial_year
+        AND posted_ff3.department_id=p_department_id AND posted_ff3.section_id=p_section_id)
+      OR (posted_ff3.expense_ledger_id IS NULL AND EXISTS (
+        SELECT 1 FROM public.finance_posting_mappings fpm
+        WHERE fpm.expense_code_registry_id=ba.expense_code_registry_id
+          AND fpm.expense_ledger_id=p_expense_ledger_id
+          AND fpm.department_id=p_department_id AND fpm.section_id=p_section_id
+          AND fpm.is_active=true AND (fpm.financial_year=p_financial_year OR fpm.financial_year IS NULL)
+      ))
+    );
+
+  SELECT COALESCE(SUM(
+      CASE WHEN upper(COALESCE(pt.transaction_type, '')) = 'REVERSAL'
+           THEN -abs(pt.amount) ELSE pt.amount END
+    ), 0)
+    INTO v_actuals
+  FROM public.payment_transactions pt
+  JOIN public.budget_allocations ba ON ba.id = pt.budget_allocation_id
+  LEFT JOIN public.ff3_commitments posted_commitment ON posted_commitment.id=pt.commitment_id
+  LEFT JOIN public.ff3_headers posted_ff3 ON posted_ff3.id=posted_commitment.ff3_header_id
+  WHERE pt.financial_year = p_financial_year
+    AND pt.status IN ('POSTED', 'RECONCILED')
+    AND ba.financial_year = p_financial_year
+    AND ba.department_id = p_department_id
+    AND ba.section_id = p_section_id
+    AND (
+      -- Recorded annual Ledger identity survives technical mapping changes.
+      (posted_ff3.expense_ledger_id=p_expense_ledger_id
+        AND posted_ff3.financial_year=p_financial_year
+        AND posted_ff3.department_id=p_department_id AND posted_ff3.section_id=p_section_id)
+      OR (posted_ff3.expense_ledger_id IS NULL AND EXISTS (
+        SELECT 1 FROM public.finance_posting_mappings fpm
+        WHERE fpm.expense_code_registry_id=ba.expense_code_registry_id
+          AND fpm.expense_ledger_id=p_expense_ledger_id
+          AND fpm.department_id=p_department_id AND fpm.section_id=p_section_id
+          AND fpm.is_active=true AND (fpm.financial_year=p_financial_year OR fpm.financial_year IS NULL)
+      ))
+    );
+
+  v_available := v_current - v_commitments - v_actuals;
+  v_shortfall := GREATEST(COALESCE(p_amount, 0) - v_available, 0);
+
+  SELECT COUNT(*)
+    INTO v_specific_count
+  FROM public.finance_posting_mappings fpm
+  WHERE fpm.financial_year = p_financial_year
+    AND fpm.expense_ledger_id = p_expense_ledger_id
+    AND fpm.department_id = p_department_id
+    AND fpm.section_id = p_section_id
+    AND fpm.is_active = true
+    AND (p_cost_centre_id IS NULL OR fpm.cost_centre_id = p_cost_centre_id);
+
+  IF v_specific_count > 0 THEN
+    v_mapping_count := v_specific_count;
+  ELSE
+    SELECT COUNT(*)
+      INTO v_mapping_count
+    FROM public.finance_posting_mappings fpm
+    WHERE fpm.financial_year IS NULL
+      AND fpm.expense_ledger_id = p_expense_ledger_id
+      AND fpm.department_id = p_department_id
+      AND fpm.section_id = p_section_id
+      AND fpm.is_active = true
+      AND (p_cost_centre_id IS NULL OR fpm.cost_centre_id = p_cost_centre_id);
+  END IF;
+
+  IF COALESCE(p_amount, 0) > v_available + 0.001 THEN
+    v_status := 'INSUFFICIENT_BUDGET_BLOCKED';
+  ELSIF v_mapping_count <> 1 THEN
+    v_status := 'POSTING_MAPPING_REQUIRED';
+  ELSE
+    v_status := 'SUFFICIENT';
+  END IF;
+
+  RETURN jsonb_build_object(
+    'status', v_status,
+    'position_exists', true,
+    'annual_budget_cycle_id', v_cycle_id,
+    'division_budget_id', v_division_budget_id,
+    'financial_year', p_financial_year,
+    'department_id', p_department_id,
+    'section_id', p_section_id,
+    'expense_ledger_id', p_expense_ledger_id,
+    'requested', p_amount,
+    'original_budget', v_original,
+    'supplementary_adjustments', v_supplementary,
+    'reallocations_in', v_realloc_in,
+    'reallocations_out', v_realloc_out,
+    'current_approved_budget', v_current,
+    'outstanding_commitments', v_commitments,
+    'actual_expenditure', v_actuals,
+    'available_budget', v_available,
+    'shortfall', v_shortfall,
+    'posting_mapping_count', v_mapping_count
+  );
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.njss_calculate_ff3_budget(integer,uuid,uuid,uuid,uuid,numeric) FROM PUBLIC,anon,authenticated;
+
 CREATE OR REPLACE FUNCTION public.get_current_budget_position(
  p_financial_year integer, p_division_id uuid DEFAULT NULL,
  p_section_id uuid DEFAULT NULL, p_expense_ledger_id uuid DEFAULT NULL
@@ -122,6 +406,9 @@ UPDATE public.menu_items SET is_active=false,updated_at=now()
 UPDATE public.menu_items SET label='Annual Budget',
  required_permissions=ARRAY['budget.view','budget.capture','budget.registrar.approve','budget.documents.manage']::varchar[],
  updated_at=now() WHERE code='budget.template';
+UPDATE public.menu_items SET label='Annual Activation',
+ required_permissions=ARRAY['budget.view','budget.activate','budget.documents.manage']::varchar[],
+ updated_at=now() WHERE code='budget.activation';
 UPDATE public.menu_items SET label='Budget Position',
  required_permissions=ARRAY['budget.view']::varchar[],updated_at=now() WHERE code='budget.control';
 
@@ -559,3 +846,47 @@ REVOKE ALL ON FUNCTION public.njss_adjust_commitment(uuid,text,numeric,text,text
 GRANT EXECUTE ON FUNCTION public.njss_adjust_commitment(uuid,text,numeric,text,text,text) TO authenticated;
 REVOKE ALL ON FUNCTION public.njss_transition_ff3(uuid,text,text,text) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.njss_transition_ff3(uuid,text,text,text) TO authenticated;
+
+-- Storage reads must follow the same registered-document scope as table reads.
+DROP POLICY IF EXISTS budget_documents_head_office_storage_scope ON storage.objects;
+CREATE POLICY budget_documents_head_office_storage_scope ON storage.objects AS RESTRICTIVE
+FOR SELECT TO authenticated USING(bucket_id<>'njss-budget-documents' OR EXISTS(
+ SELECT 1 FROM public.budget_documents d WHERE d.storage_bucket=bucket_id AND d.storage_path=name));
+
+-- Posted financial dimensions are an audit identity, not editable form fields.
+CREATE OR REPLACE FUNCTION public.njss_guard_committed_ff3_budget_key()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp
+AS $guard$
+BEGIN
+ IF EXISTS(SELECT 1 FROM public.ff3_commitments c WHERE c.ff3_header_id=OLD.id) THEN
+   IF TG_OP='DELETE' THEN
+     RAISE EXCEPTION 'Committed FF3 annual budget identity cannot be changed or deleted';
+   ELSIF (NEW.financial_year,NEW.department_id,NEW.section_id,NEW.expense_ledger_id)
+     IS DISTINCT FROM (OLD.financial_year,OLD.department_id,OLD.section_id,OLD.expense_ledger_id) THEN
+     RAISE EXCEPTION 'Committed FF3 annual budget identity cannot be changed or deleted';
+   END IF;
+ END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+ RETURN NEW;
+END;
+$guard$;
+REVOKE ALL ON FUNCTION public.njss_guard_committed_ff3_budget_key() FROM PUBLIC,anon,authenticated;
+DROP TRIGGER IF EXISTS njss_guard_committed_ff3_budget_key ON public.ff3_headers;
+CREATE TRIGGER njss_guard_committed_ff3_budget_key BEFORE UPDATE OR DELETE ON public.ff3_headers
+FOR EACH ROW EXECUTE FUNCTION public.njss_guard_committed_ff3_budget_key();
+
+CREATE OR REPLACE FUNCTION public.njss_guard_commitment_posting_identity()
+RETURNS trigger LANGUAGE plpgsql SET search_path=public,pg_temp
+AS $guard$
+BEGIN
+ IF (NEW.ff3_header_id,NEW.budget_allocation_id,NEW.financial_year)
+   IS DISTINCT FROM (OLD.ff3_header_id,OLD.budget_allocation_id,OLD.financial_year) THEN
+   RAISE EXCEPTION 'Commitment financial posting identity cannot be changed';
+ END IF;
+ RETURN NEW;
+END;
+$guard$;
+REVOKE ALL ON FUNCTION public.njss_guard_commitment_posting_identity() FROM PUBLIC,anon,authenticated;
+DROP TRIGGER IF EXISTS njss_guard_commitment_posting_identity ON public.ff3_commitments;
+CREATE TRIGGER njss_guard_commitment_posting_identity BEFORE UPDATE ON public.ff3_commitments
+FOR EACH ROW EXECUTE FUNCTION public.njss_guard_commitment_posting_identity();

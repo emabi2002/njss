@@ -29,7 +29,9 @@ try {
   await client.query('BEGIN')
   await client.query(`
     CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
-    CREATE SCHEMA auth;
+    CREATE SCHEMA auth; CREATE SCHEMA storage;
+    CREATE TABLE storage.objects(bucket_id text,name text);
+    GRANT USAGE ON SCHEMA storage TO authenticated;
     GRANT USAGE ON SCHEMA public,auth TO authenticated,anon;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
       SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
@@ -46,13 +48,13 @@ try {
     CREATE TABLE annual_budget_cycles(id uuid,financial_year integer,status text);
     CREATE TABLE division_budgets(id uuid,annual_budget_cycle_id uuid,financial_year integer,division_id uuid,status text);
     CREATE TABLE division_budget_lines(division_budget_id uuid,section_id uuid,expense_ledger_id uuid,original_amount numeric);
-    CREATE TABLE budget_documents(id uuid,division_budget_id uuid);
+    CREATE TABLE budget_documents(id uuid,division_budget_id uuid,storage_bucket text,storage_path text);
     CREATE TABLE budget_supplementary_adjustments(annual_budget_cycle_id uuid,financial_year integer,division_budget_id uuid,section_id uuid,expense_ledger_id uuid,status text,adjustment_amount numeric);
     CREATE TABLE budget_reallocations(annual_budget_cycle_id uuid,financial_year integer,source_division_budget_id uuid,source_section_id uuid,source_expense_ledger_id uuid,destination_division_budget_id uuid,destination_section_id uuid,destination_expense_ledger_id uuid,status text,transfer_amount numeric);
     CREATE TABLE budget_allocations(id uuid,financial_year integer,department_id uuid,section_id uuid,cost_centre_id uuid,expense_code_registry_id uuid,account_id uuid,funding_source_id uuid,source_module text,is_active boolean,original_budget numeric);
     CREATE TABLE ff3_headers(id uuid,financial_year integer,department_id uuid,section_id uuid,expense_ledger_id uuid,cost_centre_id uuid,status text,total_estimated_amount numeric);
     CREATE TABLE ff3_commitments(id uuid,budget_allocation_id uuid,financial_year integer,status text,outstanding_amount numeric,remaining_balance numeric);
-    CREATE TABLE payment_transactions(id uuid,budget_allocation_id uuid,financial_year integer,status text,transaction_type text,amount numeric);
+    CREATE TABLE payment_transactions(id uuid,budget_allocation_id uuid,financial_year integer,status text,transaction_type text,amount numeric,commitment_id uuid);
     CREATE TABLE finance_posting_mappings(financial_year integer,expense_ledger_id uuid,department_id uuid,section_id uuid,expense_code_registry_id uuid,is_active boolean,cost_centre_id uuid);
     CREATE TABLE menu_items(code text,is_active boolean,updated_at timestamptz,label text,required_permissions varchar[]);
     CREATE TABLE role_permissions(permission text,is_allowed boolean);
@@ -101,9 +103,11 @@ try {
   // NULL-year mappings are valid, and duplicate applicable mappings must never duplicate spend.
   await client.query('INSERT INTO finance_posting_mappings VALUES (null,$1,$2,$3,$4,true,$5),(2027,$1,$2,$3,$4,true,$5)', [id(30),id(10),id(20),id(80),id(70)])
   await client.query("INSERT INTO ff3_commitments(id,budget_allocation_id,financial_year,status,outstanding_amount,remaining_balance) VALUES ($1,$4,2027,'COMMITTED',200,null),($2,$4,2027,'REVERSED',400,null),($3,$4,2027,'CLOSED',500,null)", [id(90),id(91),id(92),id(60)])
-  await client.query("INSERT INTO payment_transactions VALUES ($1,$4,2027,'POSTED','PAYMENT',150),($2,$4,2027,'POSTED','REVERSAL',50),($3,$4,2027,'DRAFT','PAYMENT',600)", [id(100),id(101),id(102),id(60)])
+  await client.query("INSERT INTO payment_transactions(id,budget_allocation_id,financial_year,status,transaction_type,amount) VALUES ($1,$4,2027,'POSTED','PAYMENT',150),($2,$4,2027,'POSTED','REVERSAL',50),($3,$4,2027,'DRAFT','PAYMENT',600)", [id(100),id(101),id(102),id(60)])
   await client.query(`
-    GRANT SELECT ON division_budgets,division_budget_lines,budget_documents TO authenticated;
+    GRANT SELECT ON division_budgets,division_budget_lines,budget_documents,storage.objects TO authenticated;
+    ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY fixture_storage_read ON storage.objects FOR SELECT TO authenticated USING(true);
     ALTER TABLE division_budgets ENABLE ROW LEVEL SECURITY;
     ALTER TABLE division_budget_lines ENABLE ROW LEVEL SECURITY;
     ALTER TABLE budget_documents ENABLE ROW LEVEL SECURITY;
@@ -112,8 +116,11 @@ try {
     CREATE POLICY fixture_document_read ON budget_documents FOR SELECT TO authenticated USING(true);
   `)
   await client.query('INSERT INTO ff3_headers(id,financial_year,department_id,section_id,expense_ledger_id,cost_centre_id,status,total_estimated_amount) VALUES ($1,2027,$2,$3,$4,$5,$6,200)',[id(110),id(10),id(20),id(30),id(70),'COMMITTED'])
+  await client.query('UPDATE payment_transactions SET commitment_id=$1',[id(90)])
   await client.query('UPDATE ff3_commitments SET ff3_header_id=$1,current_committed_amount=200,committed_amount=200,paid_amount=0,commitment_number=$2 WHERE id=$3',[id(110),'CMT-1',id(90)])
   await client.query('INSERT INTO commitment_transactions(commitment_id,transaction_type,amount) VALUES ($1,$2,200)',[id(90),'ORIGINAL_COMMITMENT'])
+  await client.query('INSERT INTO budget_documents VALUES ($1,$2,$3,$4),($5,$6,$3,$7)',[id(120),id(50),'njss-budget-documents','division-a.pdf',id(121),id(51),'division-b.pdf'])
+  await client.query("INSERT INTO storage.objects VALUES ('njss-budget-documents','division-a.pdf'),('njss-budget-documents','division-b.pdf')")
   await client.query(migration)
   await client.query("select set_config('request.jwt.claim.sub',$1,true),set_config('test.allowed','true',true),set_config('test.scope','all',true)", [id(1)])
   await client.query('SET LOCAL ROLE authenticated')
@@ -135,16 +142,22 @@ try {
   await client.query('RESET ROLE')
   await client.query('UPDATE finance_posting_mappings SET is_active=false')
   await client.query('SET LOCAL ROLE authenticated')
+  assert.equal(Number((await client.query('select available_budget from get_current_budget_position(2027,$1,$2,$3)',[id(10),id(20),id(30)])).rows[0].available_budget),750,'technical mapping changes cannot erase annual commitments or actual expenditure')
   await denial('select njss_adjust_commitment($1,$2,$3,$4)',[id(90),'INCREASE',1,'inactive mapping'],/Valid annual financial posting linkage/)
   await client.query('RESET ROLE')
-  await client.query('UPDATE finance_posting_mappings SET is_active=true')
-  await client.query('UPDATE ff3_headers SET expense_ledger_id=null WHERE id=$1',[id(110)])
+  await client.query('UPDATE finance_posting_mappings SET is_active=true,expense_code_registry_id=$1',[id(81)])
   await client.query('SET LOCAL ROLE authenticated')
-  await denial('select njss_adjust_commitment($1,$2,$3,$4)',[id(90),'INCREASE',1,'legacy'],/active annual Head Office budget/)
-  await denial('select njss_transition_ff3($1,$2)',[id(110),'APPROVE'],/Legacy budget workflow is retired/)
+  await denial('select njss_adjust_commitment($1,$2,$3,$4)',[id(90),'INCREASE',1,'replaced mapping'],/Valid annual financial posting linkage/)
   await client.query('RESET ROLE')
-  await client.query('UPDATE ff3_headers SET expense_ledger_id=$1 WHERE id=$2',[id(30),id(110)])
+  await client.query('UPDATE finance_posting_mappings SET expense_code_registry_id=$1',[id(80)])
+  await denial('UPDATE ff3_headers SET expense_ledger_id=null WHERE id=$1',[id(110)],/Committed FF3 annual budget identity/)
+  await denial('DELETE FROM ff3_headers WHERE id=$1',[id(110)],/Committed FF3 annual budget identity/)
+  await denial('UPDATE ff3_commitments SET budget_allocation_id=$1 WHERE id=$2',[id(61),id(90)],/Commitment financial posting identity/)
+  await client.query('INSERT INTO ff3_headers(id,financial_year,department_id,section_id,status) VALUES ($1,2027,$2,$3,$4)',[id(111),id(10),id(20),'APPROVED'])
+  await client.query('INSERT INTO ff3_commitments(id,ff3_header_id,budget_allocation_id,financial_year,status) VALUES ($1,$2,$3,2027,$4)',[id(93),id(111),id(60),'ACTIVE'])
   await client.query('SET LOCAL ROLE authenticated')
+  await denial('select njss_adjust_commitment($1,$2,$3,$4)',[id(93),'INCREASE',1,'legacy'],/active annual Head Office budget/)
+  await denial('select njss_transition_ff3($1,$2)',[id(111),'APPROVE'],/Legacy budget workflow is retired/)
   await denial('select njss_create_budget_release(1)')
   await denial('insert into quarterly_releases values (1)')
   await denial('update budget_allocations set original_budget=1')
@@ -154,6 +167,7 @@ try {
   await client.query("select set_config('test.scope',$1,true)", [id(11)])
   assert.equal((await client.query('select * from division_budgets')).rows.length,1, 'drafts are scoped at RLS')
   assert.equal((await client.query('select * from division_budget_lines')).rows.length,1, 'draft lines are scoped at RLS')
+  assert.equal((await client.query('select * from storage.objects')).rows.length,1,'document storage reads follow scoped registered documents')
   assert.equal((await client.query('select * from get_current_budget_position(2027)')).rows.length,1)
   assert.equal((await client.query('select * from get_current_budget_position(2027,$1)',[id(10)])).rows.length,0,'explicit filters cannot bypass scope')
   await client.query("select set_config('test.scope',$1,true)",[id(20)])

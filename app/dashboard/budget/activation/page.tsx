@@ -14,6 +14,7 @@ import {
   Upload,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
+import { supabase } from "@/lib/supabase"
 import {
   activateAnnualBudget,
   getAnnualBudgetActivationAuthorities,
@@ -43,8 +44,9 @@ const EMPTY_DASHBOARD: HeadOfficeBudgetDashboard = {
 }
 
 export default function AnnualBudgetActivationPage() {
-  const { can } = useAuth()
+  const { can, loading: authLoading } = useAuth()
   const [financialYear, setFinancialYear] = useState(new Date().getFullYear())
+  const [yearReady, setYearReady] = useState(false)
   const [dashboard, setDashboard] = useState<HeadOfficeBudgetDashboard>(EMPTY_DASHBOARD)
   const [authorities, setAuthorities] = useState<BudgetDocument[]>([])
   const [selectedAuthorityId, setSelectedAuthorityId] = useState<string | null>(null)
@@ -70,7 +72,34 @@ export default function AnnualBudgetActivationPage() {
     [dashboard.divisions],
   )
 
+  useEffect(() => {
+    if (authLoading || !canView || yearReady) return
+    let cancelled = false
+    async function discoverYear() {
+      const requested = Number(new URLSearchParams(window.location.search).get('financialYear'))
+      if (Number.isInteger(requested) && requested >= 2000 && requested <= 2200) {
+        if (!cancelled) { setFinancialYear(requested); setYearReady(true) }
+        return
+      }
+      const result = await supabase.from('annual_budget_cycles')
+        .select('financial_year, status').order('financial_year', { ascending: false })
+      if (cancelled) return
+      if (result.error) {
+        setMessage({ type: "err", text: "Could not select the annual budget year. Select a financial year to continue." })
+        setLoading(false)
+        return
+      }
+      const cycles = result.data || []
+      const preferred = cycles.find(cycle => cycle.status === 'ACTIVE') || cycles[0]
+      setFinancialYear(preferred?.financial_year ?? new Date().getFullYear())
+      setYearReady(true)
+    }
+    void discoverYear()
+    return () => { cancelled = true }
+  }, [authLoading, canView, yearReady])
+
   const loadWorkspace = useCallback(async () => {
+    if (authLoading || !canView || !yearReady) return
     setLoading(true)
     setMessage(null)
     try {
@@ -98,11 +127,11 @@ export default function AnnualBudgetActivationPage() {
     } finally {
       setLoading(false)
     }
-  }, [financialYear])
+  }, [authLoading, canView, financialYear, yearReady])
 
   useEffect(() => {
-    loadWorkspace()
-  }, [loadWorkspace])
+    if (!authLoading && canView && yearReady) void loadWorkspace()
+  }, [authLoading, canView, yearReady, loadWorkspace])
 
   const handleUploadAuthority = async () => {
     if (!cycle) {
@@ -258,7 +287,7 @@ export default function AnnualBudgetActivationPage() {
             min={2000}
             max={2200}
             value={financialYear}
-            onChange={(event) => setFinancialYear(Number(event.target.value))}
+            onChange={(event) => { const year = Number(event.target.value); if (Number.isInteger(year) && year >= 2000 && year <= 2200) { setFinancialYear(year); setYearReady(true) } }}
             className="w-36 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
           />
           <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${active ? "bg-emerald-100 text-emerald-700" : readyForActivation ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"}`}>
