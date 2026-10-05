@@ -20,7 +20,7 @@ export default function AiReportingPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900">AI Report Assistant</h1>
-              <p className="mt-1 text-sm text-slate-500">Natural-language reporting for NJSS budget, funding, FF3, FF4, suppliers and audit data.</p>
+              <p className="mt-1 text-sm text-slate-500">Natural-language reporting for FF3, FF4, suppliers and audit activity.</p>
             </div>
           </div>
         </div>
@@ -30,6 +30,10 @@ export default function AiReportingPage() {
         </div>
       </div>
 
+      <p className="mb-6 text-sm text-slate-600">
+        For approved annual Head Office budget and funding positions, use the{' '}
+        <Link href="/dashboard/reports" className="font-medium text-blue-700 underline">standard annual reports</Link>.
+      </p>
       <AiReportPanel />
     </main>
   )

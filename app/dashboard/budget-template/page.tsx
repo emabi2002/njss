@@ -59,7 +59,7 @@ export default function AnnualBudgetPage() {
       if (canCapture) await createOrGetHeadOfficeBudgetCycle(financialYear)
       const [next, locationResult] = await Promise.all([
         getHeadOfficeBudgetDashboard(financialYear),
-        supabase.from('court_locations').select('id').eq('code', 'NCD-WGN').single(),
+        supabase.from('court_locations').select('id').eq('code', 'NCD-WGN').eq('location_type', 'HEADQUARTERS').eq('is_active', true).single(),
       ])
       if (locationResult.error) throw locationResult.error
       const divisionResult = await supabase.from('departments').select('id, name')

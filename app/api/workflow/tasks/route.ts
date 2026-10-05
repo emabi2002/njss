@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { createRequestSupabaseClient, getServerAccessContext } from '@/lib/rbac/server'
+import { createRequestSupabaseClient, getServerAccessContext, hasServerPermission } from '@/lib/rbac/server'
+import { isRecordInScope } from '@/lib/rbac/scope'
 import { resolveManagementReportScope } from '@/lib/reports/management-scope'
 
 export const dynamic = 'force-dynamic'
@@ -123,9 +124,8 @@ type RawTask = {
   rule: TaskRule
 }
 
-type DepartmentLookup = { id: string; name: string; province_id: string | null }
+type DepartmentLookup = { id: string; name: string }
 type SectionLookup = { id: string; department_id: string | null; name: string }
-type ProvinceLookup = { id: string; name: string }
 
 function ageInfo(dateString: string) {
   const when = new Date(dateString)
@@ -164,11 +164,9 @@ function presentTask(
   task: RawTask,
   departments: Map<string, DepartmentLookup>,
   sections: Map<string, SectionLookup>,
-  provinces: Map<string, ProvinceLookup>,
 ) {
   const department = task.department_id ? departments.get(task.department_id) : undefined
   const section = task.section_id ? sections.get(task.section_id) : undefined
-  const province = department?.province_id ? provinces.get(department.province_id) : undefined
   return {
     id: `${task.sourceType}-${task.id}`,
     sourceId: task.id,
@@ -178,11 +176,9 @@ function presentTask(
     financialYear: task.financialYear,
     amount: task.amount,
     departmentId: task.department_id,
-    departmentName: department?.name || 'Unassigned Department',
+    departmentName: department?.name || 'Unassigned Division',
     sectionId: task.section_id,
     sectionName: task.sourceType === 'BUDGET' ? 'Division budget' : section?.name || 'Unassigned Section',
-    provinceId: province?.id || null,
-    provinceName: province?.name || 'Unassigned Province',
     action: task.rule.action,
     actionLabel: task.rule.actionLabel,
     summaryLabel: task.rule.summaryLabel,
@@ -197,13 +193,12 @@ function presentTask(
 export async function GET(request: NextRequest) {
   const context = await getServerAccessContext(request)
   if (!context) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
-  if (!hasPermission(context.permissions, 'workflow.tasks.view')) {
+  if (!hasServerPermission(context, 'workflow.tasks.view')) {
     return NextResponse.json({ error: 'Workflow task inbox access denied' }, { status: 403 })
   }
 
   const supabase = createRequestSupabaseClient(request)
   const summaryOnly = request.nextUrl.searchParams.get('summary') === '1'
-  const requestedProvinceId = request.nextUrl.searchParams.get('provinceId')?.trim() || ''
   const requestedDepartmentId = request.nextUrl.searchParams.get('departmentId')?.trim() || ''
   const requestedSectionId = request.nextUrl.searchParams.get('sectionId')?.trim() || ''
   const requestedType = request.nextUrl.searchParams.get('type')?.trim() || ''
@@ -214,56 +209,41 @@ export async function GET(request: NextRequest) {
     const scope = await resolveManagementReportScope(supabase, context)
     const isAdministrator = context.permissions.includes('all') || context.roleNames.includes('System Administrator')
 
-    let ff3Query = supabase
-      .from('ff3_headers')
-      .select('id, ff3_number, status, financial_year, department_id, section_id, created_by, requesting_officer_id, total_estimated_amount, updated_at')
-      .in('status', Object.keys(FF3_RULES))
-      .order('updated_at', { ascending: true })
-
-    let ff4Query = supabase
-      .from('ff4_headers')
-      .select('id, ff4_number, status, financial_year, department_id, section_id, created_by, net_amount, updated_at')
-      .in('status', Object.keys(FF4_RULES))
-      .order('updated_at', { ascending: true })
-
-    if (scope.mode === 'SECTION') {
-      ff3Query = ff3Query.eq('department_id', scope.departmentId).eq('section_id', scope.sectionId)
-      ff4Query = ff4Query.eq('department_id', scope.departmentId).eq('section_id', scope.sectionId)
-    }
-
-    const [ff3Result, ff4Result, budgetResult, provinceResult, locationResult, departmentResult, sectionResult] = await Promise.all([
-      ff3Query,
-      ff4Query,
-      hasPermission(context.permissions, 'budget.registrar.approve')
+    const departmentResult = await supabase.from('departments')
+      .select('id, name, court_location:court_locations!inner(location_type, is_active)')
+      .eq('is_active', true).eq('court_location.is_active', true)
+      .eq('court_location.location_type', 'HEADQUARTERS').order('name')
+    if (departmentResult.error) throw departmentResult.error
+    const departmentRows: DepartmentLookup[] = (departmentResult.data || []).filter((row) => scope.mode !== 'SECTION' || row.id === scope.departmentId)
+    const departmentIds = departmentRows.map((row) => row.id)
+    const sectionResult = departmentIds.length
+      ? await supabase.from('sections').select('id, department_id, name').eq('is_active', true).in('department_id', departmentIds).order('name')
+      : { data: [], error: null }
+    if (sectionResult.error) throw sectionResult.error
+    const sectionRows = ((sectionResult.data || []) as SectionLookup[]).filter((row) => scope.mode !== 'SECTION' || row.id === scope.sectionId)
+    const sectionIds = sectionRows.map((row) => row.id)
+    if (requestedDepartmentId && !departmentIds.includes(requestedDepartmentId)) return NextResponse.json({ error: 'Requested Division is outside your Head Office workflow scope.' }, { status: 403 })
+    if (requestedSectionId && !sectionIds.includes(requestedSectionId)) return NextResponse.json({ error: 'Requested Section is outside your Head Office workflow scope.' }, { status: 403 })
+    const [ff3Result, ff4Result, budgetResult] = await Promise.all([
+      sectionIds.length ? supabase.from('ff3_headers')
+        .select('id, ff3_number, status, financial_year, department_id, section_id, created_by, requesting_officer_id, total_estimated_amount, updated_at')
+        .in('status', Object.keys(FF3_RULES)).in('department_id', departmentIds).in('section_id', sectionIds).order('updated_at', { ascending: true })
+        : Promise.resolve({ data: [], error: null }),
+      sectionIds.length ? supabase.from('ff4_headers')
+        .select('id, ff4_number, status, financial_year, department_id, section_id, created_by, net_amount, updated_at')
+        .in('status', Object.keys(FF4_RULES)).in('department_id', departmentIds).in('section_id', sectionIds).order('updated_at', { ascending: true })
+        : Promise.resolve({ data: [], error: null }),
+      departmentIds.length && hasPermission(context.permissions, 'budget.registrar.approve')
         ? supabase.from('division_budgets')
           .select('id, financial_year, division_id, reference_number, status, updated_at, lines:division_budget_lines(original_amount)')
-          .eq('status', 'PENDING_REGISTRAR_APPROVAL').order('updated_at', { ascending: true })
+          .in('division_id', departmentIds).eq('status', 'PENDING_REGISTRAR_APPROVAL').order('updated_at', { ascending: true })
         : Promise.resolve({ data: [], error: null }),
-      supabase.from('provinces').select('id, name').eq('is_active', true).order('name'),
-      supabase.from('court_locations').select('id, province_id').eq('is_active', true),
-      supabase.from('departments').select('id, name, court_location_id').eq('is_active', true).order('name'),
-      supabase.from('sections').select('id, department_id, name').eq('is_active', true).order('name'),
     ])
-
     if (ff3Result.error) throw ff3Result.error
     if (ff4Result.error) throw ff4Result.error
     if (budgetResult.error) throw budgetResult.error
-    if (provinceResult.error) throw provinceResult.error
-    if (locationResult.error) throw locationResult.error
-    if (departmentResult.error) throw departmentResult.error
-    if (sectionResult.error) throw sectionResult.error
-
-    const provinceByLocation = new Map((locationResult.data || []).map((row) => [row.id, row.province_id as string | null]))
-    const departmentRows: DepartmentLookup[] = (departmentResult.data || []).map((row) => ({
-      id: row.id,
-      name: row.name,
-      province_id: row.court_location_id ? provinceByLocation.get(row.court_location_id) || null : null,
-    }))
-    const sectionRows = (sectionResult.data || []) as SectionLookup[]
-    const provinceRows = (provinceResult.data || []) as ProvinceLookup[]
     const departments = new Map(departmentRows.map((row) => [row.id, row]))
     const sections = new Map(sectionRows.map((row) => [row.id, row]))
-    const provinces = new Map(provinceRows.map((row) => [row.id, row]))
 
     const rawTasks: RawTask[] = [
       ...(ff3Result.data || []).map((row) => ({
@@ -311,24 +291,12 @@ export async function GET(request: NextRequest) {
       })),
     ]
 
-    let presented = rawTasks.map((task) => presentTask(task, departments, sections, provinces))
-
-    if (scope.mode === 'SECTION') {
-      const assignedProvinceId = scope.province?.id || ''
-      if (requestedProvinceId && requestedProvinceId !== assignedProvinceId) {
-        return NextResponse.json({ error: 'Requested Province is outside your workflow scope.' }, { status: 403 })
-      }
-      if (requestedDepartmentId && requestedDepartmentId !== scope.departmentId) {
-        return NextResponse.json({ error: 'Requested Department is outside your workflow scope.' }, { status: 403 })
-      }
-      if (requestedSectionId && requestedSectionId !== scope.sectionId) {
-        return NextResponse.json({ error: 'Requested Section is outside your workflow scope.' }, { status: 403 })
-      }
-    } else {
-      if (requestedProvinceId) presented = presented.filter((task) => task.provinceId === requestedProvinceId)
-      if (requestedDepartmentId) presented = presented.filter((task) => task.departmentId === requestedDepartmentId)
-      if (requestedSectionId) presented = presented.filter((task) => task.sectionId === requestedSectionId)
-    }
+    const scopedTasks = rawTasks.filter((task) => departmentIds.includes(task.department_id || '')
+      && (task.sourceType === 'BUDGET' || sectionIds.includes(task.section_id || ''))
+      && isRecordInScope(context, { ...task, division_id: task.department_id }))
+    let presented = scopedTasks.map((task) => presentTask(task, departments, sections))
+    if (requestedDepartmentId) presented = presented.filter((task) => task.departmentId === requestedDepartmentId)
+    if (requestedSectionId) presented = presented.filter((task) => task.sectionId === requestedSectionId)
 
     if (requestedType) presented = presented.filter((task) => task.sourceType === requestedType)
     if (requestedStage) presented = presented.filter((task) => task.status === requestedStage)
@@ -348,7 +316,7 @@ export async function GET(request: NextRequest) {
     if (summaryOnly) {
       return NextResponse.json({
         isAdministrator,
-        scope: { mode: scope.mode, label: scope.label },
+        scope: { mode: scope.mode === 'SYSTEM' ? 'HEAD_OFFICE' : 'SECTION', label: scope.label },
         actionRequiredTotal: actionRequired.length,
         systemWideTotal: systemWide.length,
         actionSummary,
@@ -356,27 +324,16 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const authorisedProvinces = scope.mode === 'SECTION' && scope.province
-      ? provinceRows.filter((row) => row.id === scope.province?.id)
-      : provinceRows
-    const authorisedDepartments = scope.mode === 'SECTION'
-      ? departmentRows.filter((row) => row.id === scope.departmentId)
-      : departmentRows
-    const authorisedSections = scope.mode === 'SECTION'
-      ? sectionRows.filter((row) => row.id === scope.sectionId)
-      : sectionRows
-
     return NextResponse.json({
       isAdministrator,
-      scope: { mode: scope.mode, label: scope.label },
+      scope: { mode: scope.mode === 'SYSTEM' ? 'HEAD_OFFICE' : 'SECTION', label: scope.label },
       actionRequired,
       systemWide,
       actionSummary,
       oversightSummary,
       lookups: {
-        provinces: authorisedProvinces,
-        departments: authorisedDepartments,
-        sections: authorisedSections,
+        departments: departmentRows,
+        sections: sectionRows,
       },
     })
   } catch (error) {

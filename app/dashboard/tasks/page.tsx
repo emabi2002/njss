@@ -13,8 +13,6 @@ type Task = {
   status: string
   financialYear: number
   amount: number
-  provinceId: string | null
-  provinceName: string
   departmentId: string | null
   departmentName: string
   sectionId: string | null
@@ -31,19 +29,18 @@ type Task = {
 }
 
 type Lookup = { id: string; name: string }
-type DepartmentLookup = Lookup & { province_id: string | null }
+type DepartmentLookup = Lookup
 type SectionLookup = Lookup & { department_id: string | null }
 type Summary = { label: string; count: number; sourceType: "FF3" | "FF4" | "BUDGET" }
 
 type InboxResponse = {
   isAdministrator: boolean
-  scope: { mode: "SYSTEM" | "SECTION"; label: string }
+  scope: { mode: "HEAD_OFFICE" | "SECTION"; label: string }
   actionRequired: Task[]
   systemWide: Task[]
   actionSummary: Summary[]
   oversightSummary: Summary[]
   lookups: {
-    provinces: Lookup[]
     departments: DepartmentLookup[]
     sections: SectionLookup[]
   }
@@ -56,7 +53,7 @@ const EMPTY: InboxResponse = {
   systemWide: [],
   actionSummary: [],
   oversightSummary: [],
-  lookups: { provinces: [], departments: [], sections: [] },
+  lookups: { departments: [], sections: [] },
 }
 
 const AGE_OPTIONS = [
@@ -83,7 +80,6 @@ export default function WorkflowTasksPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [tab, setTab] = useState<"action" | "system">("action")
-  const [provinceId, setProvinceId] = useState("")
   const [departmentId, setDepartmentId] = useState("")
   const [sectionId, setSectionId] = useState("")
   const [workflowType, setWorkflowType] = useState("")
@@ -116,10 +112,7 @@ export default function WorkflowTasksPage() {
     void loadTasks()
   }, [loadTasks])
 
-  const departments = useMemo(
-    () => data.lookups.departments.filter((item) => !provinceId || item.province_id === provinceId),
-    [data.lookups.departments, provinceId],
-  )
+  const departments = data.lookups.departments
   const sections = useMemo(
     () => data.lookups.sections.filter((item) => !departmentId || item.department_id === departmentId),
     [data.lookups.sections, departmentId],
@@ -130,17 +123,16 @@ export default function WorkflowTasksPage() {
   const visibleTasks = useMemo(() => {
     const term = search.trim().toLowerCase()
     return tasks.filter((task) => {
-      if (provinceId && task.provinceId !== provinceId) return false
       if (departmentId && task.departmentId !== departmentId) return false
       if (sectionId && task.sectionId !== sectionId) return false
       if (workflowType && task.sourceType !== workflowType) return false
       if (stage && task.status !== stage) return false
       if (age && task.ageBucket !== age) return false
-      if (term && ![task.referenceNumber, task.actionLabel, task.departmentName, task.sectionName, task.provinceName, task.status]
+      if (term && ![task.referenceNumber, task.actionLabel, task.departmentName, task.sectionName, task.status]
         .some((value) => value.toLowerCase().includes(term))) return false
       return true
     })
-  }, [tasks, provinceId, departmentId, sectionId, workflowType, stage, age, search])
+  }, [tasks, departmentId, sectionId, workflowType, stage, age, search])
 
   const availableStages = useMemo(
     () => Array.from(new Set(tasks.map((task) => task.status))).sort(),
@@ -171,7 +163,7 @@ export default function WorkflowTasksPage() {
             Action Required by Me ({data.actionRequired.length})
           </button>
           <button onClick={() => setTab("system")} className={`rounded-md px-4 py-2 text-sm font-semibold ${tab === "system" ? "bg-[#132A44] text-white" : "text-slate-600 hover:bg-slate-50"}`}>
-            System-wide Pending Work ({data.systemWide.length})
+            Head Office Pending Work ({data.systemWide.length})
           </button>
         </div>
       )}
@@ -191,14 +183,9 @@ export default function WorkflowTasksPage() {
       <div className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700"><Filter className="h-4 w-4" /> Filter Tasks</div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <label className="text-xs font-medium text-slate-600">Province
-            <select value={provinceId} disabled={data.scope.mode === "SECTION"} onChange={(e) => { setProvinceId(e.target.value); setDepartmentId(""); setSectionId("") }} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100">
-              <option value="">All Provinces</option>{data.lookups.provinces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
-          <label className="text-xs font-medium text-slate-600">Department
+          <label className="text-xs font-medium text-slate-600">Division
             <select value={departmentId} disabled={data.scope.mode === "SECTION"} onChange={(e) => { setDepartmentId(e.target.value); setSectionId("") }} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100">
-              <option value="">All Departments</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              <option value="">All Head Office Divisions</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
           <label className="text-xs font-medium text-slate-600">Section
@@ -222,7 +209,7 @@ export default function WorkflowTasksPage() {
             </select>
           </label>
           <label className="text-xs font-medium text-slate-600 md:col-span-2">Search
-            <div className="relative mt-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Budget, FF3/FF4 number, location, status or action" className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm" /></div>
+            <div className="relative mt-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Budget, FF3/FF4 number, division, status or action" className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm" /></div>
           </label>
         </div>
       </div>
@@ -231,7 +218,7 @@ export default function WorkflowTasksPage() {
 
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
-          <h2 className="font-semibold text-slate-900">{tab === "system" ? "System-wide Pending Work" : "Action Required by Me"}</h2>
+          <h2 className="font-semibold text-slate-900">{tab === "system" ? "Head Office Pending Work" : "Action Required by Me"}</h2>
           <span className="text-sm text-slate-500">{visibleTasks.length} task{visibleTasks.length === 1 ? "" : "s"}</span>
         </div>
         {loading ? (
@@ -251,7 +238,7 @@ export default function WorkflowTasksPage() {
                       <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${ageClass(task.ageBucket)}`}><Clock3 className="mr-1 inline h-3 w-3" />{task.ageLabel}</span>
                     </div>
                     <p className="mt-2 text-sm font-semibold text-[#8A1420]">{task.actionLabel}</p>
-                    <p className="mt-1 text-sm text-slate-600">{task.provinceName} › {task.departmentName} › {task.sectionName}</p>
+                    <p className="mt-1 text-sm text-slate-600">{task.departmentName} › {task.sectionName}</p>
                     <p className="mt-1 text-xs text-slate-500">Responsible role: {task.responsibleRole} • FY{task.financialYear} • Waiting since {new Date(task.waitingSince).toLocaleString("en-GB")}</p>
                   </div>
                   <div className="flex items-center gap-4 lg:text-right">

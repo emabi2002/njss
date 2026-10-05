@@ -28,7 +28,7 @@ export async function resolveManagementReportScope(
   if (hasSystemWideScope(context)) {
     return {
       mode: 'SYSTEM',
-      label: 'National Judiciary — All Provinces & Court Locations',
+      label: 'Head Office — All Divisions & Sections',
       departmentId: null,
       sectionId: null,
       province: null,
@@ -45,12 +45,12 @@ export async function resolveManagementReportScope(
   const [sectionResult, departmentResult] = await Promise.all([
     supabase
       .from('sections')
-      .select('id, name, department_id')
+      .select('id, name, department_id').eq('is_active', true)
       .eq('id', context.sectionId)
       .maybeSingle(),
     supabase
       .from('departments')
-      .select('id, name, court_location_id')
+      .select('id, name, court_location_id').eq('is_active', true)
       .eq('id', context.departmentId)
       .maybeSingle(),
   ])
@@ -64,39 +64,20 @@ export async function resolveManagementReportScope(
     throw new Error('Assigned reporting Section is not valid for the assigned Department.')
   }
 
-  let courtLocation: { id: string; name: string; province_id: string | null } | null = null
-  let province: { id: string; name: string } | null = null
-
-  if (department.court_location_id) {
-    const locationResult = await supabase
-      .from('court_locations')
-      .select('id, name, province_id')
-      .eq('id', department.court_location_id)
-      .maybeSingle()
-    if (locationResult.error) throw locationResult.error
-    courtLocation = locationResult.data
-
-    if (courtLocation?.province_id) {
-      const provinceResult = await supabase
-        .from('provinces')
-        .select('id, name')
-        .eq('id', courtLocation.province_id)
-        .maybeSingle()
-      if (provinceResult.error) throw provinceResult.error
-      province = provinceResult.data
-    }
-  }
-
-  const label = [province?.name, courtLocation?.name, department.name, section.name]
-    .filter(Boolean)
-    .join(' › ')
+  const locationResult = await supabase.from('court_locations')
+    .select('id, name').eq('id', department.court_location_id || '')
+    .eq('location_type', 'HEADQUARTERS').eq('is_active', true).maybeSingle()
+  if (locationResult.error) throw locationResult.error
+  const courtLocation = locationResult.data
+  if (!courtLocation) throw new Error('Reporting assignment is outside active Head Office scope.')
+  const label = ['Head Office', department.name, section.name].join(' › ')
 
   return {
     mode: 'SECTION',
     label: label || `${department.name} › ${section.name}`,
     departmentId: department.id,
     sectionId: section.id,
-    province: province ? { id: province.id, name: province.name } : null,
+    province: null,
     courtLocation: courtLocation ? { id: courtLocation.id, name: courtLocation.name } : null,
     department: { id: department.id, name: department.name },
     section: { id: section.id, name: section.name },

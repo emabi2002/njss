@@ -10,7 +10,6 @@ import {
   FileText,
   Layers,
   MapPin,
-  TrendingUp,
   Wallet,
 } from "lucide-react"
 import Link from "next/link"
@@ -30,16 +29,13 @@ import {
 } from "recharts"
 
 type BudgetSummary = {
+  originalBudget: number
+  supplementaryAdjustments: number
+  netReallocations: number
   approvedBudget: number
-  fundedAmount: number
-  releasedAmount: number
-  pendingFF3: number
   outstandingCommitments: number
   actualExpenditure: number
   availableBalance: number
-  unfundedBudget: number
-  unreleasedFunding: number
-  projectedAvailableAfterPending: number
 }
 
 type PendingFF3 = {
@@ -52,12 +48,6 @@ type PendingFF3 = {
   daysWaiting?: number
 }
 
-type QuarterlyData = {
-  quarter: string
-  released: number
-  spent: number
-}
-
 type CentreSpend = {
   name: string
   approved: number
@@ -66,11 +56,10 @@ type CentreSpend = {
 
 type BudgetPreparationStats = {
   draft: number
-  submitted: number
+  pendingApproval: number
   returned: number
-  reviewed: number
-  approved: number
-  approvedValue: number
+  locked: number
+  draftOriginalValue: number
 }
 
 type DashboardStats = {
@@ -82,21 +71,14 @@ type DashboardStats = {
   reconciled?: number
 }
 
-type DashboardScope = {
-  mode: "NATIONAL" | "SECTION"
-  label: string
-  province: { id: string; name: string } | null
-  courtLocation: { id: string; name: string } | null
-  department: { id: string; name: string } | null
-  section: { id: string; name: string } | null
-}
+type DashboardScope = { mode: "HEAD_OFFICE" | "SECTION"; label: string }
 
 type DashboardPayload = {
   financialYear: number
   availableFinancialYears: number[]
   scope: DashboardScope
   summary: BudgetSummary
-  quarterlyData: QuarterlyData[]
+  cycleStatus: string | null
   centreSpend: CentreSpend[]
   budgetPrepStats: BudgetPreparationStats
   pendingFF3s: PendingFF3[]
@@ -113,31 +95,12 @@ const COLORS = {
 
 const PIE_COLORS = ["#15803d", "#d4af37", "#8a1420", "#cbd5e1"]
 
-const EMPTY_SUMMARY: BudgetSummary = {
-  approvedBudget: 0,
-  fundedAmount: 0,
-  releasedAmount: 0,
-  pendingFF3: 0,
-  outstandingCommitments: 0,
-  actualExpenditure: 0,
-  availableBalance: 0,
-  unfundedBudget: 0,
-  unreleasedFunding: 0,
-  projectedAvailableAfterPending: 0,
-}
-
-const EMPTY_BUDGET_PREP: BudgetPreparationStats = {
-  draft: 0,
-  submitted: 0,
-  returned: 0,
-  reviewed: 0,
-  approved: 0,
-  approvedValue: 0,
-}
+const EMPTY_SUMMARY: BudgetSummary = { originalBudget: 0, supplementaryAdjustments: 0, netReallocations: 0, approvedBudget: 0, outstandingCommitments: 0, actualExpenditure: 0, availableBalance: 0 }
+const EMPTY_BUDGET_PREP: BudgetPreparationStats = { draft: 0, pendingApproval: 0, returned: 0, locked: 0, draftOriginalValue: 0 }
 
 export default function DashboardPage() {
   const currentYear = new Date().getFullYear()
-  const [selectedFinancialYear, setSelectedFinancialYear] = useState(currentYear)
+  const [selectedFinancialYear, setSelectedFinancialYear] = useState<number | null>(null)
   const [availableFinancialYears, setAvailableFinancialYears] = useState<number[]>([currentYear])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -146,12 +109,7 @@ export default function DashboardPage() {
   const [pendingFF3s, setPendingFF3s] = useState<PendingFF3[]>([])
   const [ff3Stats, setFf3Stats] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 })
   const [ff4Stats, setFf4Stats] = useState({ total: 0, pending: 0, paid: 0, reconciled: 0 })
-  const [quarterlyData, setQuarterlyData] = useState<QuarterlyData[]>([
-    { quarter: "Q1", released: 0, spent: 0 },
-    { quarter: "Q2", released: 0, spent: 0 },
-    { quarter: "Q3", released: 0, spent: 0 },
-    { quarter: "Q4", released: 0, spent: 0 },
-  ])
+  const [cycleStatus, setCycleStatus] = useState<string | null>(null)
   const [centreSpend, setCentreSpend] = useState<CentreSpend[]>([])
   const [budgetPrepStats, setBudgetPrepStats] = useState<BudgetPreparationStats>(EMPTY_BUDGET_PREP)
 
@@ -162,17 +120,18 @@ export default function DashboardPage() {
       setLoading(true)
       setError("")
       try {
-        const response = await authFetch(`/api/dashboard?financialYear=${selectedFinancialYear}`)
+        const response = await authFetch(selectedFinancialYear === null ? "/api/dashboard" : `/api/dashboard?financialYear=${selectedFinancialYear}`)
         const body = await response.json().catch(() => ({})) as DashboardPayload & { error?: string }
         if (!response.ok) {
           throw new Error(body.error || "Unable to load dashboard data")
         }
         if (cancelled) return
 
+        setSelectedFinancialYear(body.financialYear)
         setScope(body.scope)
-        setAvailableFinancialYears(body.availableFinancialYears?.length ? body.availableFinancialYears : [selectedFinancialYear])
+        setAvailableFinancialYears(body.availableFinancialYears?.length ? body.availableFinancialYears : [body.financialYear])
         setBudgetSummary(body.summary || EMPTY_SUMMARY)
-        setQuarterlyData(body.quarterlyData || [])
+        setCycleStatus(body.cycleStatus || null)
         setCentreSpend(body.centreSpend || [])
         setBudgetPrepStats(body.budgetPrepStats || EMPTY_BUDGET_PREP)
         setPendingFF3s(body.pendingFF3s || [])
@@ -198,7 +157,6 @@ export default function DashboardPage() {
     { name: "Available", value: budgetSummary.availableBalance },
     { name: "Outstanding Commitments", value: budgetSummary.outstandingCommitments },
     { name: "Actual Expenditure", value: budgetSummary.actualExpenditure },
-    { name: "Unreleased Funding", value: budgetSummary.unreleasedFunding },
   ].filter((item) => item.value > 0)
 
   const ff3PieData = [
@@ -235,7 +193,7 @@ export default function DashboardPage() {
           <label className="flex items-center gap-2">
             <span className="font-medium text-slate-700">Financial Year</span>
             <select
-              value={selectedFinancialYear}
+              value={selectedFinancialYear ?? ""}
               onChange={(event) => setSelectedFinancialYear(Number(event.target.value))}
               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-png-red"
             >
@@ -264,24 +222,24 @@ export default function DashboardPage() {
             </div>
           </div>
           <span className="self-start rounded-full border border-png-gold/60 bg-white px-3 py-1 text-xs font-semibold text-png-maroon sm:self-center">
-            {scope?.mode === "NATIONAL" ? "National View" : "Section View"}
+            {scope?.mode === "HEAD_OFFICE" ? "Head Office View" : "Section View"}
           </span>
         </div>
       </div>
 
+      {cycleStatus !== "ACTIVE" && <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">This annual budget is {cycleStatus ? cycleStatus.replace(/_/g, " ").toLowerCase() : "not yet created"}. Financial positions are shown only after activation.</div>}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="Approved Budget" value={`K ${budgetSummary.approvedBudget.toLocaleString()}`} subtitle="Authorised budget lines" icon={<Wallet className="h-5 w-5" />} tone="maroon" />
-        <MetricCard title="Funded Amount" value={`K ${budgetSummary.fundedAmount.toLocaleString()}`} subtitle={`${percentage(budgetSummary.fundedAmount, budgetSummary.approvedBudget).toFixed(0)}% of approved budget`} icon={<TrendingUp className="h-5 w-5" />} tone="gold" />
-        <MetricCard title="Released Amount" value={`K ${budgetSummary.releasedAmount.toLocaleString()}`} subtitle={`${percentage(budgetSummary.releasedAmount, budgetSummary.fundedAmount).toFixed(0)}% of funded amount`} icon={<CheckCircle2 className="h-5 w-5" />} tone="green" />
-        <MetricCard title="Pending FF3" value={`K ${budgetSummary.pendingFF3.toLocaleString()}`} subtitle="Awaiting workflow action" icon={<Clock className="h-5 w-5" />} tone="red" />
+        <MetricCard title="Current Approved Budget" value={`K ${budgetSummary.approvedBudget.toLocaleString()}`} subtitle="Active annual budget including approved changes" icon={<Wallet className="h-5 w-5" />} tone="maroon" />
+        <MetricCard title="Original Budget" value={`K ${budgetSummary.originalBudget.toLocaleString()}`} subtitle="Activated original annual budget" icon={<Layers className="h-5 w-5" />} tone="gold" />
+        <MetricCard title="Supplementary Adjustments" value={`K ${budgetSummary.supplementaryAdjustments.toLocaleString()}`} subtitle="Approved additions or reductions" icon={<Calculator className="h-5 w-5" />} tone="gold" />
+        <MetricCard title="Net Reallocations" value={`K ${budgetSummary.netReallocations.toLocaleString()}`} subtitle="Approved transfers in less transfers out" icon={<Layers className="h-5 w-5" />} tone="gold" />
         <MetricCard title="Outstanding Commitments" value={`K ${budgetSummary.outstandingCommitments.toLocaleString()}`} subtitle="Committed but unpaid" icon={<FileText className="h-5 w-5" />} tone="red" />
-        <MetricCard title="Actual Expenditure" value={`K ${budgetSummary.actualExpenditure.toLocaleString()}`} subtitle={`${percentage(budgetSummary.actualExpenditure, budgetSummary.releasedAmount).toFixed(1)}% of released amount`} icon={<DollarSign className="h-5 w-5" />} tone="maroon" />
-        <MetricCard title="Available Balance" value={`K ${budgetSummary.availableBalance.toLocaleString()}`} subtitle="Released less commitments and actuals" icon={<CheckCircle2 className="h-5 w-5" />} tone="green" />
-        <MetricCard title="Unfunded / Unreleased" value={`K ${(budgetSummary.unfundedBudget + budgetSummary.unreleasedFunding).toLocaleString()}`} subtitle={`Unfunded K ${budgetSummary.unfundedBudget.toLocaleString()} • Unreleased K ${budgetSummary.unreleasedFunding.toLocaleString()}`} icon={<Layers className="h-5 w-5" />} tone="gold" />
+        <MetricCard title="Actual Expenditure" value={`K ${budgetSummary.actualExpenditure.toLocaleString()}`} subtitle={`${percentage(budgetSummary.actualExpenditure, budgetSummary.approvedBudget).toFixed(1)}% of current approved budget`} icon={<DollarSign className="h-5 w-5" />} tone="maroon" />
+        <MetricCard title="Available Budget" value={`K ${budgetSummary.availableBalance.toLocaleString()}`} subtitle="Current approved less commitments and actuals" icon={<CheckCircle2 className="h-5 w-5" />} tone="green" />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title="Budget Allocation">
+      <div className="grid gap-6 lg:grid-cols-1">
+        <Panel title="Annual Budget Position">
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -295,45 +253,30 @@ export default function DashboardPage() {
           </div>
         </Panel>
 
-        <Panel title="Release, Commitment & Expenditure Position">
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={quarterlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="quarter" stroke="#64748b" />
-                <YAxis stroke="#64748b" tickFormatter={(value) => `K${(Number(value) / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(value) => `K ${Number(value).toLocaleString()}`} />
-                <Legend />
-                <Bar dataKey="released" name="Released" fill={COLORS.maroon} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="spent" name="Spent" fill={COLORS.gold} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900"><Calculator className="h-5 w-5 text-png-red" /> Budget Preparation</h2>
-            <Link href="/dashboard/budget-template" className="text-sm font-medium text-png-red hover:text-png-maroon">Open Grid →</Link>
+            <Link href="/dashboard/budget-template" className="text-sm font-medium text-png-red hover:text-png-maroon">Open Annual Budget →</Link>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <PlanStat label="Draft" value={budgetPrepStats.draft} tone="slate" />
-            <PlanStat label="Submitted" value={budgetPrepStats.submitted} tone="gold" />
+            <PlanStat label="Awaiting Registrar" value={budgetPrepStats.pendingApproval} tone="gold" />
             <PlanStat label="Returned" value={budgetPrepStats.returned} tone="gold" />
-            <PlanStat label="Reviewed" value={budgetPrepStats.reviewed} tone="slate" />
-            <PlanStat label="Approved" value={budgetPrepStats.approved} tone="green" />
+            <PlanStat label="Locked" value={budgetPrepStats.locked} tone="green" />
           </div>
           <div className="mt-4 rounded-lg border border-png-gold/30 bg-png-red/5 p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-png-red/70">Total Approved Budget</p>
-            <p className="mt-1 text-2xl font-bold text-png-maroon">K {budgetPrepStats.approvedValue.toLocaleString()}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-png-red/70">Draft / Returned Original Total</p>
+            <p className="mt-1 text-2xl font-bold text-png-maroon">K {budgetPrepStats.draftOriginalValue.toLocaleString()}</p>
+            <p className="mt-1 text-xs text-slate-600">Preparation amounts are not approved or available funds. Counts cover division budgets in this scope.</p>
           </div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-6 lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900"><Layers className="h-5 w-5 text-png-gold" /> Budget by Cost Centre</h2>
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900"><Layers className="h-5 w-5 text-png-gold" /> Annual Budget by Division</h2>
             <Link href="/dashboard/budget" className="text-sm font-medium text-png-red hover:text-png-maroon">Budget Control →</Link>
           </div>
           {centreSpend.length > 0 ? (
@@ -387,19 +330,6 @@ export default function DashboardPage() {
           ["Paid", ff4Stats.paid, "green"],
           ["Reconciled", ff4Stats.reconciled, "gold"],
         ]}>
-          {centreSpend.length > 0 && (
-            <div className="h-40">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={centreSpend} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis type="number" tickFormatter={(value) => `K${(Number(value) / 1000).toFixed(0)}k`} stroke="#64748b" />
-                  <YAxis type="category" dataKey="name" width={100} stroke="#64748b" fontSize={12} />
-                  <Tooltip formatter={(value) => `K ${Number(value).toLocaleString()}`} />
-                  <Bar dataKey="approved" name="Approved" fill={COLORS.gold} radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
         </WorkflowPanel>
       </div>
 
@@ -431,13 +361,11 @@ export default function DashboardPage() {
         <div className="rounded-lg border border-slate-200 bg-white p-6">
           <h2 className="mb-4 text-lg font-semibold text-slate-900">Available Balance Formula</h2>
           <div className="space-y-3">
-            <BalanceLine label="Released Amount" amount={budgetSummary.releasedAmount} />
-            <BalanceLine label="Less: Pending FF3" amount={-budgetSummary.pendingFF3} isNegative />
+            <BalanceLine label="Current Approved Budget" amount={budgetSummary.approvedBudget} />
             <BalanceLine label="Less: Outstanding Commitments" amount={-budgetSummary.outstandingCommitments} isNegative />
             <BalanceLine label="Less: Actual Expenditure" amount={-budgetSummary.actualExpenditure} isNegative />
             <div className="mt-3 border-t border-slate-200 pt-3">
               <BalanceLine label="Available Balance" amount={budgetSummary.availableBalance} isTotal />
-              <BalanceLine label="Projected After Pending FF3" amount={budgetSummary.projectedAvailableAfterPending} />
             </div>
           </div>
 
@@ -445,14 +373,14 @@ export default function DashboardPage() {
             <h3 className="mb-2 text-sm font-medium text-slate-700">Budget Utilization</h3>
             <div className="h-4 w-full overflow-hidden rounded-full bg-slate-200">
               <div className="flex h-full">
-                <div className="h-full bg-png-red" style={{ width: `${percentage(budgetSummary.actualExpenditure, budgetSummary.releasedAmount)}%` }} title="Spent" />
-                <div className="h-full bg-png-gold" style={{ width: `${percentage(budgetSummary.outstandingCommitments, budgetSummary.releasedAmount)}%` }} title="Committed" />
+                <div className="h-full bg-png-red" style={{ width: `${percentage(budgetSummary.actualExpenditure, budgetSummary.approvedBudget)}%` }} title="Spent" />
+                <div className="h-full bg-png-gold" style={{ width: `${percentage(budgetSummary.outstandingCommitments, budgetSummary.approvedBudget)}%` }} title="Committed" />
               </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-              <LegendKey color="bg-png-red" label={`Spent: ${percentage(budgetSummary.actualExpenditure, budgetSummary.releasedAmount).toFixed(1)}%`} />
-              <LegendKey color="bg-png-gold" label={`Committed: ${percentage(budgetSummary.outstandingCommitments, budgetSummary.releasedAmount).toFixed(1)}%`} />
-              <LegendKey color="bg-slate-300" label={`Available: ${percentage(budgetSummary.availableBalance, budgetSummary.releasedAmount).toFixed(1)}%`} />
+              <LegendKey color="bg-png-red" label={`Spent: ${percentage(budgetSummary.actualExpenditure, budgetSummary.approvedBudget).toFixed(1)}%`} />
+              <LegendKey color="bg-png-gold" label={`Committed: ${percentage(budgetSummary.outstandingCommitments, budgetSummary.approvedBudget).toFixed(1)}%`} />
+              <LegendKey color="bg-slate-300" label={`Available: ${percentage(budgetSummary.availableBalance, budgetSummary.approvedBudget).toFixed(1)}%`} />
             </div>
           </div>
         </div>
@@ -506,7 +434,7 @@ function WorkflowPanel({ title, href, stats, children }: {
   title: string
   href: string
   stats: Array<[string, number, "slate" | "gold" | "green" | "red"]>
-  children: React.ReactNode
+  children?: React.ReactNode
 }) {
   const classes = {
     slate: "bg-slate-50 text-slate-900",
@@ -534,7 +462,7 @@ function BalanceLine({ label, amount, isNegative = false, isTotal = false }: {
   return (
     <div className={`flex items-center justify-between ${isTotal ? "text-lg font-bold" : ""}`}>
       <span className={isTotal ? "text-slate-900" : "text-slate-700"}>{label}</span>
-      <span className={isTotal ? "text-green-700" : isNegative ? "text-red-600" : "text-slate-900"}>K {Math.abs(amount).toLocaleString()}</span>
+      <span className={isTotal ? "text-green-700" : isNegative ? "text-red-600" : "text-slate-900"}>K {amount.toLocaleString()}</span>
     </div>
   )
 }

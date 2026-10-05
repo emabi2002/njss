@@ -39,11 +39,14 @@ export type ManagementReportResponse = {
   appliedFilters: Record<string, string | null>
   columns: ManagementReportColumn[]
   rows: ManagementReportRow[]
+  budgetCycle?: { id: string; financial_year: number; status: string } | null
+  budgetNotice?: string | null
   totals?: Record<string, number>
   lookups: {
     provinces: Array<{ id: string; name: string }>
     departments: Array<{ id: string; name: string; province_id: string | null }>
     sections: Array<{ id: string; department_id: string | null; name: string }>
+    ledgers?: Array<{ id: string; ledger_number: string; standard_description: string }>
   }
 }
 
@@ -102,7 +105,7 @@ export default function ManagementReportPreview({
   if (!response) return null
 
   const filteredSystemReport = response.scope.mode === 'SYSTEM'
-    && Boolean(response.appliedFilters.provinceId || response.appliedFilters.departmentId || response.appliedFilters.sectionId)
+    && Boolean(response.appliedFilters.departmentId || response.appliedFilters.sectionId)
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
@@ -125,7 +128,7 @@ export default function ManagementReportPreview({
             <p className="mt-1 text-sm text-slate-500">Financial Year {response.financialYear}</p>
           </div>
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${response.scope.mode === 'SYSTEM' ? 'bg-png-red/10 text-png-red' : 'bg-png-gold/20 text-png-maroon'}`}>
-            {response.scope.mode === 'SECTION' ? 'Section Report' : filteredSystemReport ? 'Filtered Consolidated Report' : 'System-wide Report'}
+            {response.scope.mode === 'SECTION' ? 'Section Report' : filteredSystemReport ? 'Filtered Consolidated Report' : 'Head Office Report'}
           </span>
         </div>
 
@@ -134,6 +137,8 @@ export default function ManagementReportPreview({
           <p className="mt-1 text-sm font-medium text-slate-900">{response.scope.label}</p>
         </div>
       </div>
+
+      {response.budgetNotice && <p className="border-b border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{response.budgetNotice}</p>}
 
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-slate-200 text-sm">

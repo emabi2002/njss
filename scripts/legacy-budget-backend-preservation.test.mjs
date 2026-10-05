@@ -11,14 +11,11 @@ const requiredFiles = [
   'supabase/migrations/061_explicit_finance_posting_mapping_and_cost_centre_fk.sql',
   'supabase/migrations/062_budget_activation_fingerprint_and_immutable_snapshot.sql',
   'supabase/migrations/063_budget_activation_fk_only_guards.sql',
-  'lib/budget-revision.ts',
-  'lib/budget-revision-workspace.ts',
-  'lib/budget-activation.ts',
   'app/api/workflows/budget/route.ts',
 ]
 
 for (const path of requiredFiles) {
-  assert.ok(fs.existsSync(path), `legacy financial-control backend must remain available: ${path}`)
+  assert.ok(fs.existsSync(path), `historical financial migration source must remain available: ${path}`)
 }
 
 const simplifiedPage = fs.readFileSync('app/dashboard/budget-template/page.tsx', 'utf8')
@@ -39,4 +36,7 @@ const activationPage = fs.readFileSync('app/dashboard/budget/activation/page.tsx
 assert.ok(activationPage.includes('Annual Budget Activation'), 'new annual activation workspace must remain the active UI')
 assert.ok(activationPage.includes('activateAnnualBudget'), 'new annual activation workspace must use the secured simplified activation RPC')
 
-console.log('Legacy financial-control backend preserved while simplified budget UI remains authoritative')
+for (const file of ['lib/budget-revision.ts','lib/budget-revision-workspace.ts','lib/budget-activation.ts','lib/budget-module.ts']) {
+  assert.equal(fs.existsSync(file), false, 'unused legacy budget client must be removed')
+}
+console.log('Historical financial migrations preserved; active legacy clients retired')

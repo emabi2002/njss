@@ -33,14 +33,16 @@ type Message = { type: "ok" | "err"; text: string } | null
 type References = { sections: SectionReference[]; ledgers: LedgerReference[] }
 
 export default function BudgetAdjustmentsPage() {
-  const { can, roles, profile } = useAuth()
+  const { can, roles, profile, loading: authLoading } = useAuth()
   const canSupplementary = can('budget.supplementary.enter')
   const canRequestReallocation = can('budget.reallocation.request')
   const canApproveReallocation = can('budget.reallocation.approve') && roles.includes('Registrar')
   const canExecuteReallocation = can('budget.reallocation.execute')
   const canManageDocuments = can('budget.documents.manage')
+  const canView = can('budget.view') || canSupplementary || canRequestReallocation || canApproveReallocation || canExecuteReallocation || canManageDocuments || can('all')
 
   const [financialYear, setFinancialYear] = useState(new Date().getFullYear())
+  const [yearReady, setYearReady] = useState(false)
   const [dashboard, setDashboard] = useState<HeadOfficeBudgetDashboard | null>(null)
   const [positions, setPositions] = useState<BudgetPositionRow[]>([])
   const [supplementaryRows, setSupplementaryRows] = useState<SupplementaryBudgetAdjustment[]>([])
@@ -73,7 +75,35 @@ export default function BudgetAdjustmentsPage() {
   const [reallocationDate, setReallocationDate] = useState("")
   const [reallocationFile, setReallocationFile] = useState<File | null>(null)
 
+  useEffect(() => {
+    if (authLoading || !canView || yearReady) return
+    let cancelled = false
+    async function discoverYear() {
+      const requested = Number(new URLSearchParams(window.location.search).get('financialYear'))
+      if (Number.isInteger(requested) && requested >= 2000 && requested <= 2200) {
+        if (!cancelled) { setFinancialYear(requested); setYearReady(true) }
+        return
+      }
+      const result = await supabase.from('annual_budget_cycles')
+        .select('financial_year, status').order('financial_year', { ascending: false })
+      if (cancelled) return
+      if (result.error) {
+        setMessage({ type: "err", text: "Could not select the annual budget year. Select a financial year to continue." })
+        setLoading(false)
+        return
+      }
+      const cycles = result.data || []
+      const preferred = cycles.find(cycle => cycle.status === 'ACTIVE') || cycles[0]
+      setFinancialYear(preferred?.financial_year ?? new Date().getFullYear())
+      setYearReady(true)
+    }
+    void discoverYear()
+    return () => { cancelled = true }
+  }, [authLoading, canView, yearReady])
+
   const load = useCallback(async () => {
+    if (authLoading || !canView || !yearReady) return
+    setLoading(true)
     try {
       const [nextDashboard, nextPositions, nextSupplementary, nextReallocations, sectionResult, ledgerResult] = await Promise.all([
         getHeadOfficeBudgetDashboard(financialYear),
@@ -103,14 +133,15 @@ export default function BudgetAdjustmentsPage() {
     } finally {
       setLoading(false)
     }
-  }, [financialYear])
+  }, [authLoading, canView, financialYear, yearReady])
 
   useEffect(() => {
+    if (authLoading || !canView || !yearReady) return
     const timer = window.setTimeout(() => {
       void load()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [load])
+  }, [authLoading, canView, yearReady, load])
 
   const divisionByBudgetId = useMemo(() => new Map((dashboard?.divisions || []).map((row) => [row.id, row])), [dashboard])
   const sectionById = useMemo(() => new Map(references.sections.map((row) => [row.id, row])), [references.sections])
@@ -222,10 +253,13 @@ export default function BudgetAdjustmentsPage() {
   const label = (row: BudgetPositionRow) => `${divisionByBudgetId.get(row.division_budget_id)?.division?.name || row.division_id} / ${sectionById.get(row.section_id)?.name || row.section_id} / ${ledgerById.get(row.expense_ledger_id)?.finance_code || row.expense_ledger_id}`
   const active = dashboard?.cycle?.status === 'ACTIVE'
 
+  if (authLoading) return <div className="flex justify-center p-12"><Loader2 className="animate-spin" aria-label="Loading permissions" /></div>
+  if (!canView) return <div className="rounded-lg border p-6">You do not have permission to view budget adjustments.</div>
+
   return <div className="mx-auto max-w-[1800px] space-y-6 p-4 md:p-6">
     <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
       <div><h1 className="text-2xl font-semibold">Budget Adjustments</h1><p className="text-sm text-slate-600">Supplementary Budget and Budget Reallocation controls for the active Head Office budget.</p></div>
-      <div className="flex items-end gap-2"><label className="text-sm">Financial Year <input className="w-28 rounded border px-3 py-2" type="number" value={financialYear} onChange={(e) => setFinancialYear(Number(e.target.value))} /></label><button className="rounded border px-3 py-2 text-sm" onClick={() => void refresh()}><RefreshCw className="mr-1 inline h-4 w-4" />Refresh</button></div>
+      <div className="flex items-end gap-2"><label className="text-sm">Financial Year <input className="w-28 rounded border px-3 py-2" type="number" value={financialYear} onChange={(e) => { const year = Number(e.target.value); if (Number.isInteger(year) && year >= 2000 && year <= 2200) { setFinancialYear(year); setYearReady(true) } }} /></label><button className="rounded border px-3 py-2 text-sm" onClick={() => void refresh()}><RefreshCw className="mr-1 inline h-4 w-4" />Refresh</button></div>
     </header>
 
     {message && <div className={`flex gap-2 rounded border p-3 text-sm ${message.type === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>{message.type === 'ok' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}{message.text}</div>}

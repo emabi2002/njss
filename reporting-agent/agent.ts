@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import { detectReportCategory } from "./domain"
+import { assertSupportedReportQuestion, detectReportCategory } from "./domain"
 import { executeReportSql } from "./execute"
 import { guardReportSql } from "./guard"
 import { correctReportSql, generateReportSql } from "./model"
@@ -29,6 +29,8 @@ export async function runReportAgent(input: {
   if (question.length > 2000) {
     throw new ReportAgentError("INVALID_QUESTION", "The reporting question is too long. Keep it under 2,000 characters.", 400)
   }
+
+  assertSupportedReportQuestion(question)
 
   const maxRows = clampMaxRows(input.maxRows || 250)
   const category = detectReportCategory(question)
