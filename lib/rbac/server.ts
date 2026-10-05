@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getRoutePermissions } from './client'
+import { getDashboardLandingPath } from './dashboard-landing'
 import type { DataScopeType, PermissionCode, RbacRole, UserAccessContext } from './types'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
@@ -166,6 +167,12 @@ export async function guardDashboardRoute(request: NextRequest) {
   if (context.mustChangePassword === true) return NextResponse.redirect(new URL('/set-password', request.url))
   if (context.mustChangePassword !== false) return NextResponse.json({ error: 'Password status unavailable' }, { status: 503 })
   if (request.nextUrl.pathname === '/dashboard/no-access') return response
+
+  if (request.nextUrl.pathname === '/dashboard' && !hasServerPermission(context, 'dashboard.view')) {
+    const redirect = NextResponse.redirect(new URL(getDashboardLandingPath(context.permissions), request.url))
+    response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie))
+    return redirect
+  }
 
   const isAiReportingRoute = /^\/dashboard\/reports\/ai($|\/)/.test(request.nextUrl.pathname)
   const required = isAiReportingRoute ? [AI_REPORT_PERMISSION] : getRoutePermissions(request.nextUrl.pathname)

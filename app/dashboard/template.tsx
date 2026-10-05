@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { canAccessRoute } from "@/lib/rbac/client"
 import { dashboardAccessState } from "@/lib/rbac/dashboard-access"
+import { getDashboardLandingPath } from "@/lib/rbac/dashboard-landing"
 
 export default function DashboardTemplate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -16,10 +17,10 @@ export default function DashboardTemplate({ children }: { children: React.ReactN
   })
 
   useEffect(() => {
-    if (state === "denied") router.replace("/dashboard/no-access")
+    if (state === "denied") router.replace(pathname === "/dashboard" ? getDashboardLandingPath(permissions) : "/dashboard/no-access")
     if (state === "password") router.replace("/set-password")
     if (state === "login") router.replace("/login")
-  }, [state, router])
+  }, [state, router, pathname, permissions])
 
   return state === "allowed" ? <>{children}</> : null
 }
