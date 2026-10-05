@@ -135,6 +135,10 @@ jobs:
         env:
           NJSS_TEST_DATABASE_URL: postgresql://postgres:njss-ci-only@127.0.0.1:5432/njss_rpc_test
         run: node scripts/client-table-privileges-runtime.test.mjs
+      - name: Supplier and commitment scope identity runtime checks
+        env:
+          NJSS_TEST_DATABASE_URL: postgresql://postgres:njss-ci-only@127.0.0.1:5432/njss_rpc_test
+        run: node scripts/supplier-scope-identity-runtime.test.mjs
       - name: Dashboard and operations access runtime checks
         run: |
           bun scripts/dashboard-access-runtime.test.mjs
