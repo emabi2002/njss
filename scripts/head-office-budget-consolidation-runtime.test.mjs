@@ -123,6 +123,9 @@ try {
   await client.query("INSERT INTO storage.objects VALUES ('njss-budget-documents','division-a.pdf'),('njss-budget-documents','division-b.pdf')")
   await client.query(migration)
   await client.query("select set_config('request.jwt.claim.sub',$1,true),set_config('test.allowed','true',true),set_config('test.scope','all',true)", [id(1)])
+  const paymentSnapshot=(await client.query('select njss_budget_position_for_allocation($1) as result',[id(60)])).rows[0].result
+  assert.equal(Number(paymentSnapshot.available_budget),750,'FF4 audit snapshots use annual positions')
+  assert.equal(paymentSnapshot.released_amount,undefined,'retired quarterly limits are never returned')
   await client.query('SET LOCAL ROLE authenticated')
   const positions = (await client.query('select * from get_current_budget_position(2027)')).rows
   assert.equal(positions.length, 3, 'two HQ Divisions plus event-only ledger; no provincial row')

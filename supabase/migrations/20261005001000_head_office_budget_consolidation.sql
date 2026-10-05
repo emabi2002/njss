@@ -890,3 +890,34 @@ REVOKE ALL ON FUNCTION public.njss_guard_commitment_posting_identity() FROM PUBL
 DROP TRIGGER IF EXISTS njss_guard_commitment_posting_identity ON public.ff3_commitments;
 CREATE TRIGGER njss_guard_commitment_posting_identity BEFORE UPDATE ON public.ff3_commitments
 FOR EACH ROW EXECUTE FUNCTION public.njss_guard_commitment_posting_identity();
+
+-- FF4 uses this private compatibility helper only for audit snapshots. Never
+-- return retired quarterly cash limits from an otherwise current payment API.
+CREATE OR REPLACE FUNCTION public.njss_budget_position_for_allocation(p_budget_allocation_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp
+AS $position$
+DECLARE
+ b public.budget_allocations;
+ ledger_id uuid;
+ ledger_count integer;
+ result jsonb;
+BEGIN
+ SELECT * INTO b FROM public.budget_allocations WHERE id=p_budget_allocation_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'Financial posting reference not found'; END IF;
+ SELECT count(*),min(key.ledger::text)::uuid INTO ledger_count,ledger_id FROM (
+   SELECT DISTINCT h.expense_ledger_id ledger FROM public.ff3_commitments c
+   JOIN public.ff3_headers h ON h.id=c.ff3_header_id
+   WHERE c.budget_allocation_id=b.id AND h.expense_ledger_id IS NOT NULL
+     AND h.financial_year=b.financial_year AND h.department_id=b.department_id AND h.section_id=b.section_id
+ ) key;
+ IF ledger_count=1 THEN
+   result:=public.njss_calculate_ff3_budget(b.financial_year,b.department_id,b.section_id,ledger_id,b.cost_centre_id,1);
+ ELSE
+   -- Ambiguous/historical references carry no approved budget or cash ceiling.
+   result:=jsonb_build_object('status','ANNUAL_POSITION_REQUIRES_LEDGER','position_exists',false,
+     'financial_year',b.financial_year,'department_id',b.department_id,'section_id',b.section_id);
+ END IF;
+ RETURN result||jsonb_build_object('budget_allocation_id',b.id);
+END;
+$position$;
+REVOKE ALL ON FUNCTION public.njss_budget_position_for_allocation(uuid) FROM PUBLIC,anon,authenticated;
