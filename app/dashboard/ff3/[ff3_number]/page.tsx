@@ -236,9 +236,9 @@ export default function FF3DetailPage({ params }: { params: Promise<{ ff3_number
     )
   }
 
-  const canEndorseSupervisor = header.status === 'SUBMITTED' && can('ff3.endorse')
-  const canEndorseSectionHead = header.status === 'ENDORSED_SUPERVISOR' && can('ff3.endorse')
-  const canApprove = header.status === 'ENDORSED_SECTION_HEAD' && can('ff3.approve')
+  const canEndorseSupervisor = Boolean(header.expense_ledger_id) && header.status === 'SUBMITTED' && can('ff3.endorse')
+  const canEndorseSectionHead = Boolean(header.expense_ledger_id) && header.status === 'ENDORSED_SUPERVISOR' && can('ff3.endorse')
+  const canApprove = Boolean(header.expense_ledger_id) && header.status === 'ENDORSED_SECTION_HEAD' && can('ff3.approve')
   const canReject = ['SUBMITTED', 'ENDORSED_SUPERVISOR', 'ENDORSED_SECTION_HEAD'].includes(header.status) && (can('ff3.reject') || can('ff3.approve'))
   const isTerminal = ['APPROVED', 'COMMITTED', 'REJECTED', 'CANCELLED', 'RETURNED', 'EXPIRED'].includes(header.status)
   const hasAnyAction = canEndorseSupervisor || canEndorseSectionHead || canApprove || canReject

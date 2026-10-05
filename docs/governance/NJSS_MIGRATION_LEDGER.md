@@ -228,3 +228,9 @@ The complete read-only live ledger checkpoint is `NJSS_LIVE_MIGRATIONS_2026-10-0
 The source versions `20261004215333_head_office_uat_operational_scope.sql` and `20261004215730_uat_view_invoker_hardening.sql` match the exact managed versions. Their executable SQL was rehearsed with rollback before application and verified afterward. The recovered September 30 archive sources already exist in the live ledger. Do not rerun those resets against the current 2027 PREPARATION cycle and 15 populated Head Office budgets.
 
 Historical national seed entries and Court Interpreter creation/removal entries remain immutable history. Presence in this checkpoint does not mean a retired schema or national operational scope still exists. Existing older filename drift remains governed by the mapping/replay rules above; this checkpoint is not certification that an unmodified native `db push` can rebuild the database.
+
+## 5 October 2026 annual Head Office budget consolidation
+
+Managed version `20261005001037 head_office_budget_consolidation` is applied. The new source file matches that exact version; the provisional unmerged filename was renamed without changing its executable SQL. Eight changed function bodies matched source byte for byte. PostgreSQL CI #658 passed before application, and live role/access/preservation probes passed afterward. The detailed retirement inventory and business UAT prerequisites are in `NJSS_HEAD_OFFICE_BUDGET_CONSOLIDATION_2026-10-05.md`.
+
+The migration removes legacy operational access, not financial history. It preserves 15 FY2027 preparation headers, 437 posting identities, 32 FF3 headers, 20 commitments and 8 payment transactions. Annual capture/activation remains available; legacy release/revision/activation writes and budget-amount reads are denied to clients.
