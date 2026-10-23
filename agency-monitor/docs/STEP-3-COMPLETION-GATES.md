@@ -7,7 +7,7 @@
 - Private supporting-document handling through protected server routes; role/record guards, signature checks, storage path randomisation, 60-second URLs; agency logo is public brand content only, uploaded by administrator.
 - Database-backed reporting views by item, section, supplier, expense category and expenditure evidence verification status.
 - One-time first administrator bootstrap with exact independent project reference check and explicit server-side authorization.
-- Twenty-five tests passed locally. TypeScript syntax checks passed (no full typechecking).
+- Twenty-five Node tests passed locally. Networked GitHub Actions confirmed TypeScript semantic checking and a Next.js production build; a PostgreSQL service-based migration smoke test is being added.
 
 ## Cannot truthfully mark as validated without an isolated agency test environment
 1. A NEW Supabase project in an organisation chosen by the user with cost accepted. None has been created.
@@ -15,7 +15,7 @@
 3. Supabase permission and SQL execution testing with at least five distinct verified Auth users, including forbidden transitions, cross-section history and CRUD denial.
 4. Tests that provoke simultaneous purchases and receipts to confirm row-level locking prevents over-order and over-receipt.
 5. Actual document uploads and signed download authorization in server runtime; malware scanning, rate limiting and retention controls still require production design.
-6. Complete dependency installation and `next build`/`tsc --noEmit`. npmjs.org DNS unavailable in this environment; lockfile could not be generated. The included GitHub Actions workflow uses a networked runner to install dependencies, but a pinned lockfile remains required for production release.
+6. The networked GitHub Actions runner successfully installed dependencies, completed `tsc --noEmit` and built Next.js after isolating the Turbopack root. Its generated package-lock.json is included with the source; final GitHub CI must pass with `npm ci` against this committed lockfile.
 7. Independent second agency test installation and restoration drill.
 8. Government department information security, data ownership, licence and deployment sign-off.
 

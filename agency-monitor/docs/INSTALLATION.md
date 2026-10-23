@@ -18,7 +18,7 @@ Before starting, identify the institution project owner, cloud-billing owner, ap
 
 1. Copy the master source into a new agency-owned GitHub/hosting application project. Prefer a private repository, following approved government policies.
 2. Copy `.env.example` to `.env.local` and set the **new agency project's** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and server-only `SUPABASE_SERVICE_ROLE_KEY`. Never use a service-role key in the web UI or `NEXT_PUBLIC_` environment variable.
-3. Run `npm install` (which also creates an agency lockfile), `npm test`, `npm run typecheck`, `npm run build`, and `npm run dev` for UAT. Do **not** proceed if any build/dependency/test check fails.
+3. Run `npm ci` with the committed lockfile, `npm test`, `npm run typecheck`, `npm run build`, and `npm run dev` for UAT. Do **not** proceed if any build/dependency/test check fails.
 4. Before production create an immutable build, lockfile, rollback runbook, backup restore plan and separate approval record. Do not reuse another agency's passwords, URL or data.
 
 ## Gate 3: institution setup
