@@ -1,0 +1,62 @@
+name: Agency Monitor v0.3 Validation
+on:
+  push:
+    branches:
+      - feature/step3-internal-monitor-starter
+    paths:
+      - 'agency-monitor/**'
+      - '.github/workflows/agency-monitor-ci.yml'
+  pull_request:
+    paths:
+      - 'agency-monitor/**'
+      - '.github/workflows/agency-monitor-ci.yml'
+permissions:
+  contents: read
+jobs:
+  source-build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test_only_never_use_in_production
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: agency-monitor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: agency-monitor/package-lock.json
+      - name: Reproducible dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Run unit and static security tests
+        run: npm test
+      - name: TypeScript semantic validation
+        run: npm run typecheck
+      - name: Build standalone app
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholderagency.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-only
+      - name: PostgreSQL 17 syntax and workflow smoke tests
+        env:
+          PGPASSWORD: test_only_never_use_in_production
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGDATABASE: postgres
+        run: |
+          command -v psql || { echo 'psql is missing on this runner'; exit 1; }
+          psql -v ON_ERROR_STOP=1 -f tests/database/bootstrap.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261023000100_initial_monitoring.sql
+          psql -v ON_ERROR_STOP=1 -f tests/database/assertions.sql
