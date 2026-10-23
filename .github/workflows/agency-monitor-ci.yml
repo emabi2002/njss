@@ -1,0 +1,42 @@
+name: Agency Monitor v0.3 Validation
+on:
+  push:
+    branches:
+      - feature/step3-internal-monitor-starter
+    paths:
+      - 'agency-monitor/**'
+      - '.github/workflows/agency-monitor-ci.yml'
+  pull_request:
+    paths:
+      - 'agency-monitor/**'
+      - '.github/workflows/agency-monitor-ci.yml'
+permissions:
+  contents: read
+jobs:
+  source-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agency-monitor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run unit and static security tests
+        run: npm test
+      - name: TypeScript semantic validation
+        run: npm run typecheck
+      - name: Build standalone app
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholderagency.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-only
+      - name: Archive generated dependency lockfile for reviewed commit
+        uses: actions/upload-artifact@v4
+        with:
+          name: agency-monitor-lockfile
+          path: agency-monitor/package-lock.json
+          if-no-files-found: warn
