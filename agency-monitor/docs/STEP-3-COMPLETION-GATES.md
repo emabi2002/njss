@@ -7,11 +7,11 @@
 - Private supporting-document handling through protected server routes; role/record guards, signature checks, storage path randomisation, 60-second URLs; agency logo is public brand content only, uploaded by administrator.
 - Database-backed reporting views by item, section, supplier, expense category and expenditure evidence verification status.
 - One-time first administrator bootstrap with exact independent project reference check and explicit server-side authorization.
-- Twenty-five Node tests passed locally. Networked GitHub Actions confirmed TypeScript semantic checking and a Next.js production build; a PostgreSQL service-based migration smoke test is being added.
+- Twenty-five Node tests passed locally. Networked GitHub Actions confirmed TypeScript semantic checking and a Next.js production build; GitHub Actions executed the SQL migration and synthetic purchase workflow in a disposable PostgreSQL 17 container successfully; negative-access cases have now been added for the final run.
 
 ## Cannot truthfully mark as validated without an isolated agency test environment
-1. A NEW Supabase project in an organisation chosen by the user with cost accepted. None has been created.
-2. Executing baseline SQL in that blank project. No SQL execution occurred.
+1. A NEW Supabase project in an organisation chosen by the user with cost accepted. None has been created; PostgreSQL CI is a useful emulation, not a substitute for Supabase Auth/Storage/PostgREST integration testing.
+2. Applying the baseline to a real blank Supabase project. The migration has been executed successfully in a disposable PostgreSQL 17 CI container with minimal Auth/Storage catalogue stubs, not against a hosted Supabase agency project.
 3. Supabase permission and SQL execution testing with at least five distinct verified Auth users, including forbidden transitions, cross-section history and CRUD denial.
 4. Tests that provoke simultaneous purchases and receipts to confirm row-level locking prevents over-order and over-receipt.
 5. Actual document uploads and signed download authorization in server runtime; malware scanning, rate limiting and retention controls still require production design.

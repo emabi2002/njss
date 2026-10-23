@@ -54,3 +54,6 @@ Every adopting agency gets its own new application project, new Supabase project
 
 ## Build status and deployment caution
 See [Step 3 completion gates](docs/STEP-3-COMPLETION-GATES.md). Source and local tests are ready for independent UAT, **not production**. This is not an IFMS interface or government accounting application.
+
+## Validation
+The standalone source is CI-tested using Node 22, `npm ci`, 25 Node tests, TypeScript semantic typecheck, Next.js build and an isolated PostgreSQL 17 migration/workflow smoke test with synthetic accounts. Live Supabase-specific integration/UAT and agency acceptance remain mandatory for production.

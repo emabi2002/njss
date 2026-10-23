@@ -94,3 +94,58 @@ select count(*)::integer as verified_count from public.monitor_expense_evidence 
 \quit 1
 \endif
 \echo 'SQL workflow smoke tests completed successfully'
+
+
+-- Negative security/control scenarios: self-approval and direct table writes are forbidden.
+select set_config('request.jwt.claim.sub','11111111-1111-4111-8111-111111111111',false);
+do $$
+declare v_req uuid;
+begin
+ select public.monitor_create_requisition(
+   (select id from public.monitor_sections where code='OPS-01'),
+   (select id from public.monitor_items where code='TONER-BLACK'),
+   1,120,'Extra toner for synthetic offices','cccccccc-cccc-4ccc-8ccc-cccccccccccc') into v_req;
+ perform public.monitor_submit_requisition(v_req);
+ begin
+   perform public.monitor_review_requisition(v_req,'APPROVE','Self approval must not be permitted');
+   raise exception 'Self-approval was allowed';
+ exception when others then
+   if sqlerrm='Self-approval was allowed' then raise; end if;
+   if position('Requester cannot approve their own requisition' in sqlerrm)=0 then raise; end if;
+ end;
+end $$;
+
+-- Verify source staff role cannot verify expenditure evidence they personally recorded.
+select public.monitor_record_expense_evidence(:'purchase_line_id'::uuid,10.00,'INV-TEST-ADMIN','second synthetic evidence') as admin_evidence_id \gset
+select set_config('test.admin_evidence', :'admin_evidence_id', false);
+do $$ begin
+  perform public.monitor_verify_expense_evidence(current_setting('test.admin_evidence')::uuid,true,'Attempted self-verification');
+  raise exception 'Self verification was allowed';
+exception when others then
+  if sqlerrm='Self verification was allowed' then raise; end if;
+  if position('Recorded-by officer cannot verify own expense evidence' in sqlerrm)=0 then raise; end if;
+end $$;
+
+-- The authenticated role must not have direct table INSERT privileges.
+select set_config('request.jwt.claim.sub','33333333-3333-4333-8333-333333333333',false);
+do $$ begin
+ insert into public.monitor_purchases(purchase_reference,entered_by,section_id,ordered_at)
+ values('BYPASS-TEST',auth.uid(),(select id from public.monitor_sections limit 1),current_date);
+ raise exception 'Unprivileged direct INSERT was allowed';
+exception when insufficient_privilege then null;
+when others then raise;
+end $$;
+
+-- The private attachment metadata must be unavailable by direct SELECT.
+do $$ begin
+ perform count(*) from public.monitor_documents;
+ raise exception 'Unprivileged direct document SELECT was allowed';
+exception when insufficient_privilege then null;
+when others then raise;
+end $$;
+
+do $$ begin
+ if not exists(select 1 from public.monitor_duplicate_reviews where disposition='JUSTIFIED_REPEAT')
+ then raise exception 'Auditable duplicate-review disposition missing'; end if;
+end $$;
+\echo 'SQL negative authorization and maker-checker tests passed'
