@@ -1,22 +1,56 @@
-# Agency Internal Requisition & Expenditure Monitor — Step 3
+# Agency Internal Requisition, Purchasing & Expenditure Monitor
 
-**Architecture:** single agency per independently provisioned deployment. Each government institution receives its own new hosting project, Supabase project, PostgreSQL database, Auth user directory, Storage, secrets and backups. No agency shares the NJSS operational database.
+**Step 3 Development Release: v0.3 — 23 October 2026**
 
-**Business purpose:** internal requisitions, historical purchases, ordered and received quantities, reported expense evidence, cross-section item-history review and potential-duplicate warnings before approval. **Not an ERP, official accounting/general ledger, IFMS replacement or IFMS integration.** No bank payment execution.
+A standalone Next.js and Supabase application for **departmental/sectional internal purchasing control** in a single government agency. The product records item requests, approvals, purchase orders, delivered quantities and internally reported/verified expenditure. It flags possible repeated purchases before approval and retains a searchable cross-division history.
 
-## Step 3 deliverable / source artifact
+**NOT** an official financial management/accounting system, IFMS integration, financial statements engine, e-tendering platform or payment execution service.
 
-The complete first functional starter was created as a downloadable source ZIP attached to the Step 3 ChatGPT handoff. It contains a stand-alone Next.js app, a clean SQL schema plus role-checked RPCs, an item catalogue/agency setup UI, requisition approvals, duplicate review, purchase/receipt and expenditure-evidence interfaces, four passing JS unit tests, and an independent installation guide.
+## Independent installation rule
 
-**This GitHub branch currently includes the duplicate rules and initial documentation. The full standalone app bundle is supplied as an attached ZIP and has NOT yet been imported/verified as a GitHub tree.** Do not merge based on this README alone. The complete code ZIP must be reviewed, imported and run through CI before Step 3 may be merged.
+Every adopting agency gets its own new application project, new Supabase project, PostgreSQL database, Auth user directory, private file storage, environment credentials and backup configuration. No NJSS business data or other agency's operational records are copied or shared.
 
-## Critical blockers before real agency deployment
+## Implemented development features
 
-- No new agency Supabase/UAT project has been created, no schema migration executed, and no operating NJSS data changed.
-- npm dependency installation and Next.js build/typecheck could not be executed in the isolated workspace.
-- SQL RLS and function behavior have not been verified on a disposable Supabase database.
-- Database duplicate matching in the functional starter uses the same catalog item ID; fuzzy cross-item matches are not yet wired into server-side SQL.
-- Staff provisioning, secure attachment/logo uploads, workflow completeness, detailed item-ledger mapping, historical data import and production-grade dashboard verification remain open.
-- Existing NJSS public financial-document storage findings require separate approved remediation.
+- Agency identity: name, addresses, logo HTTPS URL, contact and configurable duplicate lookback.
+- Organization: divisions and sections; agency-specific monitoring categories, item codes, units, synonyms, suppliers.
+- Secure login through agency-owned Supabase Auth; role-checked SQL RPC operations.
+- Staff role/section mapping for **already verified** agency Auth identities; no browser self-registration or implicit administrator privileges.
+- Internal requisition, independent reviewer approval, and warnings for pending/recent purchases using item identity, normalized codes/names and administrator-curated aliases.
+- Warnings saved with reviewer, decision, reason and date. Warnings do **not** automatically establish waste or fraud.
+- Purchase order capture with division/section attribution, historical/external purchase option, item/approved-quantity checks and serialized quantity control for linked requisitions.
+- Partial delivery receipt with over-receipt prevention.
+- Reported internal expenditure evidence and separate second-person verification/dispute (no bank payments).
+- Purchasing-by-item and purchasing-by-section SQL reporting views, with database-side full-history aggregation.
+- Database RLS and limited direct grants; private-by-default bucket provisioned with **no public upload/download policies**.
+- Test suite for comparison logic, quantity controls and static SQL-contract checks.
 
-See Step 1–2 architecture documents in docs/architecture for governance and scope.
+## Source and execution
+
+1. Read [Independent installation](docs/INSTALLATION.md) and [UAT controls](docs/UAT-CHECKLIST.md).
+2. Use **a brand-new, authorised Supabase test project only**; never point this source at NJSS or an agency production database.
+3. Run the clean migration `supabase/migrations/20261023000100_initial_monitoring.sql` in the new empty project after technical review. It is **not applied anywhere** by this release.
+4. Provide the project's environment variables following `.env.example`; never put a service-role key into `NEXT_PUBLIC_*` variables.
+5. Install dependencies and run `npm test`, `npm run typecheck` and `npm run build`, then `npm run dev` for controlled UAT.
+
+## Test status and limitations
+
+- **15 Node unit/contract tests pass.** TypeScript **syntax transpilation** of the 4 TS/TSX modules passed.
+- **Unverified**: SQL migration execution and function behavior in Postgres, Supabase RLS policies under real users, full TypeScript typecheck, Next.js production build, deployed UI, concurrent multi-user UAT, independent project backup/recovery, and file upload/download.
+- No npm lockfile has been generated: dependency installation was blocked by unavailable registry access in this environment. Generate/commit a lockfile and do supply-chain review before pilot/deploy.
+- Logo can be set by an approved HTTPS URL; actual file uploads and purchase evidence attachments remain a future secured feature.
+- Duplicate matching covers same catalog item, exact normalized item names/codes and curated synonyms with equal units. General fuzzy semantic detection is **not yet present in SQL**; the JS scoring utility is not used for approval decisions.
+- Requisitions/purchases are one line per transaction in this starter; multi-line form entry, item reconciliation, richer role delegation and imports still need development.
+- Current staff have cross-division **read access to requisitions/purchasing data** intentionally for institution-wide duplicate checks; production-specific confidentiality scopes need agency policy review.
+
+**Do not use production finances, official records or sensitive attachments until database integration testing and security/UAT gates are completed.**
+
+## v0.3 additions
+- Independent one-time verified Auth administrator bootstrap script.
+- Agency-local authenticated upload/download APIs for private requisition, purchase and expenditure attachments; file signatures and per-record access checks.
+- Administrator-only logo upload.
+- Unlinked historical purchasing requires administrator authority.
+- Supabase testing remains pending; no live NJSS database is touched.
+
+## Build status and deployment caution
+See [Step 3 completion gates](docs/STEP-3-COMPLETION-GATES.md). Source and local tests are ready for independent UAT, **not production**. This is not an IFMS interface or government accounting application.

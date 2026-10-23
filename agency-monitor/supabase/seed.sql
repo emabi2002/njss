@@ -1,0 +1,3 @@
+-- Intentionally blank: independent agency databases must start without operational records,
+-- copied NJSS users, ledgers, requisitions, supplier lists or court-specific sample data.
+-- Use authorized administrator bootstrap documented in docs/INSTALLATION.md.
